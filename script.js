@@ -154,14 +154,12 @@
     }
 
     /**
-     * Renderiza o ticker (HTML) em DOIS pontos: Global (fixo) e Mercado.
-     * O track da Landing foi removido (mercado saiu da Home).
-     * Duplicamos os itens (x2) pra permitir o loop infinito via CSS (translateX -50%).
+     * Renderiza o ticker (HTML) APENAS no ponto Global fixo (header).
+     * Os tickers da Landing e do Mercado foram removidos por pedido do usuário.
      */
     function renderQuotesTicker() {
         const tracks = [
-            document.getElementById('tickerGlobalTrack'),
-            document.getElementById('tickerMarketTrack')
+            document.getElementById('tickerGlobalTrack')
         ].filter(Boolean);
         if (tracks.length === 0) return;
 
@@ -645,6 +643,11 @@
         // conta logada no mesmo navegador herdava as threads da conta anterior.
         messageThreads = {};
         activeThreadUser = null;
+        // BUGFIX CRÍTICO: savedAssets não era resetado no logout. Isso fazia
+        // checkIncomingGifts() comparar o cofre do usuário anterior com o do
+        // novo, interpretando os cards já existentes do novo usuário como
+        // "presentes recebidos" e disparando alertas/TTS sem nenhuma doação real.
+        savedAssets = [];
         document.getElementById('nav-btn-text').innerText = "ACESSAR TERMINAL";
         document.getElementById('navVaultBtn').style.display = 'none';
         document.getElementById('navMessagesBtn').style.display = 'none';
@@ -1187,6 +1190,10 @@
     // Dispara alerta + TTS quando um presente é detectado no cofre ao login
     function checkIncomingGifts(prevAssets, newAssets) {
         if (!prevAssets || !newAssets) return;
+        // Segunda camada de proteção: se não havia estado anterior nesta
+        // sessão (cofre vazio antes do login), não há base de comparação
+        // confiável — evita interpretar o cofre inicial do usuário como "presente".
+        if (prevAssets.length === 0) return;
         const prevIds = new Set(prevAssets.map(a => a.id));
         const incoming = newAssets.filter(a => !prevIds.has(a.id));
         if (incoming.length === 0) return;
@@ -1989,12 +1996,16 @@
         // ── FASE 1: animação visual do painel de alquimia ──────────────
         const alchPanel = document.getElementById('alchemyPanel');
         alchPanel.classList.add('alchemy-fusing');
+        playSynthSound('click');
+        speakPhrase("Iniciando fusão. Aguarde a estabilização.", "Initiating fusion sequence. Stand by.");
+
         setTimeout(() => {
             alchPanel.classList.remove('alchemy-fusing');
 
             // ── FASE 2: overlay de glitch por 1500ms ───────────────────────
             const glitchOverlay = document.createElement('div');
             glitchOverlay.id = 'fusionGlitchOverlay';
+            glitchOverlay.className = 'fusion-glitch-active';
             Object.assign(glitchOverlay.style, {
                 position:       'fixed',
                 inset:          '0',
@@ -2007,6 +2018,26 @@
                 gap:            '18px',
                 pointerEvents:  'all',
             });
+
+            // Camada de flash de luz, dispara em pulsos aleatórios durante o overlay
+            const flashLayer = document.createElement('div');
+            flashLayer.className = 'fusion-flash-layer';
+            glitchOverlay.appendChild(flashLayer);
+
+            // Trepidação de tela (shake) no body inteiro durante a fusão
+            document.body.classList.add('fusion-screen-shake');
+
+            // Som de "máquina" em loop curto enquanto o overlay está ativo
+            playTerminalSound('alchemy');
+            const glitchSoundTimer = setInterval(() => playSynthSound('click'), 350);
+            // Flashes de luz em instantes aleatórios dentro da janela de 1500ms
+            const flashTimers = [300, 650, 1000, 1250].map(delay =>
+                setTimeout(() => {
+                    flashLayer.classList.add('flash-pulse');
+                    setTimeout(() => flashLayer.classList.remove('flash-pulse'), 90);
+                    playSynthSound('click');
+                }, delay)
+            );
 
             // Texto principal com efeito glitch
             const glitchLabel = document.createElement('div');
@@ -2043,6 +2074,8 @@
 
             // ── FASE 3: após 1500ms, remove glitch e processa resultado ───
             setTimeout(async () => {
+                clearInterval(glitchSoundTimer);
+                document.body.classList.remove('fusion-screen-shake');
                 glitchOverlay.remove();
 
                 // Remove cartas originais ANTES de qualquer resultado
