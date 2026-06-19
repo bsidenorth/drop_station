@@ -1832,93 +1832,148 @@
 
         const roll = Math.random();
 
-        // Animação visual
+        // ── FASE 1: animação visual do painel de alquimia ──────────────
         const alchPanel = document.getElementById('alchemyPanel');
         alchPanel.classList.add('alchemy-fusing');
         setTimeout(() => {
             alchPanel.classList.remove('alchemy-fusing');
 
-            // Remove cartas originais ANTES de qualquer resultado
-            savedAssets = savedAssets.filter(a => a.id !== id1 && a.id !== id2);
-            marketAssets = marketAssets.filter(m => m.id !== id1 && m.id !== id2);
-            saveMarket(marketAssets);
+            // ── FASE 2: overlay de glitch por 1500ms ───────────────────────
+            const glitchOverlay = document.createElement('div');
+            glitchOverlay.id = 'fusionGlitchOverlay';
+            Object.assign(glitchOverlay.style, {
+                position:       'fixed',
+                inset:          '0',
+                zIndex:         '9999',
+                background:     'rgba(5, 5, 7, 0.92)',
+                display:        'flex',
+                flexDirection:  'column',
+                alignItems:     'center',
+                justifyContent: 'center',
+                gap:            '18px',
+                pointerEvents:  'all',
+            });
 
-            let result, fusedCard, alertTitle, alertMsg, alertType;
+            // Texto principal com efeito glitch
+            const glitchLabel = document.createElement('div');
+            glitchLabel.className = 'loading-glitch loading-glitch-cursor';
+            glitchLabel.setAttribute('data-text', currentLang === 'PT' ? 'EXECUTANDO_FUSÃO...' : 'EXECUTING_FUSION...');
+            glitchLabel.textContent = currentLang === 'PT' ? 'EXECUTANDO_FUSÃO...' : 'EXECUTING_FUSION...';
+            Object.assign(glitchLabel.style, { fontSize: '1.4rem', letterSpacing: '4px' });
 
-            if (roll < pb) {
-                // FALHA: cartas quebram — sem novo card
-                result = 'break';
-                alertTitle = currentLang === 'PT' ? '💀 FUSÃO DESTRUÍDA' : '💀 FUSION DESTROYED';
-                alertMsg   = currentLang === 'PT'
-                    ? `Cards <b>${id1}</b> e <b>${id2}</b> foram destruídos na fusão instável. Nenhum ativo gerado.`
-                    : `Cards <b>${id1}</b> and <b>${id2}</b> were destroyed in the unstable fusion. No asset generated.`;
-                alertType = 'error';
-                playSynthSound('shatter');
-                speakPhrase("Fusão destruída. Perda total.", "Fusion destroyed. Total loss.");
+            // Linha de status secundária
+            const glitchSub = document.createElement('div');
+            glitchSub.style.cssText = 'font-family:"Space Mono",monospace; font-size:0.6rem; color:#444466; letter-spacing:2px;';
+            const subMessages = [
+                'QUEBRANDO VÍNCULOS MOLECULARES...',
+                'RECOMBINANDO SEQUÊNCIA DE DNA DIGITAL...',
+                'INSTABILIDADE DE REDE DETECTADA...',
+                'SINCRONIZANDO MATRIZ DE RARIDADE...',
+            ];
+            glitchSub.textContent = subMessages[Math.floor(Math.random() * subMessages.length)];
 
-            } else if (roll < pb + (1 - ps - pb)) {
-                // ITEM COMUM
-                result = 'common';
-                const newId = "#" + Math.floor(100000 + Math.random() * 900000);
-                fusedCard = {
-                    id: newId, rarityType: 'common', rarityName: 'COMUM', rarityNameEN: 'COMMON',
-                    styleName: 'RESÍDUO [FUSED]', styleNameEN: 'RESIDUE [FUSED]',
-                    creator: currentUser.username, registered: true, exposed: false,
-                    forSale: false, isListed: false, price: 0,
-                    imgSrc: snap1.imgSrc, isFused: true, tags: ['fused']
-                };
-                savedAssets.push(fusedCard);
-                alertTitle = currentLang === 'PT' ? '◆ FUSÃO PARCIAL' : '◆ PARTIAL FUSION';
-                alertMsg   = currentLang === 'PT'
-                    ? `Fusão instável resultou num card comum.<br><b>${newId}</b> — <span style="color:#aaa">COMUM</span>`
-                    : `Unstable fusion resulted in a common card.<br><b>${newId}</b> — <span style="color:#aaa">COMMON</span>`;
-                alertType = 'warn';
-                playSynthSound('success');
-                speakPhrase("Fusão parcial. Item comum gerado.", "Partial fusion. Common item generated.");
+            // Barra de progresso de terminal
+            const glitchBar = document.createElement('span');
+            glitchBar.className = 'loading-glitch-bar';
+            Object.assign(glitchBar.style, { width: '260px', display: 'block' });
 
-            } else {
-                // SUCESSO — rarity baseada nos inputs
-                result = 'success';
-                const rarityRoll = Math.random();
-                let newRarity;
-                if (total >= 6)      newRarity = rarityRoll < 0.75 ? 'legendary' : 'epic';
-                else if (total >= 4) newRarity = rarityRoll < 0.35 ? 'legendary' : 'epic';
-                else if (total >= 3) newRarity = rarityRoll < 0.08 ? 'legendary' : 'epic';
-                else                 newRarity = rarityRoll < 0.03 ? 'legendary' : 'epic';
+            // Scanline sobreposta
+            const scanline = document.createElement('div');
+            scanline.className = 'loading-glitch-scanline';
 
-                const rN   = newRarity === 'legendary' ? 'LENDÁRIO' : 'ÉPICO';
-                const rNEN = newRarity === 'legendary' ? 'LEGENDARY' : 'EPIC';
-                const wc   = newRarity === 'legendary' ? '#00ffff' : '#ffaa00';
-                const nameParts = [snap1.styleName.split(' ')[0], snap2.styleName.split(' ')[0]];
-                const fusedStyle = nameParts.join('×') + ' [FUSED]';
-                const newId = "#" + Math.floor(100000 + Math.random() * 900000);
+            glitchOverlay.appendChild(scanline);
+            glitchOverlay.appendChild(glitchLabel);
+            glitchOverlay.appendChild(glitchSub);
+            glitchOverlay.appendChild(glitchBar);
+            document.body.appendChild(glitchOverlay);
 
-                fusedCard = {
-                    id: newId, rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
-                    styleName: fusedStyle, styleNameEN: fusedStyle,
-                    creator: currentUser.username, registered: true, exposed: false,
-                    forSale: false, isListed: false, price: 0,
-                    imgSrc: Math.random() > 0.5 ? snap1.imgSrc : snap2.imgSrc,
-                    isFused: true, tags: ['fused', 'evento']
-                };
-                savedAssets.push(fusedCard);
-                alertTitle = currentLang === 'PT' ? '⚗️ FUSÃO CONCLUÍDA' : '⚗️ FUSION COMPLETE';
-                alertMsg   = currentLang === 'PT'
-                    ? `Novo ativo gerado com sucesso!<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span><br>Estilo: <b>${fusedStyle}</b><br><small style="color:#666">Este card tem tag [EVENTO] e pode ser usado como banner.</small>`
-                    : `New asset successfully generated!<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span><br>Style: <b>${fusedStyle}</b><br><small style="color:#666">This card has [EVENT] tag and can be used as banner.</small>`;
-                alertType = 'success';
-                playTerminalSound('alchemy');
-            }
+            // ── FASE 3: após 1500ms, remove glitch e processa resultado ───
+            setTimeout(() => {
+                glitchOverlay.remove();
 
-            // Persiste
-            const userData = registryGet(currentUser.username);
-            if (userData) { userData.savedAssets = savedAssets; registrySet(currentUser.username, userData); }
-            if (result !== 'break') pushLedger(`${currentUser.username} fundiu ${id1}+${id2} → ${fusedCard.id} [${fusedCard.rarityNameEN}]`);
-            else pushLedger(`${currentUser.username} tentou fundir ${id1}+${id2} — FALHA TOTAL`);
+                // Remove cartas originais ANTES de qualquer resultado
+                savedAssets = savedAssets.filter(a => a.id !== id1 && a.id !== id2);
+                marketAssets = marketAssets.filter(m => m.id !== id1 && m.id !== id2);
+                saveMarket(marketAssets);
 
-            document.getElementById('alchemyPanel').style.display = 'none';
-            renderVaultGrid();
-            showCyberAlert(alertTitle, alertMsg, alertType);
+                let result, fusedCard, alertTitle, alertMsg, alertType;
+
+                if (roll < pb) {
+                    // FALHA: cartas quebram — sem novo card
+                    result = 'break';
+                    alertTitle = currentLang === 'PT' ? '💀 FUSÃO DESTRUÍDA' : '💀 FUSION DESTROYED';
+                    alertMsg   = currentLang === 'PT'
+                        ? `Cards <b>${id1}</b> e <b>${id2}</b> foram destruídos na fusão instável. Nenhum ativo gerado.`
+                        : `Cards <b>${id1}</b> and <b>${id2}</b> were destroyed in the unstable fusion. No asset generated.`;
+                    alertType = 'error';
+                    playSynthSound('shatter');
+                    speakPhrase("Fusão destruída. Perda total.", "Fusion destroyed. Total loss.");
+
+                } else if (roll < pb + (1 - ps - pb)) {
+                    // ITEM COMUM
+                    result = 'common';
+                    const newId = "#" + Math.floor(100000 + Math.random() * 900000);
+                    fusedCard = {
+                        id: newId, rarityType: 'common', rarityName: 'COMUM', rarityNameEN: 'COMMON',
+                        styleName: 'RESÍDUO [FUSED]', styleNameEN: 'RESIDUE [FUSED]',
+                        creator: currentUser.username, registered: true, exposed: false,
+                        forSale: false, isListed: false, price: 0,
+                        imgSrc: snap1.imgSrc, isFused: true, tags: ['fused']
+                    };
+                    savedAssets.push(fusedCard);
+                    alertTitle = currentLang === 'PT' ? '◆ FUSÃO PARCIAL' : '◆ PARTIAL FUSION';
+                    alertMsg   = currentLang === 'PT'
+                        ? `Fusão instável resultou num card comum.<br><b>${newId}</b> — <span style="color:#aaa">COMUM</span>`
+                        : `Unstable fusion resulted in a common card.<br><b>${newId}</b> — <span style="color:#aaa">COMMON</span>`;
+                    alertType = 'warn';
+                    playSynthSound('success');
+                    speakPhrase("Fusão parcial. Item comum gerado.", "Partial fusion. Common item generated.");
+
+                } else {
+                    // SUCESSO — rarity baseada nos inputs
+                    result = 'success';
+                    const rarityRoll = Math.random();
+                    let newRarity;
+                    if (total >= 6)      newRarity = rarityRoll < 0.75 ? 'legendary' : 'epic';
+                    else if (total >= 4) newRarity = rarityRoll < 0.35 ? 'legendary' : 'epic';
+                    else if (total >= 3) newRarity = rarityRoll < 0.08 ? 'legendary' : 'epic';
+                    else                 newRarity = rarityRoll < 0.03 ? 'legendary' : 'epic';
+
+                    const rN   = newRarity === 'legendary' ? 'LENDÁRIO' : 'ÉPICO';
+                    const rNEN = newRarity === 'legendary' ? 'LEGENDARY' : 'EPIC';
+                    const wc   = newRarity === 'legendary' ? '#00ffff' : '#ffaa00';
+                    const nameParts = [snap1.styleName.split(' ')[0], snap2.styleName.split(' ')[0]];
+                    const fusedStyle = nameParts.join('×') + ' [FUSED]';
+                    const newId = "#" + Math.floor(100000 + Math.random() * 900000);
+
+                    fusedCard = {
+                        id: newId, rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
+                        styleName: fusedStyle, styleNameEN: fusedStyle,
+                        creator: currentUser.username, registered: true, exposed: false,
+                        forSale: false, isListed: false, price: 0,
+                        imgSrc: Math.random() > 0.5 ? snap1.imgSrc : snap2.imgSrc,
+                        isFused: true, tags: ['fused', 'evento']
+                    };
+                    savedAssets.push(fusedCard);
+                    alertTitle = currentLang === 'PT' ? '⚗️ FUSÃO CONCLUÍDA' : '⚗️ FUSION COMPLETE';
+                    alertMsg   = currentLang === 'PT'
+                        ? `Novo ativo gerado com sucesso!<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span><br>Estilo: <b>${fusedStyle}</b><br><small style="color:#666">Este card tem tag [EVENTO] e pode ser usado como banner.</small>`
+                        : `New asset successfully generated!<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span><br>Style: <b>${fusedStyle}</b><br><small style="color:#666">This card has [EVENT] tag and can be used as banner.</small>`;
+                    alertType = 'success';
+                    playTerminalSound('alchemy');
+                }
+
+                // Persiste
+                const userData = registryGet(currentUser.username);
+                if (userData) { userData.savedAssets = savedAssets; registrySet(currentUser.username, userData); }
+                if (result !== 'break') pushLedger(`${currentUser.username} fundiu ${id1}+${id2} → ${fusedCard.id} [${fusedCard.rarityNameEN}]`);
+                else pushLedger(`${currentUser.username} tentou fundir ${id1}+${id2} — FALHA TOTAL`);
+
+                document.getElementById('alchemyPanel').style.display = 'none';
+                renderVaultGrid();
+                showCyberAlert(alertTitle, alertMsg, alertType);
+
+            }, 1500); // ← 1500ms de glitch antes do pop-up
         }, 1200);
     }
 
