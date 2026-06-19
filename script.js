@@ -13,6 +13,42 @@
     };
 
     // =========================================================
+    // PERSISTÊNCIA DA SESSÃO ATIVA (corrige logout no F5)
+    // =========================================================
+    const CURRENT_USER_KEY = 'cyber_current_user';
+
+    function saveCurrentSession() {
+        try {
+            if (currentUser.loggedIn) {
+                localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+            }
+        } catch(e) {}
+    }
+
+    function restoreCurrentSession() {
+        try {
+            const raw = localStorage.getItem(CURRENT_USER_KEY);
+            if (!raw) return false;
+            const stored = JSON.parse(raw);
+            if (!stored || !stored.username) return false;
+
+            // Revalida contra o registry para não restaurar dados desatualizados
+            const fresh = registryGet(stored.username) || stored;
+            currentUser = { ...fresh, ...stored, loggedIn: true };
+
+            savedAssets = currentUser.savedAssets || [];
+
+            const navText = document.getElementById('nav-btn-text');
+            if (navText) navText.innerText = currentUser.username.toUpperCase();
+            const vaultBtn = document.getElementById('navVaultBtn'); if (vaultBtn) vaultBtn.style.display = 'flex';
+            const marketBtn = document.getElementById('navMarketBtn'); if (marketBtn) marketBtn.style.display = 'flex';
+            const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'flex';
+            const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'flex';
+            return true;
+        } catch(e) { return false; }
+    }
+
+    // =========================================================
     // REGISTRY CENTRALIZADO DE UTILIZADORES (persistência GitHub)
     // =========================================================
     const REGISTRY_KEY = 'drop_station_users';
@@ -54,6 +90,9 @@
         });
         if (changed) saveRegistry(reg);
     })();
+
+    // Restaura sessão ativa (se existir) logo após o registry estar pronto
+    restoreCurrentSession();
 
 
     // =========================================================
@@ -650,7 +689,7 @@
         if (screenId === 'engine') { setTimeout(resizeCanvases, 50); }
         if (screenId === 'vault') renderVaultGrid();
         if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); }
-        if (screenId === 'messages') renderChatThreads();
+        if (screenId === 'messages') { renderChatThreads(); renderGlobalOffers('offersContainer'); }
         if (screenId === 'profile') viewTargetUserCollection(currentUser.username, currentUser.code, currentUser.bio, currentUser.avatar, currentUser.banner, true);
     }
 
@@ -669,6 +708,7 @@
         // novo, interpretando os cards já existentes do novo usuário como
         // "presentes recebidos" e disparando alertas/TTS sem nenhuma doação real.
         savedAssets = [];
+        localStorage.removeItem(CURRENT_USER_KEY);
         document.getElementById('nav-btn-text').innerText = "ACESSAR TERMINAL";
         document.getElementById('navVaultBtn').style.display = 'none';
         document.getElementById('navMessagesBtn').style.display = 'none';
@@ -770,6 +810,7 @@
         document.getElementById('navVaultBtn').style.display = 'flex'; document.getElementById('navMarketBtn').style.display = 'flex';
         document.getElementById('navMessagesBtn').style.display = 'flex'; document.getElementById('navLogoutBtn').style.display = 'flex';
 
+        saveCurrentSession();
         playTerminalSound('login');
         navigateTo('engine');
     }
@@ -1372,38 +1413,41 @@
         renderMarketGrid();
     }
 
-    function openInspectModal(asset) {
-        if(!asset) return;
-        document.getElementById('inspectImg').src = asset.imgSrc;
-        document.getElementById('inspectTitle').innerText = `INSPECT // ${asset.id}`;
+    function openInspectModal(cardAsset) {
+        if(!cardAsset) return;
+        const ownerName = cardAsset.creator || cardAsset.owner; // nunca usar fallback global/defasado
+
+        document.getElementById('inspectImg').src = cardAsset.imgSrc;
+        document.getElementById('inspectTitle').innerText = `INSPECT // ${cardAsset.id}`;
 
         const glow = document.getElementById('holoGlow');
-        if (asset.rarityType === 'legendary') {
+        if (cardAsset.rarityType === 'legendary') {
             glow.style.display = 'block'; glow.style.background = "radial-gradient(circle, rgba(0,255,255,0.4) 0%, transparent 70%)";
-        } else if (asset.rarityType === 'epic') {
+        } else if (cardAsset.rarityType === 'epic') {
             glow.style.display = 'block'; glow.style.background = "radial-gradient(circle, rgba(255,170,0,0.3) 0%, transparent 70%)";
         } else { glow.style.display = 'none'; }
         
-        let ownerItems = globalFeed.filter(f => f.creator === asset.creator);
+        let ownerItems = globalFeed.filter(f => f.creator === ownerName);
         let score = ownerItems.length * 5; 
 
         const metaBox = document.getElementById('inspectMetaBox');
         metaBox.innerHTML = `
-            <b>CÓDIGO IDENTIFICADOR:</b> ${asset.id}<br>
-            <b>ESTILO VISUAL:</b> ${currentLang === 'PT' ? asset.styleName : (asset.styleNameEN || asset.styleName)}<br>
-            <b>RARIDADE DO ATIVO:</b> <span style="color:${asset.rarityType==='legendary'?'#00ffff':'#ffaa00'}">${(currentLang === 'PT' ? asset.rarityName : asset.rarityNameEN).toUpperCase()}</span><br>
+            <b>CÓDIGO IDENTIFICADOR:</b> ${cardAsset.id}<br>
+            <b>ESTILO VISUAL:</b> ${currentLang === 'PT' ? cardAsset.styleName : (cardAsset.styleNameEN || cardAsset.styleName)}<br>
+            <b>RARIDADE DO ATIVO:</b> <span style="color:${cardAsset.rarityType==='legendary'?'#00ffff':'#ffaa00'}">${(currentLang === 'PT' ? cardAsset.rarityName : cardAsset.rarityNameEN).toUpperCase()}</span><br>
             <b>NÍVEL DE COLECIONADOR DO PROPRIETÁRIO:</b> LVL ${score || 1}<br>
-            <b>DONO DA ASSINATURA:</b> <span style="color:#00ff66; text-decoration:underline; cursor:pointer;" class="inspect-author">${asset.creator}</span> (CLIQUE PARA VER PERFIL)<br>
-            <b>ESTADO NA REDE:</b> ${asset.registered ? 'CRIPTOGRAFADO EM WALLET' : 'FLUXO VOLÁTIL'}
+            <b>DONO DA ASSINATURA:</b> <span style="color:#00ff66; text-decoration:underline; cursor:pointer;" class="inspect-author">${ownerName}</span> (CLIQUE PARA VER PERFIL)<br>
+            <b>ESTADO NA REDE:</b> ${cardAsset.registered ? 'CRIPTOGRAFADO EM WALLET' : 'FLUXO VOLÁTIL'}
         `;
 
-        metaBox.querySelector('.inspect-author').addEventListener('click', () => viewExternalProfile(asset.creator));
+        // Usa sempre o owner real mapeado no objeto do card recebido como argumento
+        metaBox.querySelector('.inspect-author').addEventListener('click', () => viewExternalProfile(ownerName));
 
         const zone = document.getElementById('inspectActionZone'); zone.innerHTML = '';
-        if (asset.registered && asset.creator !== currentUser.username) {
+        if (cardAsset.registered && ownerName !== currentUser.username) {
             const btn = document.createElement('button'); btn.className = 'btn-action'; btn.style.borderColor = '#ff00ff';
-            btn.innerText = `💬 ABRIR NEGOCIAÇÃO COM ${asset.creator}`;
-            btn.onclick = () => { closeInspectModal(); initiateTradeContact(asset.creator, asset.id); };
+            btn.innerText = `💬 ABRIR NEGOCIAÇÃO COM ${ownerName}`;
+            btn.onclick = () => { closeInspectModal(); initiateTradeContact(ownerName, cardAsset.id); };
             zone.appendChild(btn);
         }
 
@@ -1438,6 +1482,80 @@
             const raw = localStorage.getItem(key);
             return raw ? JSON.parse(raw) : null;
         } catch(e) { return null; }
+    }
+
+    // =========================================================
+    // PROPOSTAS GLOBAIS — owner/receiver explícitos (cyber_global_offers)
+    // =========================================================
+    const GLOBAL_OFFERS_KEY = 'cyber_global_offers';
+
+    function loadGlobalOffers() {
+        try { return JSON.parse(localStorage.getItem(GLOBAL_OFFERS_KEY)) || []; } catch(e) { return []; }
+    }
+    function saveGlobalOffers(offers) {
+        try { localStorage.setItem(GLOBAL_OFFERS_KEY, JSON.stringify(offers)); } catch(e) {}
+    }
+
+    // owner = quem envia a proposta | receiver = quem deve aceitar/recusar
+    function createOffer({ owner, receiver, assetId, bumpsOffered }) {
+        if (!owner || !receiver) return null;
+        const offers = loadGlobalOffers();
+        const offer = {
+            id: `offer_${Date.now()}_${Math.floor(Math.random()*9999)}`,
+            owner, receiver, assetId, bumpsOffered,
+            status: 'pending', // pending | accepted | rejected
+            createdAt: Date.now()
+        };
+        offers.push(offer);
+        saveGlobalOffers(offers);
+        return offer;
+    }
+
+    function renderGlobalOffers(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        container.innerHTML = '';
+        if (!currentUser.loggedIn) return;
+
+        const offers = loadGlobalOffers();
+        const me = currentUser.username;
+
+        offers.forEach(offer => {
+            const isReceiver = offer.receiver === me;
+            const isOwner = offer.owner === me;
+
+            // Se não for owner nem receiver, o card NÃO é gerado
+            if (!isReceiver && !isOwner) return;
+
+            const card = document.createElement('div');
+            card.className = 'offer-card';
+
+            if (isReceiver) {
+                card.innerHTML = `
+                    <span>Proposta de <b>${offer.owner}</b> — ${offer.bumpsOffered} B$ pelo ativo ${offer.assetId}</span>
+                    <span>
+                        <button class="btn-action accept-offer">Aceitar</button>
+                        <button class="btn-action decline-offer">Recusar</button>
+                    </span>
+                `;
+                card.querySelector('.accept-offer').addEventListener('click', () => updateOfferStatus(offer.id, 'accepted'));
+                card.querySelector('.decline-offer').addEventListener('click', () => updateOfferStatus(offer.id, 'rejected'));
+            } else {
+                const statusLabel = offer.status === 'pending' ? 'Pendente' : (offer.status === 'accepted' ? 'Aceita' : 'Recusada');
+                card.innerHTML = `<span>Proposta enviada a <b>${offer.receiver}</b> — ${offer.bumpsOffered} B$ pelo ativo ${offer.assetId} — <b>${statusLabel}</b></span>`;
+            }
+
+            container.appendChild(card);
+        });
+    }
+
+    function updateOfferStatus(offerId, status) {
+        const offers = loadGlobalOffers();
+        const idx = offers.findIndex(o => o.id === offerId);
+        if (idx === -1) return;
+        offers[idx].status = status;
+        saveGlobalOffers(offers);
+        renderGlobalOffers('offersContainer');
     }
 
     function initiateTradeContact(seller, assetId) {
@@ -1650,6 +1768,15 @@
             status: "PENDING"
         };
 
+        // PROPOSTA GLOBAL: owner = quem envia, receiver = quem deve aceitar/recusar
+        const offerRecord = createOffer({
+            owner: currentUser.username,
+            receiver: activeThreadUser,
+            assetId: assetObject ? assetObject.id : null,
+            bumpsOffered
+        });
+        thread.activeProposal.globalOfferId = offerRecord ? offerRecord.id : null;
+
         // Adiciona registro estruturado na caixa de mensagens
         let logMsg = `⚙️ CONTRAPROPOSTA ENVIADA POR ${currentUser.username}: Ofertou ${bumpsOffered} B$`;
         if(assetObject) logMsg += ` + Figurinha [${assetObject.id}]`;
@@ -1767,6 +1894,7 @@
         }
 
         prop.status = "ACCEPTED";
+        if (prop.globalOfferId) updateOfferStatus(prop.globalOfferId, 'accepted');
         thread.messages.push({ sender: 'system', text: `✓ ACORDO COMINADO. Transações de rede liquidadas e registradas.` });
         playSynthSound('success');
         saveThreadToStorage(activeThreadUser);
@@ -1777,6 +1905,7 @@
         if(!activeThreadUser || !messageThreads[activeThreadUser]) return;
         let thread = messageThreads[activeThreadUser];
         thread.activeProposal.status = "REJECTED";
+        if (thread.activeProposal.globalOfferId) updateOfferStatus(thread.activeProposal.globalOfferId, 'rejected');
         thread.messages.push({ sender: currentUser.username, text: `✕ A proposta ativa na mesa de negociação foi rejeitada.` });
         playSynthSound('shatter');
         saveThreadToStorage(activeThreadUser);
