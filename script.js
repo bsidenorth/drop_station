@@ -686,7 +686,8 @@
         document.querySelectorAll('.spa-screen').forEach(s => s.classList.remove('active'));
         const t = document.getElementById(`screen-${screenId}`);
         if(t) t.classList.add('active');
-        if (screenId === 'engine') { setTimeout(resizeCanvases, 50); }
+        if (screenId === 'engine') { setTimeout(resizeCanvases, 50); renderDailyDropButton(); }
+        if (screenId === 'leaderboard') renderLeaderboard();
         if (screenId === 'vault') renderVaultGrid();
         if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); }
         if (screenId === 'messages') { renderChatThreads(); renderGlobalOffers('offersContainer'); }
@@ -835,13 +836,216 @@
     }
     requestAnimationFrame(masterRenderLoop);
 
+    // =========================================================
+    // DAILY DROPS — Recompensa diária (cooldown de 24h)
+    // =========================================================
+    const DAILY_DROP_REWARD_BUMPS = 15;
+
+    function getDailyDropKey() {
+        return `cyber_daily_drop_${currentUser.username}`;
+    }
+
+    function claimDailyDrop() {
+        if (!currentUser.loggedIn) { navigateTo('auth'); return; }
+        const key = getDailyDropKey();
+        const last = parseInt(localStorage.getItem(key) || '0', 10);
+        const now = Date.now();
+        if (now - last < 86400000) { renderDailyDropButton(); return; }
+
+        currentUser.bumps += DAILY_DROP_REWARD_BUMPS;
+        localStorage.setItem(key, String(now));
+        const userData = registryGet(currentUser.username);
+        if (userData) { userData.bumps = currentUser.bumps; registrySet(currentUser.username, userData); }
+
+        showCyberAlert('PROCESSO_CONCLUÍDO:', `Subsídio de rede coletado! +${DAILY_DROP_REWARD_BUMPS} B$ creditados na conta.`, 'success');
+        playTerminalSound('claim');
+        renderDailyDropButton();
+    }
+
+    function renderDailyDropButton() {
+        const btn = document.getElementById('dailyDropBtn');
+        if (!btn) return;
+        if (!currentUser.loggedIn) { btn.innerText = '🛰️ LOGIN PARA COLHER SUBSÍDIO'; btn.disabled = true; return; }
+
+        const last = parseInt(localStorage.getItem(getDailyDropKey()) || '0', 10);
+        const remaining = 86400000 - (Date.now() - last);
+
+        if (remaining <= 0) {
+            btn.disabled = false;
+            btn.innerText = `🛰️ COLHER SUBSÍDIO DA REDE (+${DAILY_DROP_REWARD_BUMPS} B$)`;
+        } else {
+            btn.disabled = true;
+            const h = Math.floor(remaining / 3600000);
+            const m = Math.floor((remaining % 3600000) / 60000);
+            const s = Math.floor((remaining % 60000) / 1000);
+            btn.innerText = `⏳ PRÓXIMO SUBSÍDIO EM ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        }
+    }
+    setInterval(renderDailyDropButton, 1000);
+
+    // =========================================================
+    // LEADERBOARD — Placar Global de Operadores
+    // =========================================================
+    let leaderboardMode = 'bumps'; // 'bumps' | 'legendary'
+
+    function setLeaderboardMode(mode) {
+        leaderboardMode = mode;
+        document.querySelectorAll('#leaderboardModeBar .filter-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.mode === mode);
+        });
+        renderLeaderboard();
+    }
+
+    function renderLeaderboard() {
+        const list = document.getElementById('leaderboardList');
+        if (!list) return;
+        const reg = loadRegistry();
+
+        const rows = Object.values(reg).map(u => {
+            const legendaryCount = (u.savedAssets || []).filter(a => a.rarityType === 'legendary').length;
+            return { username: u.username, bumps: u.bumps || 0, legendaryCount };
+        });
+
+        rows.sort((a, b) => leaderboardMode === 'bumps' ? (b.bumps - a.bumps) : (b.legendaryCount - a.legendaryCount));
+        const top5 = rows.slice(0, 5);
+
+        if (top5.length === 0) {
+            list.innerHTML = '<div class="empty-vault-notice">NENHUM OPERADOR REGISTRADO NA REDE.</div>';
+            return;
+        }
+
+        list.innerHTML = top5.map((r, i) => {
+            const medal = ['🥇','🥈','🥉','🎖️','🎖️'][i] || '▫️';
+            const value = leaderboardMode === 'bumps' ? `${r.bumps} B$` : `${r.legendaryCount} LENDÁRIOS`;
+            const isMe = r.username === currentUser.username ? ' style="color:#00ffff;"' : '';
+            return `<div class="leaderboard-row"${isMe}><span>${medal} #${i+1}</span><span>${r.username}</span><span>${value}</span></div>`;
+        }).join('');
+    }
+
+    // =========================================================
+    // BADGES DE CONQUISTA
+    // =========================================================
+    function computeBadges(userData) {
+        const badges = [];
+        const fusionCount = (userData && userData.fusionCount) || 0;
+        const bumps = (userData && userData.bumps) || 0;
+        if (fusionCount >= 10) badges.push({ icon: '⚗️', label: 'MESTRE ALQUIMISTA' });
+        if (bumps >= 1000) badges.push({ icon: '🐋', label: 'BALEIA DA REDE' });
+        const legendaryCount = ((userData && userData.savedAssets) || []).filter(a => a.rarityType === 'legendary').length;
+        if (legendaryCount >= 3) badges.push({ icon: '💎', label: 'CAÇADOR DE LENDAS' });
+        return badges;
+    }
+
+    function renderProfileBadges(username) {
+        const zone = document.getElementById('profBadgesZone');
+        if (!zone) return;
+        const userData = registryGet(username);
+        const badges = computeBadges(userData);
+        zone.innerHTML = badges.length === 0
+            ? '<span class="badge-tag badge-empty">SEM INSÍGNIAS REGISTRADAS</span>'
+            : badges.map(b => `<span class="badge-tag">${b.icon} ${b.label}</span>`).join('');
+    }
+
+    function registerFusionForBadges() {
+        const userData = registryGet(currentUser.username);
+        if (!userData) return;
+        userData.fusionCount = (userData.fusionCount || 0) + 1;
+        registrySet(currentUser.username, userData);
+    }
+
+    // =========================================================
+    // EVENTO DE SISTEMA — SOBRECARGA NA REDE (boost temporário de Épicos)
+    // =========================================================
+    let networkOverloadActive = false;
+    const NETWORK_OVERLOAD_EPIC_MULTIPLIER = 2.5;
+    const NETWORK_OVERLOAD_DURATION_MS = 5 * 60 * 1000;
+    const NETWORK_OVERLOAD_CHECK_INTERVAL_MS = 90 * 1000; // checa a cada 90s
+    const NETWORK_OVERLOAD_CHANCE_PER_CHECK = 0.12; // 12% de chance por checagem
+
+    function triggerNetworkOverload() {
+        if (networkOverloadActive) return;
+        networkOverloadActive = true;
+        const indicator = document.getElementById('overloadIndicator');
+        if (indicator) indicator.style.display = 'inline-flex';
+
+        showCyberAlert(
+            '⚠️ ALERTA_DE_REDE:',
+            'Sobrecarga na rede! Chance de dropar cards ÉPICOS aumentada por 5 minutos!',
+            'warn'
+        );
+        playTerminalSound('alchemy');
+
+        setTimeout(() => {
+            networkOverloadActive = false;
+            if (indicator) indicator.style.display = 'none';
+            showCyberAlert('LOG_ERRO:', 'Sobrecarga de rede estabilizada. Probabilidades normalizadas.', 'warn');
+        }, NETWORK_OVERLOAD_DURATION_MS);
+    }
+
+    function startNetworkOverloadLoop() {
+        setInterval(() => {
+            if (networkOverloadActive) return;
+            if (Math.random() < NETWORK_OVERLOAD_CHANCE_PER_CHECK) triggerNetworkOverload();
+        }, NETWORK_OVERLOAD_CHECK_INTERVAL_MS);
+    }
+    startNetworkOverloadLoop();
+
+    // =========================================================
+    // FX — CURTO-CIRCUITO NA LOGO + ESTALO ELÉTRICO SINTETIZADO
+    // =========================================================
+    function playElectricZap() {
+        try {
+            initAudio();
+            const bufferSize = audioCtx.sampleRate * 0.18;
+            const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = noiseBuffer;
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'highpass'; filter.frequency.setValueAtTime(1800, audioCtx.currentTime);
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+
+            noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+            noise.start();
+
+            const osc = audioCtx.createOscillator();
+            osc.type = 'square'; osc.frequency.setValueAtTime(90, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.12);
+            const oGain = audioCtx.createGain();
+            oGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            oGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.14);
+            osc.connect(oGain); oGain.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.14);
+        } catch(e) {}
+    }
+
+    function triggerLogoGlitch() {
+        const logo = document.getElementById('appLogo');
+        if (!logo) return;
+        logo.classList.add('logo-shortcircuit');
+        playElectricZap();
+        setTimeout(() => logo.classList.remove('logo-shortcircuit'), 450);
+    }
+
+    function startLogoGlitchLoop() {
+        setInterval(() => {
+            // dispara aleatoriamente, em média a cada ~20-40s
+            if (Math.random() < 0.35) triggerLogoGlitch();
+        }, 12000);
+    }
+    startLogoGlitchLoop();
+
     function executeHardwareRoll(isPremium) {
         if (isRolling) return;
         // PREMIUM_DROP_PASS: bloqueia imediatamente se deslogado
         if (isPremium && !currentUser.loggedIn) {
-            alert(currentLang === 'PT' 
-                ? "⛔ ACESSO NEGADO: O PREMIUM_DROP_PASS requer autenticação de rede. Faça login para continuar." 
-                : "⛔ ACCESS DENIED: PREMIUM_DROP_PASS requires network authentication. Login to proceed.");
+            showCyberAlert('ACESSO_NEGADO:', currentLang === 'PT'
+                ? 'O PREMIUM_DROP_PASS requer autenticação de rede. Faça login para continuar.'
+                : 'PREMIUM_DROP_PASS requires network authentication. Login to proceed.', 'error');
             return;
         }
         if (isPremium && currentUser.bumps < 50) { openDepositModal(); return; }
@@ -911,9 +1115,12 @@
             // Para premium: qualquer randRarity
             // Usamos um roll dedicado para raridade, independente do shatter roll
             let rarityRoll = Math.random(); // 0..1
+            const epicThreshold = networkOverloadActive
+                ? Math.min(0.01 + 0.14 * NETWORK_OVERLOAD_EPIC_MULTIPLIER, 0.6)
+                : 0.15;
             if (rarityRoll < 0.01) {
                 rarityKey = "legendary";
-            } else if (rarityRoll < 0.15) {
+            } else if (rarityRoll < epicThreshold) {
                 rarityKey = "epic";
             } else {
                 rarityKey = "common";
@@ -1018,9 +1225,9 @@
 
         // FREE ROLL sem login: bloqueia envio ao cofre, liberta mutex imediatamente
         if (!currentUser.loggedIn) {
-            alert(currentLang === 'PT'
-                ? "🔒 COFRE BLOQUEADO: Faça login para salvar este ativo no seu cofre seguro. O card será perdido se não consolidar."
-                : "🔒 VAULT LOCKED: Login required to save this asset to your secure vault. Card will be lost if not consolidated.");
+            showCyberAlert('ACESSO_NEGADO:', currentLang === 'PT'
+                ? 'COFRE BLOQUEADO: Faça login para salvar este ativo no seu cofre seguro. O card será perdido se não consolidar.'
+                : 'VAULT LOCKED: Login required to save this asset to your secure vault. Card will be lost if not consolidated.', 'error');
             downloadBtn.disabled = false;
             downloadBtn.innerText = originalBtnText;
             isProcessingClaim = false;
@@ -1081,7 +1288,7 @@
         pushLedger(`${currentUser.username} resgatou o card ${assetSnapshot.id} [${assetSnapshot.rarityNameEN}]`);
 
         // Liberta mutex após o alert (alert é síncrono, bloqueia a thread até dismiss)
-        alert(currentLang === 'PT' ? "Consolidado no seu cofre seguro!" : "Consolidated into your secure vault!");
+        showCyberAlert('PROCESSO_CONCLUÍDO:', currentLang === 'PT' ? 'Consolidado no seu cofre seguro!' : 'Consolidated into your secure vault!', 'success');
         isProcessingClaim = false;
     }
 
@@ -1746,14 +1953,14 @@
         let thread = messageThreads[activeThreadUser];
 
         if(thread.activeProposal && thread.activeProposal.status === "ACCEPTED") {
-            alert("Este canal de negociação já foi finalizado com sucesso."); return;
+            showCyberAlert('LOG_ERRO:', 'Este canal de negociação já foi finalizado com sucesso.', 'error'); return;
         }
 
         const bumpsOffered = parseInt(document.getElementById('counterBumpsInput').value) || 0;
         const selectedAssetId = document.getElementById('counterAssetSelect').value;
 
-        if(bumpsOffered < 0) { alert("Valor inválido de Bumps."); return; }
-        if(bumpsOffered > currentUser.bumps) { alert("Você não possui saldo de Bumps suficiente em conta para cobrir esta proposta."); return; }
+        if(bumpsOffered < 0) { showCyberAlert('LOG_ERRO:', 'Valor inválido de Bumps.', 'error'); return; }
+        if(bumpsOffered > currentUser.bumps) { showCyberAlert('ACESSO_NEGADO:', 'Você não possui saldo de Bumps suficiente em conta para cobrir esta proposta.', 'error'); return; }
 
         let assetObject = null;
         if(selectedAssetId) {
@@ -1808,12 +2015,12 @@
             let buyerData = storedBuyer ? JSON.parse(storedBuyer) : null;
 
             if(buyerData && buyerData.bumps < prop.offeredBumps) {
-                alert(`ERRO_REDE: O comprador ${buyerName} não possui fundos suficientes no momento.`); return;
+                showCyberAlert('ERRO_REDE:', `O comprador ${buyerName} não possui fundos suficientes no momento.`, 'error'); return;
             }
 
             // Transfere o Card Alvo para o Comprador
             let assetToTransfer = savedAssets.find(s => s.id === thread.targetAsset.id);
-            if(!assetToTransfer) { alert("Você já não possui mais este ativo no cofre."); return; }
+            if(!assetToTransfer) { showCyberAlert('LOG_ERRO:', 'Você já não possui mais este ativo no cofre.', 'error'); return; }
 
             // Executa Trocas Financeiras
             currentUser.bumps += prop.offeredBumps;
@@ -1852,14 +2059,14 @@
 
         } else {
             // Caso o Usuário Atual seja o COMPRADOR aceitando uma oferta/contraproposta vinda do Dono do Card
-            if(currentUser.bumps < prop.offeredBumps) { alert("Seu saldo de Bumps é insuficiente."); return; }
+            if(currentUser.bumps < prop.offeredBumps) { showCyberAlert('ACESSO_NEGADO:', 'Seu saldo de Bumps é insuficiente.', 'error'); return; }
             
             let storedSeller = localStorage.getItem(`user_${sellerName}`);
             let sellerData = storedSeller ? JSON.parse(storedSeller) : null;
 
             if(sellerData) {
                 let sellerAsset = sellerData.savedAssets.find(s => s.id === thread.targetAsset.id);
-                if(!sellerAsset) { alert("O vendedor não possui mais este ativo no cofre."); return; }
+                if(!sellerAsset) { showCyberAlert('LOG_ERRO:', 'O vendedor não possui mais este ativo no cofre.', 'error'); return; }
 
                 // Deduz recursos do comprador atual
                 currentUser.bumps -= prop.offeredBumps;
@@ -2307,6 +2514,7 @@
                 // Persiste
                 const userData = registryGet(currentUser.username);
                 if (userData) { userData.savedAssets = savedAssets; registrySet(currentUser.username, userData); }
+                if (result !== 'break') registerFusionForBadges();
                 // Fusões bem-sucedidas (comum ou épico/lendário) entram no feed global,
                 // para que apareçam na Home e sobrevivam ao F5 — não só no cofre do usuário.
                 if (result !== 'break') {
@@ -2380,6 +2588,8 @@
 
         const showcaseRankArea = document.getElementById('showcaseRankArea');
         if (showcaseRankArea) computeCollectionLevel(sourceAssets, showcaseRankArea);
+
+        renderProfileBadges(username);
     }
 
     function computeCollectionLevel(items, areaElement) {
