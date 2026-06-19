@@ -44,6 +44,7 @@
             const marketBtn = document.getElementById('navMarketBtn'); if (marketBtn) marketBtn.style.display = 'flex';
             const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'flex';
             const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'flex';
+            const contractsBtn = document.getElementById('navContractsBtn'); if (contractsBtn) contractsBtn.style.display = 'flex';
             return true;
         } catch(e) { return false; }
     }
@@ -692,6 +693,7 @@
         if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); }
         if (screenId === 'messages') { renderChatThreads(); renderGlobalOffers('offersContainer'); }
         if (screenId === 'profile') viewTargetUserCollection(currentUser.username, currentUser.code, currentUser.bio, currentUser.avatar, currentUser.banner, true);
+        if (screenId === 'contracts') renderContractsScreen();
     }
 
     function handleProfileNavClick() {
@@ -714,6 +716,7 @@
         document.getElementById('navVaultBtn').style.display = 'none';
         document.getElementById('navMessagesBtn').style.display = 'none';
         document.getElementById('navLogoutBtn').style.display = 'none';
+        const cBtn = document.getElementById('navContractsBtn'); if(cBtn) cBtn.style.display = 'none';
         // navMarketBtn NÃO é escondido: visitantes deslogados podem navegar
         // e visualizar o mercado/perfis, só não podem comprar/interagir.
         navigateTo('engine');
@@ -810,9 +813,11 @@
         document.getElementById('nav-btn-text').innerText = currentUser.username.toUpperCase();
         document.getElementById('navVaultBtn').style.display = 'flex'; document.getElementById('navMarketBtn').style.display = 'flex';
         document.getElementById('navMessagesBtn').style.display = 'flex'; document.getElementById('navLogoutBtn').style.display = 'flex';
+        const _cBtn = document.getElementById('navContractsBtn'); if (_cBtn) _cBtn.style.display = 'flex';
 
         saveCurrentSession();
         playTerminalSound('login');
+        resumePendingContracts();
         navigateTo('engine');
     }
 
@@ -2759,4 +2764,350 @@
 
     buildStoriesMarquee();
     renderQuotesTicker();
+
+
+    // =========================================================
+    // SISTEMA DE CONTRATOS / MISSÕES DE INVASÃO (Idle Staking)
+    // =========================================================
+
+    const CONTRACTS_DB = [
+        {
+            id: 'CTR-01',
+            name: 'Infiltrar Data Center',
+            desc: 'Acesse o núcleo de dados corporativo e exfiltre arquivos sensíveis antes que o firewall reative.',
+            durationMs: 60 * 1000,
+            durationLabel: '1 MIN',
+            reqCount: 1,
+            reqRarity: 'common',
+            reqLabel: '1 Card Comum',
+            reward: 5
+        },
+        {
+            id: 'CTR-02',
+            name: 'Drenar Banco de Neom',
+            desc: 'Infiltra o sistema bancário de Neom e redireciona créditos para a carteira fantasma da rede.',
+            durationMs: 5 * 60 * 1000,
+            durationLabel: '5 MIN',
+            reqCount: 2,
+            reqRarity: 'epic',
+            reqLabel: '2 Cards Épicos',
+            reward: 30
+        },
+        {
+            id: 'CTR-03',
+            name: 'Hackear Satélite Militar',
+            desc: 'Operação de alto risco. Intercepta o sinal de controle do satélite orbital e redireciona o feed.',
+            durationMs: 15 * 60 * 1000,
+            durationLabel: '15 MIN',
+            reqCount: 1,
+            reqRarity: 'legendary',
+            reqLabel: '1 Card Lendário',
+            reward: 100
+        }
+    ];
+
+    const ACTIVE_CONTRACTS_KEY = 'dr0p_active_contracts';
+    let _contractTimers = {}; // intervalId por contractId
+    let _pendingContractId = null;
+    let _selectedContractCards = [];
+
+    function loadActiveContracts() {
+        if (!currentUser.loggedIn) return {};
+        try {
+            const all = JSON.parse(localStorage.getItem(ACTIVE_CONTRACTS_KEY)) || {};
+            return all[currentUser.username] || {};
+        } catch(e) { return {}; }
+    }
+
+    function saveActiveContracts(obj) {
+        try {
+            const all = JSON.parse(localStorage.getItem(ACTIVE_CONTRACTS_KEY)) || {};
+            all[currentUser.username] = obj;
+            localStorage.setItem(ACTIVE_CONTRACTS_KEY, JSON.stringify(all));
+        } catch(e) {}
+    }
+
+    function startContractTimer(contractId, endTs, cardIds) {
+        if (_contractTimers[contractId]) clearInterval(_contractTimers[contractId]);
+
+        _contractTimers[contractId] = setInterval(() => {
+            const now = Date.now();
+            const remaining = endTs - now;
+
+            // Atualiza barra e label se a tela estiver visível
+            const fill = document.getElementById(`ctimer-fill-${contractId}`);
+            const label = document.getElementById(`ctimer-label-${contractId}`);
+            const contract = CONTRACTS_DB.find(c => c.id === contractId);
+            if (fill && label && contract) {
+                const pct = Math.max(0, (remaining / contract.durationMs) * 100);
+                fill.style.width = pct + '%';
+                if (remaining > 0) {
+                    label.innerText = `⏱ ${formatContractTime(remaining)} RESTANTES`;
+                }
+            }
+
+            if (remaining <= 0) {
+                clearInterval(_contractTimers[contractId]);
+                delete _contractTimers[contractId];
+                concludeContract(contractId, cardIds);
+            }
+        }, 1000);
+    }
+
+    function formatContractTime(ms) {
+        const totalSec = Math.ceil(ms / 1000);
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        return m > 0 ? `${m}m ${s.toString().padStart(2,'0')}s` : `${s}s`;
+    }
+
+    function concludeContract(contractId, cardIds) {
+        const contract = CONTRACTS_DB.find(c => c.id === contractId);
+        if (!contract) return;
+
+        // Desbloqueia cards
+        cardIds.forEach(cid => {
+            const card = savedAssets.find(a => a.id === cid);
+            if (card) card.isLocked = false;
+        });
+
+        // Adiciona recompensa
+        currentUser.bumps += contract.reward;
+        const userData = registryGet(currentUser.username);
+        if (userData) {
+            userData.bumps = currentUser.bumps;
+            userData.savedAssets = savedAssets;
+            registrySet(currentUser.username, userData);
+        }
+        saveCurrentSession();
+
+        // Remove contrato ativo
+        const active = loadActiveContracts();
+        delete active[contractId];
+        saveActiveContracts(active);
+
+        // Atualiza badge de saldo se visível
+        const profBumpsEl = document.getElementById('profBumps');
+        if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
+
+        playSynthSound('success');
+        showCyberAlert(
+            'CONTRATO_CONCLUÍDO',
+            `<b style="color:#ff6600;">${contract.name}</b><br>Dados extraídos com sucesso. Créditos transferidos.<br><br>+<b style="color:#ffaa00;">${contract.reward} B$</b> adicionados ao seu terminal.<br>Saldo atual: <b>${currentUser.bumps} B$</b>`,
+            'success'
+        );
+
+        // Re-renderiza tela se estiver aberta
+        const screen = document.getElementById('screen-contracts');
+        if (screen && screen.classList.contains('active')) renderContractsScreen();
+    }
+
+    // Reativa timers de contratos que ainda estão rodando (persistência F5)
+    function resumePendingContracts() {
+        if (!currentUser.loggedIn) return;
+        const active = loadActiveContracts();
+        Object.entries(active).forEach(([cid, state]) => {
+            if (Date.now() < state.endTs) {
+                startContractTimer(cid, state.endTs, state.cardIds);
+            } else {
+                // Já expirou enquanto estava fora — conclui imediatamente
+                concludeContract(cid, state.cardIds);
+            }
+        });
+    }
+
+    function renderContractsScreen() {
+        if (!currentUser.loggedIn) {
+            document.getElementById('contractsGrid').innerHTML =
+                '<div class="empty-vault-notice" style="grid-column:1/-1;">Login necessário para acessar contratos.</div>';
+            document.getElementById('activeContractsZone').innerHTML = '';
+            return;
+        }
+
+        const active = loadActiveContracts();
+        const activeZone = document.getElementById('activeContractsZone');
+        const grid = document.getElementById('contractsGrid');
+        activeZone.innerHTML = '';
+        grid.innerHTML = '';
+
+        // Seção de missões ativas
+        const activeList = Object.entries(active);
+        if (activeList.length > 0) {
+            const header = document.createElement('div');
+            header.style.cssText = 'color:#ffaa00; font-size:0.6rem; font-weight:bold; letter-spacing:2px; margin-bottom:10px;';
+            header.innerText = '> MISSÕES_ATIVAS // EM EXECUÇÃO';
+            activeZone.appendChild(header);
+
+            activeList.forEach(([cid, state]) => {
+                const contract = CONTRACTS_DB.find(c => c.id === cid);
+                if (!contract) return;
+                const remaining = Math.max(0, state.endTs - Date.now());
+                const pct = Math.max(0, (remaining / contract.durationMs) * 100);
+                const lockedImgs = state.cardIds.map(id => {
+                    const card = savedAssets.find(a => a.id === id);
+                    return card ? `<img class="contract-locked-thumb" src="${card.imgSrc}" title="${card.id}">` : '';
+                }).join('');
+
+                const div = document.createElement('div');
+                div.className = 'contract-card running';
+                div.style.marginBottom = '10px';
+                div.innerHTML = `
+                    <div class="contract-tag">${contract.id} // EM EXECUÇÃO</div>
+                    <div class="contract-name">${contract.name}</div>
+                    <div class="contract-meta-row">
+                        <span class="contract-meta-pill pill-reward">+${contract.reward} B$</span>
+                        <span class="contract-meta-pill pill-req">${contract.reqLabel}</span>
+                    </div>
+                    <div class="contract-locked-cards">${lockedImgs}</div>
+                    <div class="contract-timer-bar-wrap">
+                        <div class="contract-timer-bar-fill" id="ctimer-fill-${cid}" style="width:${pct}%;"></div>
+                    </div>
+                    <div class="contract-timer-label" id="ctimer-label-${cid}">⏱ ${formatContractTime(remaining)} RESTANTES</div>
+                `;
+                activeZone.appendChild(div);
+
+                // Garante que o timer está rodando
+                if (!_contractTimers[cid]) {
+                    startContractTimer(cid, state.endTs, state.cardIds);
+                }
+            });
+        }
+
+        // Seção de contratos disponíveis
+        CONTRACTS_DB.forEach(contract => {
+            const isRunning = !!active[contract.id];
+            const div = document.createElement('div');
+            div.className = 'contract-card';
+            div.innerHTML = `
+                <div class="contract-tag">${contract.id}</div>
+                <div class="contract-name">${contract.name}</div>
+                <p style="font-size:0.6rem; color:#888899; margin-bottom:10px;">${contract.desc}</p>
+                <div class="contract-meta-row">
+                    <span class="contract-meta-pill pill-duration">⏱ ${contract.durationLabel}</span>
+                    <span class="contract-meta-pill pill-req">🃏 ${contract.reqLabel}</span>
+                    <span class="contract-meta-pill pill-reward">💰 +${contract.reward} B$</span>
+                </div>
+                ${isRunning
+                    ? `<button class="btn-action" style="width:100%; border-color:#555; color:#555; cursor:not-allowed;" disabled>EM EXECUÇÃO...</button>`
+                    : `<button class="btn-action" style="width:100%; border-color:#ff6600; color:#ff6600;" onclick="openContractCardModal('${contract.id}')">▶ ACEITAR CONTRATO</button>`
+                }
+            `;
+            grid.appendChild(div);
+        });
+    }
+
+    // Abre modal de seleção de cards
+    function openContractCardModal(contractId) {
+        if (!currentUser.loggedIn) { showCyberAlert('ACESSO_NEGADO', 'Login necessário.', 'error'); return; }
+        const contract = CONTRACTS_DB.find(c => c.id === contractId);
+        if (!contract) return;
+
+        _pendingContractId = contractId;
+        _selectedContractCards = [];
+
+        document.getElementById('contractModalTitle').innerText = contract.name;
+        document.getElementById('contractModalDesc').innerText = contract.desc;
+        document.getElementById('contractModalReq').innerText = `REQUISITO: ${contract.reqLabel}`;
+        document.getElementById('contractSelectedCount').innerText = '0';
+
+        // Cards elegíveis: mesma raridade, não listados, não bloqueados
+        const eligible = savedAssets.filter(a =>
+            a.rarityType === contract.reqRarity &&
+            !a.isListed && !a.forSale && !a.isLocked
+        );
+
+        const grid = document.getElementById('contractCardSelectGrid');
+        grid.innerHTML = '';
+
+        if (eligible.length === 0) {
+            grid.innerHTML = `<div style="grid-column:1/-1; color:#ff0044; font-size:0.65rem; padding:10px;">Nenhum card elegível. Requisito: ${contract.reqLabel} disponível no cofre.</div>`;
+        } else {
+            eligible.forEach(card => {
+                const div = document.createElement('div');
+                div.style.cssText = 'border:1px solid #333; padding:6px; cursor:pointer; transition:border-color 0.15s;';
+                div.dataset.cardId = card.id;
+                div.innerHTML = `<img src="${card.imgSrc}" style="width:100%;aspect-ratio:1;object-fit:cover;margin-bottom:4px;"><div style="font-size:0.5rem;color:#888;">${card.id}</div>`;
+                div.onclick = () => toggleContractCardSelection(div, card.id, contract.reqCount);
+                grid.appendChild(div);
+            });
+        }
+
+        document.getElementById('contractCardModal').style.display = 'flex';
+    }
+
+    function toggleContractCardSelection(el, cardId, maxCount) {
+        const idx = _selectedContractCards.indexOf(cardId);
+        if (idx > -1) {
+            _selectedContractCards.splice(idx, 1);
+            el.style.borderColor = '#333';
+            el.style.boxShadow = '';
+        } else {
+            if (_selectedContractCards.length >= maxCount) {
+                // Deseleciona o mais antigo se já atingiu o máximo
+                const oldId = _selectedContractCards.shift();
+                const oldEl = document.querySelector(`[data-card-id="${oldId}"]`);
+                if (oldEl) { oldEl.style.borderColor = '#333'; oldEl.style.boxShadow = ''; }
+            }
+            _selectedContractCards.push(cardId);
+            el.style.borderColor = '#ff6600';
+            el.style.boxShadow = '0 0 8px rgba(255,102,0,0.5)';
+        }
+        document.getElementById('contractSelectedCount').innerText = _selectedContractCards.length;
+    }
+
+    function closeContractCardModal() {
+        document.getElementById('contractCardModal').style.display = 'none';
+        _pendingContractId = null;
+        _selectedContractCards = [];
+    }
+
+    function confirmContractStart() {
+        const contract = CONTRACTS_DB.find(c => c.id === _pendingContractId);
+        if (!contract) return;
+
+        if (_selectedContractCards.length < contract.reqCount) {
+            showCyberAlert('ERRO_PROTOCOLO', `Selecione exatamente <b>${contract.reqCount}</b> card(s) para iniciar.`, 'error');
+            return;
+        }
+
+        // Bloqueia cards
+        _selectedContractCards.forEach(cid => {
+            const card = savedAssets.find(a => a.id === cid);
+            if (card) card.isLocked = true;
+        });
+
+        // Persiste contrato ativo
+        const endTs = Date.now() + contract.durationMs;
+        const active = loadActiveContracts();
+        active[contract.id] = { endTs, cardIds: [..._selectedContractCards] };
+        saveActiveContracts(active);
+
+        // Salva estado dos cards no registry
+        const userData = registryGet(currentUser.username);
+        if (userData) { userData.savedAssets = savedAssets; registrySet(currentUser.username, userData); }
+        saveCurrentSession();
+
+        closeContractCardModal();
+        startContractTimer(contract.id, endTs, active[contract.id].cardIds);
+        renderContractsScreen();
+
+        showCyberAlert(
+            'CONTRATO_ACEITO',
+            `<b style="color:#ff6600;">${contract.name}</b><br>Cards alocados. Operação em andamento.<br>Recompensa: <b style="color:#ffaa00;">+${contract.reward} B$</b> em <b>${contract.durationLabel}</b>.`,
+            'warn'
+        );
+    }
+
+    // Ativa botão de contratos e retoma timers após login/restore
+    const _origRestoreSession = restoreCurrentSession;
+    // Hook: após login bem-sucedido, mostrar botão e retomar timers
+    // (chamado no handleAuthSubmit e no restore inicial)
+    function showContractsBtnAndResume() {
+        const btn = document.getElementById('navContractsBtn');
+        if (btn) btn.style.display = 'flex';
+        resumePendingContracts();
+    }
+
+    // Retoma contratos se sessão já estava restaurada
+    if (currentUser.loggedIn) showContractsBtnAndResume();
 
