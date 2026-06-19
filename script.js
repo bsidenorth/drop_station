@@ -317,7 +317,28 @@
         { id: "#110293", rarityType: "epic",      rarityName: "ÉPICO",    rarityNameEN: "EPIC",      styleName: "ACID NEON",    styleNameEN: "ACID NEON",    creator: "@neon_samurai", registered: true, exposed: true, forSale: false, price: 0, imgSrc: "https://i.ibb.co/S7JbrXX2/fa809178-22dc-4ec1-8d84-2dcea9ab44b7.jpg" }
     ];
 
-    let globalFeed = [...SEED_FEED];
+    // =========================================================
+    // PERSISTÊNCIA DO FEED GLOBAL DE MUTAÇÕES/FUSÕES — Ponto 1
+    // Sem isso, novos drops/fusões desapareciam da Home a cada F5.
+    // =========================================================
+    const GLOBAL_FEED_KEY = 'cyber_global_feed';
+
+    function loadGlobalFeed() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(GLOBAL_FEED_KEY));
+            return Array.isArray(saved) ? saved : null;
+        } catch(e) { return null; }
+    }
+    function saveGlobalFeed(arr) {
+        try { localStorage.setItem(GLOBAL_FEED_KEY, JSON.stringify(arr)); } catch(e) {}
+    }
+
+    // Carrega o feed persistido; só usa o SEED_FEED na primeira vez (storage vazio)
+    let globalFeed = loadGlobalFeed();
+    if (globalFeed === null) {
+        globalFeed = [...SEED_FEED];
+        saveGlobalFeed(globalFeed);
+    }
 
     // Carrega mercado persistido; se vazio, semeia com o item do feed de exemplo
     let marketAssets = loadMarket();
@@ -895,6 +916,7 @@
             };
 
             globalFeed.unshift({...activeAssetData});
+            saveGlobalFeed(globalFeed);
             buildStoriesMarquee();
 
             downloadBtn.style.display = "block";
@@ -930,7 +952,7 @@
     function shatterAsset() {
         playSynthSound('shatter');
         speakPhrase("Mutação destruída.", "Mutation destroyed.");
-        if(activeAssetData) { globalFeed = globalFeed.filter(a => a.id !== activeAssetData.id); buildStoriesMarquee(); }
+        if(activeAssetData) { globalFeed = globalFeed.filter(a => a.id !== activeAssetData.id); saveGlobalFeed(globalFeed); buildStoriesMarquee(); }
         
         downloadBtn.style.display = "none";
         targetContainer.className = "target-box shattering";
@@ -2156,6 +2178,13 @@
                 // Persiste
                 const userData = registryGet(currentUser.username);
                 if (userData) { userData.savedAssets = savedAssets; registrySet(currentUser.username, userData); }
+                // Fusões bem-sucedidas (comum ou épico/lendário) entram no feed global,
+                // para que apareçam na Home e sobrevivam ao F5 — não só no cofre do usuário.
+                if (result !== 'break') {
+                    globalFeed.unshift({...fusedCard});
+                    saveGlobalFeed(globalFeed);
+                    buildStoriesMarquee();
+                }
                 if (result !== 'break') pushLedger(`${currentUser.username} fundiu ${id1}+${id2} → ${fusedCard.id} [${fusedCard.rarityNameEN}]`);
                 else pushLedger(`${currentUser.username} tentou fundir ${id1}+${id2} — FALHA TOTAL`);
 
