@@ -1809,6 +1809,130 @@
         document.getElementById('probCommon').innerText  = `${pc}%`;
     }
 
+    // =========================================================
+    // EFEITO VISUAL DINÂMICO DE FUSÃO (ALQUIMIA) — Ponto 4
+    // Gera um filtro CSS aleatório + distorção/pixelado/ruído únicos
+    // a cada fusão, sempre a partir da imagem-base do card resultante.
+    // =========================================================
+    function buildRandomFusionFilter() {
+        const hue = Math.floor(Math.random() * 360);
+        const sat = 120 + Math.floor(Math.random() * 220);     // 120% - 340%
+        const con = 100 + Math.floor(Math.random() * 140);     // 100% - 240%
+        const bri = 70 + Math.floor(Math.random() * 60);       // 70%  - 130%
+        const doInvert = Math.random() < 0.35;
+        const invertPct = doInvert ? Math.floor(Math.random() * 100) : 0;
+        const doGray = Math.random() < 0.2;
+
+        let parts = [
+            `hue-rotate(${hue}deg)`,
+            `saturate(${sat}%)`,
+            `contrast(${con}%)`,
+            `brightness(${bri}%)`
+        ];
+        if (doInvert) parts.push(`invert(${invertPct}%)`);
+        if (doGray) parts.push(`grayscale(${20 + Math.floor(Math.random() * 50)}%)`);
+
+        return parts.join(' ');
+    }
+
+    /**
+     * Renderiza a imagem-base do card fundido com filtro CSS aleatório
+     * e, por cima, aplica uma das distorções de pixel (pixelado, ruído
+     * estático, "derretido"/stretch) escolhida aleatoriamente, de modo
+     * que o resultado visual nunca se repita entre fusões.
+     * Retorna uma Promise<string> com o dataURL final (PNG).
+     */
+    function renderFusedCardVisual(baseImgSrc) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+                const SIZE = 600;
+                const canvas = document.createElement('canvas');
+                canvas.width = SIZE; canvas.height = SIZE;
+                const ctx = canvas.getContext('2d');
+
+                // 1) Desenha a imagem-base já com o filtro CSS aleatório aplicado
+                const filterStr = buildRandomFusionFilter();
+                ctx.filter = filterStr;
+                ctx.drawImage(img, 0, 0, SIZE, SIZE);
+                ctx.filter = "none";
+
+                // 2) Escolhe aleatoriamente UMA distorção adicional pra aplicar
+                const distortion = ["pixelado", "ruido", "derretido", "nenhuma"][Math.floor(Math.random() * 4)];
+
+                if (distortion === "pixelado") {
+                    const blockSize = 6 + Math.floor(Math.random() * 14); // 6-20px
+                    const tiny = document.createElement('canvas');
+                    const tinyW = Math.max(1, Math.floor(SIZE / blockSize));
+                    tiny.width = tinyW; tiny.height = tinyW;
+                    const tCtx = tiny.getContext('2d');
+                    tCtx.drawImage(canvas, 0, 0, tinyW, tinyW);
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.clearRect(0, 0, SIZE, SIZE);
+                    ctx.drawImage(tiny, 0, 0, tinyW, tinyW, 0, 0, SIZE, SIZE);
+                    ctx.imageSmoothingEnabled = true;
+
+                } else if (distortion === "ruido") {
+                    // Sobrepõe ruído estático em pequenos blocos translúcidos
+                    const noiseCount = 800 + Math.floor(Math.random() * 1200);
+                    for (let i = 0; i < noiseCount; i++) {
+                        const nx = Math.random() * SIZE;
+                        const ny = Math.random() * SIZE;
+                        const ns = 1 + Math.random() * 2.5;
+                        const shade = Math.floor(Math.random() * 255);
+                        ctx.fillStyle = `rgba(${shade},${shade},${shade},${(Math.random() * 0.35).toFixed(2)})`;
+                        ctx.fillRect(nx, ny, ns, ns);
+                    }
+                    // Linhas de scanline aleatórias, estilo TV com defeito
+                    const scanlines = 4 + Math.floor(Math.random() * 8);
+                    for (let i = 0; i < scanlines; i++) {
+                        const ly = Math.random() * SIZE;
+                        ctx.fillStyle = `rgba(0,0,0,${(0.1 + Math.random() * 0.25).toFixed(2)})`;
+                        ctx.fillRect(0, ly, SIZE, 1 + Math.random() * 3);
+                    }
+
+                } else if (distortion === "derretido") {
+                    // Efeito "derretido": redesenha em faixas horizontais com
+                    // deslocamento horizontal e estiramento vertical aleatório,
+                    // crescente em direção à base da imagem.
+                    const snapshot = ctx.getImageData(0, 0, SIZE, SIZE);
+                    const tmp = document.createElement('canvas');
+                    tmp.width = SIZE; tmp.height = SIZE;
+                    tmp.getContext('2d').putImageData(snapshot, 0, 0);
+
+                    ctx.clearRect(0, 0, SIZE, SIZE);
+                    const strips = 30 + Math.floor(Math.random() * 30);
+                    const stripH = SIZE / strips;
+                    const maxDrip = 18 + Math.random() * 40;
+                    for (let i = 0; i < strips; i++) {
+                        const progress = i / strips; // 0 no topo, 1 na base
+                        const xOffset = (Math.random() - 0.5) * (8 + progress * 26);
+                        const dripStretch = 1 + (progress * progress) * (maxDrip / stripH) * 0.15 * Math.random();
+                        const sy = i * stripH;
+                        ctx.drawImage(
+                            tmp,
+                            0, sy, SIZE, stripH,
+                            xOffset, sy, SIZE, stripH * dripStretch
+                        );
+                    }
+                }
+                // "nenhuma" → mantém só o filtro de cor, sem distorção extra
+
+                // 3) Marca d'água sutil indicando que é resultado de fusão
+                ctx.fillStyle = "rgba(0,0,0,0.55)";
+                ctx.fillRect(16, SIZE - 40, 150, 28);
+                ctx.fillStyle = "#ff00ff";
+                ctx.font = "bold 13px 'Space Mono'";
+                ctx.fillText("FUSION_OUTPUT", 24, SIZE - 21);
+
+                resolve(canvas.toDataURL());
+            };
+            img.onerror = () => resolve(baseImgSrc); // fallback: usa imagem original sem efeito
+            img.src = baseImgSrc;
+        });
+    }
+
     function fuseCards(id1, id2) {
         if (!id1 || !id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Seleciona 2 cards diferentes.' : 'Select 2 different cards.', 'error'); return; }
         if (id1 === id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Os 2 cards devem ser diferentes.' : 'Both cards must be different.', 'error'); return; }
@@ -1888,7 +2012,7 @@
             document.body.appendChild(glitchOverlay);
 
             // ── FASE 3: após 1500ms, remove glitch e processa resultado ───
-            setTimeout(() => {
+            setTimeout(async () => {
                 glitchOverlay.remove();
 
                 // Remove cartas originais ANTES de qualquer resultado
@@ -1913,12 +2037,13 @@
                     // ITEM COMUM
                     result = 'common';
                     const newId = "#" + Math.floor(100000 + Math.random() * 900000);
+                    const fusedVisual = await renderFusedCardVisual(snap1.imgSrc);
                     fusedCard = {
                         id: newId, rarityType: 'common', rarityName: 'COMUM', rarityNameEN: 'COMMON',
                         styleName: 'RESÍDUO [FUSED]', styleNameEN: 'RESIDUE [FUSED]',
                         creator: currentUser.username, registered: true, exposed: false,
                         forSale: false, isListed: false, price: 0,
-                        imgSrc: snap1.imgSrc, isFused: true, tags: ['fused']
+                        imgSrc: fusedVisual, isFused: true, tags: ['fused']
                     };
                     savedAssets.push(fusedCard);
                     alertTitle = currentLang === 'PT' ? '◆ FUSÃO PARCIAL' : '◆ PARTIAL FUSION';
@@ -1945,13 +2070,15 @@
                     const nameParts = [snap1.styleName.split(' ')[0], snap2.styleName.split(' ')[0]];
                     const fusedStyle = nameParts.join('×') + ' [FUSED]';
                     const newId = "#" + Math.floor(100000 + Math.random() * 900000);
+                    const baseVisualSrc = Math.random() > 0.5 ? snap1.imgSrc : snap2.imgSrc;
+                    const fusedVisual = await renderFusedCardVisual(baseVisualSrc);
 
                     fusedCard = {
                         id: newId, rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
                         styleName: fusedStyle, styleNameEN: fusedStyle,
                         creator: currentUser.username, registered: true, exposed: false,
                         forSale: false, isListed: false, price: 0,
-                        imgSrc: Math.random() > 0.5 ? snap1.imgSrc : snap2.imgSrc,
+                        imgSrc: fusedVisual,
                         isFused: true, tags: ['fused', 'evento']
                     };
                     savedAssets.push(fusedCard);
