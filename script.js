@@ -117,9 +117,10 @@
 
     // Cotação base de cada raridade (preço de referência em B$)
     const BASE_QUOTES = {
-        common:    { base: 10,  label: 'COMUM',    labelEN: 'COMMON'    },
-        epic:      { base: 80,  label: 'ÉPICO',    labelEN: 'EPIC'      },
-        legendary: { base: 300, label: 'LENDÁRIO', labelEN: 'LEGENDARY' }
+        common:    { base: 10,   label: 'COMUM',     labelEN: 'COMMON'    },
+        epic:      { base: 80,   label: 'ÉPICO',     labelEN: 'EPIC'      },
+        legendary: { base: 300,  label: 'LENDÁRIO',  labelEN: 'LEGENDARY' },
+        ancestral: { base: 2000, label: 'ANCESTRAL', labelEN: 'ANCESTRAL' }
     };
 
     // Limites de variação pra cotação não explodir nem zerar
@@ -135,7 +136,8 @@
         return {
             common:    { price: BASE_QUOTES.common.base,    change: 0, trend: 'up' },
             epic:      { price: BASE_QUOTES.epic.base,      change: 0, trend: 'up' },
-            legendary: { price: BASE_QUOTES.legendary.base, change: 0, trend: 'up' }
+            legendary: { price: BASE_QUOTES.legendary.base, change: 0, trend: 'up' },
+            ancestral: { price: BASE_QUOTES.ancestral.base, change: 0, trend: 'up' }
         };
     }
 
@@ -155,36 +157,33 @@
     function updateMarketQuotes(droppedRarity) {
         const q = marketQuotes;
 
-        // Variação aleatória entre 2% e 9% por evento, pra ficar orgânico
         const rollPct = () => 0.02 + Math.random() * 0.07;
 
         function applyMove(key, direction) {
+            if (!q[key]) return;
             const base = BASE_QUOTES[key].base;
-            const pct = rollPct() * direction; // direction: +1 sobe, -1 cai
+            const pct = rollPct() * direction;
             let newPrice = q[key].price * (1 + pct);
-
-            // Trava dentro do piso/teto relativos ao valor base
             const floor = base * QUOTE_FLOOR_MULT;
             const ceil  = base * QUOTE_CEIL_MULT;
             newPrice = Math.max(floor, Math.min(ceil, newPrice));
-
             const changePct = ((newPrice - q[key].price) / q[key].price) * 100;
             q[key].change = changePct;
             q[key].trend  = newPrice >= q[key].price ? 'up' : 'down';
             q[key].price  = Math.round(newPrice * 100) / 100;
         }
 
-        if (droppedRarity === 'epic') {
-            // Excesso de épicos no mercado -> ÉPICO desvaloriza
+        if (droppedRarity === 'ancestral') {
+            applyMove('ancestral', -1);
+            applyMove('legendary', 1);
+            applyMove('epic', 1);
+        } else if (droppedRarity === 'epic') {
             applyMove('epic', -1);
         } else if (droppedRarity === 'legendary') {
-            // Excesso de lendários no mercado -> LENDÁRIO desvaloriza
             applyMove('legendary', -1);
         } else {
-            // Drop comum -> escassez relativa de raros -> ÉPICO e LENDÁRIO valorizam
             applyMove('epic', 1);
             applyMove('legendary', 1);
-            // Comum tem leve queda por excesso de oferta da própria categoria
             applyMove('common', -1);
         }
 
@@ -193,20 +192,17 @@
         return q;
     }
 
-    /**
-     * Renderiza o ticker (HTML) APENAS no ponto Global fixo (header).
-     * Os tickers da Landing e do Mercado foram removidos por pedido do usuário.
-     */
     function renderQuotesTicker() {
         const tracks = [
             document.getElementById('tickerGlobalTrack')
         ].filter(Boolean);
         if (tracks.length === 0) return;
 
-        const order = ['common', 'epic', 'legendary'];
+        const order = ['common', 'epic', 'legendary', 'ancestral'];
         const isPT = currentLang === 'PT';
 
         const itemsHtml = order.map(key => {
+            if (!marketQuotes[key]) return '';
             const data  = marketQuotes[key];
             const meta  = BASE_QUOTES[key];
             const label = isPT ? meta.label : meta.labelEN;
@@ -222,7 +218,6 @@
                 </div>`;
         }).join('');
 
-        // Duplica a sequência para o loop ficar contínuo (CSS anima até -50%)
         const fullHtml = itemsHtml + itemsHtml;
         tracks.forEach(track => track.innerHTML = fullHtml);
     }
@@ -314,14 +309,20 @@
     function setVaultFilter(f) {
         vaultFilter = f; vaultPage = 0;
         document.querySelectorAll('#vaultFilterBar .filter-btn').forEach(b => {
-            b.className = 'filter-btn' + (b.dataset.filter === f ? (f==='epic'?' active-epic':f==='legendary'?' active-legendary':' active') : '');
+            const isActive = b.dataset.filter === f;
+            b.className = 'filter-btn' + (isActive
+                ? (f==='epic'?' active-epic': f==='legendary'?' active-legendary': f==='ancestral'?' active-ancestral':' active')
+                : '');
         });
         renderVaultGrid();
     }
     function setMarketFilter(f) {
         marketFilter = f; marketPage = 0;
         document.querySelectorAll('#marketFilterBar .filter-btn').forEach(b => {
-            b.className = 'filter-btn' + (b.dataset.filter === f ? (f==='epic'?' active-epic':f==='legendary'?' active-legendary':' active') : '');
+            const isActive = b.dataset.filter === f;
+            b.className = 'filter-btn' + (isActive
+                ? (f==='epic'?' active-epic': f==='legendary'?' active-legendary': f==='ancestral'?' active-ancestral':' active')
+                : '');
         });
         renderMarketGrid();
     }
@@ -687,7 +688,7 @@
         document.querySelectorAll('.spa-screen').forEach(s => s.classList.remove('active'));
         const t = document.getElementById(`screen-${screenId}`);
         if(t) t.classList.add('active');
-        if (screenId === 'engine') { setTimeout(resizeCanvases, 50); renderDailyDropButton(); }
+        if (screenId === 'engine') { setTimeout(resizeCanvases, 50); renderDailyDropButton(); renderDailyMissions(); }
         if (screenId === 'leaderboard') renderLeaderboard();
         if (screenId === 'vault') renderVaultGrid();
         if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); }
@@ -697,20 +698,27 @@
     }
 
     function handleProfileNavClick() {
-        if(currentUser.loggedIn) navigateTo('profile'); else navigateTo('auth');
+        if (!currentUser.loggedIn) {
+            showCyberAlert('ACESSO_NEGADO:', 'Perfil bloqueado. Faça login para acessar seu terminal de operador.', 'error');
+            setTimeout(() => { closeCyberAlert(); navigateTo('auth'); }, 1500);
+            return;
+        }
+        navigateTo('profile');
     }
 
     function logoutSession() {
-        currentUser.loggedIn = false; currentUser.username = "ANON_PLAYER";
+        // Reseta o objeto currentUser para estado anônimo
+        currentUser = {
+            loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: fixedSessionCode,
+            bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
+            followers: 12, following: 4, followedByMe: false
+        };
         // Limpa o estado de chat/propostas em memória — sem isso, a próxima
         // conta logada no mesmo navegador herdava as threads da conta anterior.
         messageThreads = {};
         activeThreadUser = null;
-        // BUGFIX CRÍTICO: savedAssets não era resetado no logout. Isso fazia
-        // checkIncomingGifts() comparar o cofre do usuário anterior com o do
-        // novo, interpretando os cards já existentes do novo usuário como
-        // "presentes recebidos" e disparando alertas/TTS sem nenhuma doação real.
         savedAssets = [];
+        // Limpa APENAS a sessão ativa — registry e demais chaves preservados
         localStorage.removeItem(CURRENT_USER_KEY);
         document.getElementById('nav-btn-text').innerText = "ACESSAR TERMINAL";
         document.getElementById('navVaultBtn').style.display = 'none';
@@ -842,8 +850,193 @@
     requestAnimationFrame(masterRenderLoop);
 
     // =========================================================
-    // DAILY DROPS — Recompensa diária (cooldown de 24h)
+    // MISSÕES DIÁRIAS — Reset a cada 24h reais via timestamp
     // =========================================================
+    const DAILY_MISSIONS_KEY = 'dr0p_daily_missions';
+
+    const DAILY_MISSIONS_DB = [
+        {
+            id: 'MSN-01',
+            name: 'Primeira Extração',
+            desc: 'Resgate 1 card comum na máquina de drop.',
+            reqRarity: 'common',
+            reqCount: 1,
+            reward: 20,
+            rewardLabel: '20 B$'
+        },
+        {
+            id: 'MSN-02',
+            name: 'Caçador Épico',
+            desc: 'Possua 1 card Épico no cofre.',
+            reqRarity: 'epic',
+            reqCount: 1,
+            reward: 80,
+            rewardLabel: '80 B$'
+        },
+        {
+            id: 'MSN-03',
+            name: 'Lendário da Rede',
+            desc: 'Possua 1 card Lendário no cofre.',
+            reqRarity: 'legendary',
+            reqCount: 1,
+            reward: 200,
+            rewardLabel: '200 B$'
+        },
+        {
+            id: 'MSN-04',
+            name: 'ENTIDADE ANCESTRAL',
+            desc: 'Possua 1 card ANCESTRAL no cofre. [MISSÃO RARA]',
+            reqRarity: 'ancestral',
+            reqCount: 1,
+            reward: 500,
+            rewardLabel: '500 B$'
+        }
+    ];
+
+    function loadDailyMissions() {
+        try {
+            const all = JSON.parse(localStorage.getItem(DAILY_MISSIONS_KEY)) || {};
+            return all[currentUser.username] || { lastReset: 0, completed: [] };
+        } catch(e) { return { lastReset: 0, completed: [] }; }
+    }
+
+    function saveDailyMissions(data) {
+        try {
+            const all = JSON.parse(localStorage.getItem(DAILY_MISSIONS_KEY)) || {};
+            all[currentUser.username] = data;
+            localStorage.setItem(DAILY_MISSIONS_KEY, JSON.stringify(all));
+        } catch(e) {}
+    }
+
+    function checkDailyMissionsReset() {
+        const data = loadDailyMissions();
+        const now = Date.now();
+        if (now - data.lastReset >= 86400000) {
+            // Reseta painel após 24h
+            saveDailyMissions({ lastReset: now, completed: [] });
+            return { lastReset: now, completed: [] };
+        }
+        return data;
+    }
+
+    function claimDailyMission(missionId) {
+        if (!currentUser.loggedIn) { navigateTo('auth'); return; }
+        const mission = DAILY_MISSIONS_DB.find(m => m.id === missionId);
+        if (!mission) return;
+
+        const data = checkDailyMissionsReset();
+        if (data.completed.includes(missionId)) return;
+
+        // Verifica requisito: conta cards da raridade no cofre
+        const count = savedAssets.filter(a => a.rarityType === mission.reqRarity).length;
+        if (count < mission.reqCount) {
+            showCyberAlert('MISSÃO NÃO CONCLUÍDA',
+                `Requisito: <b>${mission.reqCount} card(s) ${mission.reqRarity.toUpperCase()}</b> no cofre.<br>Você tem: <b>${count}</b>.`, 'warn');
+            return;
+        }
+
+        // Log de terminal antes de creditar
+        const logLines = [
+            `> INICIANDO PROCESSO DE VERIFICAÇÃO...`,
+            `> MISSÃO [${missionId}]: ${mission.name.toUpperCase()}`,
+            `> REQUISITO VALIDADO: ${count} CARD(S) ${mission.reqRarity.toUpperCase()} DETECTADO(S)`,
+            `> CALCULANDO RECOMPENSA: ${mission.reward} B$`,
+            `> CREDITANDO NO TERMINAL...`,
+            `> OPERAÇÃO CONCLUÍDA. +${mission.reward} B$ ADICIONADOS.`
+        ];
+
+        // Credita recompensa
+        currentUser.bumps += mission.reward;
+        const userData = registryGet(currentUser.username);
+        if (userData) { userData.bumps = currentUser.bumps; registrySet(currentUser.username, userData); }
+        saveCurrentSession();
+
+        // Marca missão como concluída
+        data.completed.push(missionId);
+        saveDailyMissions(data);
+
+        // Atualiza badge de saldo
+        const profBumpsEl = document.getElementById('profBumps');
+        if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
+
+        playSynthSound('success');
+        if (mission.reqRarity === 'ancestral') triggerAncestralFlash('#ff007f');
+
+        showCyberAlert(
+            '// MISSÃO CONCLUÍDA //',
+            `<div style="font-family:'Space Mono',monospace; font-size:0.6rem; color:#00ff6699; text-align:left; margin-bottom:12px; line-height:2;">${logLines.map(l => `<div>${l}</div>`).join('')}</div>` +
+            `<b style="color:#ffaa00; font-size:0.9rem;">+${mission.reward} B$</b> creditados.<br>Saldo atual: <b>${currentUser.bumps} B$</b>`,
+            'success'
+        );
+
+        renderDailyMissions();
+    }
+
+    function renderDailyMissions() {
+        const container = document.getElementById('dailyMissionsContainer');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (!currentUser.loggedIn) {
+            container.innerHTML = '<div class="empty-vault-notice">Login necessário para ver missões diárias.</div>';
+            return;
+        }
+
+        const data = checkDailyMissionsReset();
+        const now = Date.now();
+        const remaining = Math.max(0, 86400000 - (now - data.lastReset));
+        const h = Math.floor(remaining / 3600000);
+        const m = Math.floor((remaining % 3600000) / 60000);
+
+        // Header com reset timer
+        const header = document.createElement('div');
+        header.style.cssText = 'font-size:0.55rem; color:#555566; letter-spacing:1px; margin-bottom:12px;';
+        header.innerText = `> MISSÕES_DIÁRIAS // RESET EM ${String(h).padStart(2,'0')}h${String(m).padStart(2,'0')}m`;
+        container.appendChild(header);
+
+        DAILY_MISSIONS_DB.forEach(mission => {
+            const isDone = data.completed.includes(mission.id);
+            const isAncestral = mission.reqRarity === 'ancestral';
+
+            // Missão concluída some da lista
+            if (isDone) return;
+
+            const card = document.createElement('div');
+            card.style.cssText = `
+                background: ${isAncestral ? '#120008' : '#07070f'};
+                border: 1px solid ${isAncestral ? '#ff007f' : '#333344'};
+                padding: 14px 16px; margin-bottom: 8px; position: relative; overflow: hidden;
+                ${isAncestral ? 'box-shadow: 0 0 12px rgba(255,0,127,0.2);' : ''}
+            `;
+
+            const countOwned = savedAssets.filter(a => a.rarityType === mission.reqRarity).length;
+            const canClaim = countOwned >= mission.reqCount;
+
+            card.innerHTML = `
+                <div style="font-size:0.5rem; color:${isAncestral ? '#ff007f' : '#666680'}; letter-spacing:2px; margin-bottom:4px;">${mission.id} ${isAncestral ? '// ⚠ MISSÃO RARA' : ''}</div>
+                <div style="font-family:'Archivo Black',sans-serif; font-size:0.8rem; color:${isAncestral ? '#ff007f' : '#fff'}; margin-bottom:4px;">${mission.name}</div>
+                <div style="font-size:0.58rem; color:#888899; margin-bottom:8px;">${mission.desc}</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <span style="font-size:0.55rem; color:${isAncestral ? '#ff007f' : '#ffaa00'}; border:1px solid currentColor; padding:2px 7px;">💰 +${mission.rewardLabel}</span>
+                    <span style="font-size:0.5rem; color:#666;">VOCÊ TEM: ${countOwned}/${mission.reqCount}</span>
+                    <button class="btn-action" style="border-color:${canClaim ? (isAncestral ? '#ff007f' : '#00ff66') : '#333'}; color:${canClaim ? (isAncestral ? '#ff007f' : '#00ff66') : '#555'}; ${canClaim ? '' : 'cursor:not-allowed; opacity:0.5;'} padding:6px 14px; width:auto;" ${canClaim ? `onclick="claimDailyMission('${mission.id}')"` : 'disabled'}>
+                        ${canClaim ? '▶ RESGATAR' : 'INCOMPLETA'}
+                    </button>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+
+        // Se todas concluídas
+        if (container.querySelectorAll('div[style]').length <= 1) {
+            const done = document.createElement('div');
+            done.className = 'empty-vault-notice';
+            done.innerHTML = '✅ TODAS AS MISSÕES DO DIA CONCLUÍDAS.<br><small style="color:#444;font-size:0.55rem;">Volta amanhã para novas missões.</small>';
+            container.appendChild(done);
+        }
+    }
+
+    // DAILY DROPS — Recompensa diária (cooldown de 24h)
     const DAILY_DROP_REWARD_BUMPS = 15;
 
     function getDailyDropKey() {
@@ -1028,6 +1221,32 @@
         } catch(e) {}
     }
 
+    // =========================================================
+    // FX — FLASH DE TELA ANCESTRAL (rosa se sucesso, vermelho se quebrar)
+    // =========================================================
+    function triggerAncestralFlash(color) {
+        const flash = document.createElement('div');
+        flash.style.cssText = `
+            position:fixed; inset:0; z-index:99999;
+            background:${color};
+            opacity:0; pointer-events:none;
+            transition: opacity 0.08s ease;
+        `;
+        document.body.appendChild(flash);
+        // Pulsa 3 vezes
+        let count = 0;
+        const pulse = () => {
+            flash.style.opacity = '0.35';
+            setTimeout(() => {
+                flash.style.opacity = '0';
+                count++;
+                if (count < 3) setTimeout(pulse, 160);
+                else setTimeout(() => flash.remove(), 200);
+            }, 100);
+        };
+        setTimeout(pulse, 20);
+    }
+
     function triggerLogoGlitch() {
         const logo = document.getElementById('appLogo');
         if (!logo) return;
@@ -1114,16 +1333,14 @@
             ];
             let styleIndex = Math.floor(Math.random() * visualStylesPT.length);
 
-            // TAXAS EXACTAS: 1% LEGENDARY, 14% EPIC, 85% COMMON
-            // randRarity já foi usado para shatter check (free < 0.15 → shatter)
-            // Para o free roll que sobreviveu: randRarity >= 0.15
-            // Para premium: qualquer randRarity
-            // Usamos um roll dedicado para raridade, independente do shatter roll
-            let rarityRoll = Math.random(); // 0..1
+            // TAXAS EXACTAS: 1% ANCESTRAL, 1% LEGENDARY, 14% EPIC, 84% COMMON
+            let rarityRoll = Math.random();
             const epicThreshold = networkOverloadActive
-                ? Math.min(0.01 + 0.14 * NETWORK_OVERLOAD_EPIC_MULTIPLIER, 0.6)
-                : 0.15;
+                ? Math.min(0.02 + 0.14 * NETWORK_OVERLOAD_EPIC_MULTIPLIER, 0.6)
+                : 0.16;
             if (rarityRoll < 0.01) {
+                rarityKey = "ancestral";
+            } else if (rarityRoll < 0.02) {
                 rarityKey = "legendary";
             } else if (rarityRoll < epicThreshold) {
                 rarityKey = "epic";
@@ -1131,14 +1348,24 @@
                 rarityKey = "common";
             }
 
-            rarityName = rarityKey === "legendary" ? "LENDÁRIO" : rarityKey === "epic" ? "ÉPICO" : "COMUM";
-            rarityNameEN = rarityKey === "legendary" ? "LEGENDARY" : rarityKey === "epic" ? "EPIC" : "COMMON";
-            watermarkColor = rarityKey === "legendary" ? "#00ffff" : rarityKey === "epic" ? "#ffaa00" : "#ffffff";
+            rarityName   = rarityKey === "ancestral" ? "ANCESTRAL" : rarityKey === "legendary" ? "LENDÁRIO" : rarityKey === "epic" ? "ÉPICO" : "COMUM";
+            rarityNameEN = rarityKey === "ancestral" ? "ANCESTRAL" : rarityKey === "legendary" ? "LEGENDARY" : rarityKey === "epic" ? "EPIC" : "COMMON";
+            watermarkColor = rarityKey === "ancestral" ? "#ff007f" : rarityKey === "legendary" ? "#00ffff" : rarityKey === "epic" ? "#ffaa00" : "#ffffff";
+
+            // Flash de tela Ancestral: rosa se sucesso
+            if (rarityKey === "ancestral") {
+                triggerAncestralFlash('#ff007f');
+            }
 
             // Atualiza a cotação global do mercado em tempo real a cada drop
             updateMarketQuotes(rarityKey);
 
-            if (rarityKey !== "common") {
+            if (rarityKey === "ancestral") {
+                filterStyle = "hue-rotate(300deg) saturate(400%) contrast(130%) brightness(90%)";
+                styleName   = "ROSA PHANTASMA";
+                styleNameEN = "ROSE PHANTASMA";
+                if(!isPremium) claimCost = 50;
+            } else if (rarityKey !== "common") {
                 filterStyle = rarityKey === "legendary" ? "hue-rotate(210deg) saturate(250%) contrast(120%)" : "hue-rotate(140deg) saturate(200%) brightness(90%)";
                 styleName = rarityKey === "legendary" ? "NEON GHOST" : "ACID GLITCH";
                 styleNameEN = rarityKey === "legendary" ? "NEON GHOST" : "ACID GLITCH";
@@ -1342,7 +1569,7 @@
                 ${a.forSale ? `<div class="market-badge">${a.price} B$</div>` : ''}
                 <div class="album-meta">
                     <div class="album-id">${a.id}</div>
-                    <div class="album-rarity" style="color:${a.rarityType==='legendary'?'#00ffff':a.rarityType==='epic'?'#ffaa00':'#aaaaaa'}">${currentLang === 'PT' ? a.rarityName : a.rarityNameEN}</div>
+                    <div class="album-rarity" style="color:${a.rarityType==='ancestral'?'#ff007f':a.rarityType==='legendary'?'#00ffff':a.rarityType==='epic'?'#ffaa00':'#aaaaaa'}">${currentLang === 'PT' ? a.rarityName : a.rarityNameEN}</div>
                 </div>
                 <div class="card-actions">
                     <button class="btn-action btn-expose" data-action="expose" data-idx="${index}">${a.exposed ? '⭐ Sair da Vitrine' : '📁 Expor na Vitrine'}</button>
@@ -1627,32 +1854,59 @@
 
     function openInspectModal(cardAsset) {
         if(!cardAsset) return;
-        const ownerName = cardAsset.creator || cardAsset.owner; // nunca usar fallback global/defasado
+        const ownerName = cardAsset.creator || cardAsset.owner;
 
         document.getElementById('inspectImg').src = cardAsset.imgSrc;
         document.getElementById('inspectTitle').innerText = `INSPECT // ${cardAsset.id}`;
 
+        // CRT glow baseado na raridade
+        const rarityColors = {
+            legendary: '#00ffff',
+            epic:      '#ffaa00',
+            ancestral: '#ff007f',
+            common:    '#aaaaaa'
+        };
+        const rarityColor = rarityColors[cardAsset.rarityType] || '#aaaaaa';
+
         const glow = document.getElementById('holoGlow');
-        if (cardAsset.rarityType === 'legendary') {
-            glow.style.display = 'block'; glow.style.background = "radial-gradient(circle, rgba(0,255,255,0.4) 0%, transparent 70%)";
-        } else if (cardAsset.rarityType === 'epic') {
-            glow.style.display = 'block'; glow.style.background = "radial-gradient(circle, rgba(255,170,0,0.3) 0%, transparent 70%)";
-        } else { glow.style.display = 'none'; }
-        
+        glow.style.display = 'block';
+        glow.style.background = `radial-gradient(circle, ${rarityColor}55 0%, transparent 70%)`;
+
+        // Aplica borda/glow CRT ao modal conforme raridade
+        const modalCard = document.querySelector('.modal-card');
+        if (modalCard) {
+            modalCard.style.borderColor = rarityColor;
+            modalCard.style.boxShadow = `0 0 30px ${rarityColor}55, inset 0 0 20px ${rarityColor}11, 0 0 2px ${rarityColor}`;
+        }
+
+        // Linhas decorativas CRT injetadas acima dos metadados
+        const crtLines = [
+            `> SYS // INTEGRIDADE: OPERACIONAL`,
+            `> NET // AUTENTICIDADE: VERIFICADA`,
+            `> ID  // CHAIN: CRIPTOGRAFADO`,
+            `> RNG // SEED: ${cardAsset.id}`,
+        ];
+
         let ownerItems = globalFeed.filter(f => f.creator === ownerName);
-        let score = ownerItems.length * 5; 
+        let score = ownerItems.length * 5;
 
         const metaBox = document.getElementById('inspectMetaBox');
         metaBox.innerHTML = `
+            <div class="inspect-crt-lines" style="
+                font-size:0.5rem; color:${rarityColor}88; margin-bottom:10px;
+                border:1px solid ${rarityColor}33; padding:6px 10px;
+                background: rgba(0,0,0,0.6);
+                font-family:'Space Mono',monospace; letter-spacing:1px;
+                line-height:1.8;
+            ">${crtLines.map(l => `<div>${l}</div>`).join('')}</div>
             <b>CÓDIGO IDENTIFICADOR:</b> ${cardAsset.id}<br>
             <b>ESTILO VISUAL:</b> ${currentLang === 'PT' ? cardAsset.styleName : (cardAsset.styleNameEN || cardAsset.styleName)}<br>
-            <b>RARIDADE DO ATIVO:</b> <span style="color:${cardAsset.rarityType==='legendary'?'#00ffff':'#ffaa00'}">${(currentLang === 'PT' ? cardAsset.rarityName : cardAsset.rarityNameEN).toUpperCase()}</span><br>
+            <b>RARIDADE DO ATIVO:</b> <span style="color:${rarityColor}">${(currentLang === 'PT' ? cardAsset.rarityName : cardAsset.rarityNameEN).toUpperCase()}</span><br>
             <b>NÍVEL DE COLECIONADOR DO PROPRIETÁRIO:</b> LVL ${score || 1}<br>
             <b>DONO DA ASSINATURA:</b> <span style="color:#00ff66; text-decoration:underline; cursor:pointer;" class="inspect-author">${ownerName}</span> (CLIQUE PARA VER PERFIL)<br>
             <b>ESTADO NA REDE:</b> ${cardAsset.registered ? 'CRIPTOGRAFADO EM WALLET' : 'FLUXO VOLÁTIL'}
         `;
 
-        // Usa sempre o owner real mapeado no objeto do card recebido como argumento
         metaBox.querySelector('.inspect-author').addEventListener('click', () => viewExternalProfile(ownerName));
 
         const zone = document.getElementById('inspectActionZone'); zone.innerHTML = '';
@@ -1666,7 +1920,15 @@
         document.getElementById('inspectModal').style.display = 'flex';
     }
 
-    function closeInspectModal() { document.getElementById('inspectModal').style.display = 'none'; }
+    function closeInspectModal() {
+        // Reseta borda do modal ao fechar
+        const modalCard = document.querySelector('.modal-card');
+        if (modalCard) {
+            modalCard.style.borderColor = '';
+            modalCard.style.boxShadow = '';
+        }
+        document.getElementById('inspectModal').style.display = 'none';
+    }
 
     function rotateCard(e) {
         const card = document.getElementById('card3D'); const box = card.getBoundingClientRect();
@@ -2456,6 +2718,7 @@
                         ? `Cards <b>${id1}</b> e <b>${id2}</b> foram destruídos na fusão instável. Nenhum ativo gerado.`
                         : `Cards <b>${id1}</b> and <b>${id2}</b> were destroyed in the unstable fusion. No asset generated.`;
                     alertType = 'error';
+                    triggerAncestralFlash('#ff0044'); // flash vermelho na quebra
                     playSynthSound('shatter');
                     speakPhrase("Fusão destruída. Perda total.", "Fusion destroyed. Total loss.");
 
@@ -2481,23 +2744,33 @@
                     speakPhrase("Fusão parcial. Item comum gerado.", "Partial fusion. Common item generated.");
 
                 } else {
-                    // SUCESSO — rarity baseada nos inputs
+                    // SUCESSO — rarity baseada nos inputs + 1% Ancestral
                     result = 'success';
                     const rarityRoll = Math.random();
                     let newRarity;
-                    if (total >= 6)      newRarity = rarityRoll < 0.75 ? 'legendary' : 'epic';
+                    if (rarityRoll < 0.01) {
+                        newRarity = 'ancestral';
+                    } else if (total >= 6)      newRarity = rarityRoll < 0.75 ? 'legendary' : 'epic';
                     else if (total >= 4) newRarity = rarityRoll < 0.35 ? 'legendary' : 'epic';
                     else if (total >= 3) newRarity = rarityRoll < 0.08 ? 'legendary' : 'epic';
                     else                 newRarity = rarityRoll < 0.03 ? 'legendary' : 'epic';
 
-                    const rN   = newRarity === 'legendary' ? 'LENDÁRIO' : 'ÉPICO';
-                    const rNEN = newRarity === 'legendary' ? 'LEGENDARY' : 'EPIC';
-                    const wc   = newRarity === 'legendary' ? '#00ffff' : '#ffaa00';
+                    const rarityColors = {
+                        ancestral: '#ff007f',
+                        legendary: '#00ffff',
+                        epic:      '#ffaa00'
+                    };
+                    const rN   = newRarity === 'ancestral' ? 'ANCESTRAL' : newRarity === 'legendary' ? 'LENDÁRIO' : 'ÉPICO';
+                    const rNEN = newRarity === 'ancestral' ? 'ANCESTRAL' : newRarity === 'legendary' ? 'LEGENDARY' : 'EPIC';
+                    const wc   = rarityColors[newRarity] || '#aaaaaa';
                     const nameParts = [snap1.styleName.split(' ')[0], snap2.styleName.split(' ')[0]];
                     const fusedStyle = nameParts.join('×') + ' [FUSED]';
                     const newId = "#" + Math.floor(100000 + Math.random() * 900000);
                     const baseVisualSrc = Math.random() > 0.5 ? snap1.imgSrc : snap2.imgSrc;
                     const fusedVisual = await renderFusedCardVisual(baseVisualSrc);
+
+                    // Flash ancestral (rosa) se for ancestral
+                    if (newRarity === 'ancestral') triggerAncestralFlash('#ff007f');
 
                     fusedCard = {
                         id: newId, rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
@@ -2582,7 +2855,7 @@
                         <div class="album-preview-wrapper"><img src="${a.imgSrc}" draggable="false"></div>
                         <div class="album-meta">
                             <div class="album-id">${a.id}</div>
-                            <div class="album-rarity" style="color:${a.rarityType==='legendary'?'#00ffff':a.rarityType==='epic'?'#ffaa00':'#aaaaaa'}">${currentLang === 'PT' ? a.rarityName : a.rarityNameEN}</div>
+                            <div class="album-rarity" style="color:${a.rarityType==='ancestral'?'#ff007f':a.rarityType==='legendary'?'#00ffff':a.rarityType==='epic'?'#ffaa00':'#aaaaaa'}">${currentLang === 'PT' ? a.rarityName : a.rarityNameEN}</div>
                         </div>
                     `;
                     card.querySelector('.album-preview-wrapper').addEventListener('click', () => openInspectModal(a));
