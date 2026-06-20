@@ -412,18 +412,14 @@ async function logoutSession() {
 // =========================================================
 
     // =========================================================
-    // PERSISTÊNCIA DO MERCADO (dr0p_market) — Ponto 1
+    // PERSISTÊNCIA DO MERCADO — Ponto 1
+    // ⚠️ loadMarket/saveMarket (localStorage) foram REMOVIDOS.
+    // O mercado agora é persistido na tabela `cards` (for_sale + is_listed)
+    // via loadMarketFromSupabase / listCardOnMarket / unlistCardFromMarket /
+    // buyCardFromMarket (ver Parte 5/4, mais abaixo no arquivo).
     // =========================================================
-    const MARKET_KEY  = 'dr0p_market';
     const NOTIF_KEY   = 'dr0p_notifications';
     const LEDGER_KEY  = 'dr0p_ledger';
-
-    function loadMarket() {
-        try { return JSON.parse(localStorage.getItem(MARKET_KEY)) || []; } catch(e) { return []; }
-    }
-    function saveMarket(arr) {
-        try { localStorage.setItem(MARKET_KEY, JSON.stringify(arr)); } catch(e) {}
-    }
 
     // =========================================================
     // SISTEMA DE COTAÇÃO EM TEMPO REAL (MARKET QUOTES ENGINE)
@@ -701,17 +697,17 @@ async function logoutSession() {
         saveGlobalFeed(globalFeed);
     }
 
-    // Carrega mercado persistido; se vazio, semeia com o item do feed de exemplo
-    let marketAssets = loadMarket();
-    if (marketAssets.length === 0) {
-        marketAssets = [SEED_FEED[0]];
-        saveMarket(marketAssets);
-    }
+    // Mercado: array em memória que renderMarketGrid() lê/filtra/pagina.
+    // Fonte de verdade real é a tabela `cards` no Supabase — este array é
+    // só um CACHE preenchido por loadMarketFromSupabase() sempre que a
+    // tela de mercado é aberta ou uma ação (listar/comprar/remover) muda
+    // o estado. Começa vazio; renderMarketGrid() popula no primeiro render.
+    let marketAssets = [];
 
-    // Garante que items do mercado também aparecem no globalFeed (sem duplicar por ID)
-    marketAssets.forEach(m => {
-        if (!globalFeed.find(f => f.id === m.id)) globalFeed.unshift(m);
-    });
+    // Garante que o item de exemplo do SEED_FEED também aparece no globalFeed
+    // (sem duplicar por ID). Isso é só o feed social/cosmético da Home —
+    // não tem relação com o mercado real de venda (ver nota acima).
+    if (!globalFeed.find(f => f.id === SEED_FEED[0].id)) globalFeed.unshift(SEED_FEED[0]);
 
     const canvas = document.getElementById('pfp-canvas'); 
     const ctx = canvas ? canvas.getContext('2d') : null;
@@ -2073,20 +2069,16 @@ async function logoutSession() {
         if (price === null) return; const parsed = parseInt(price);
         if (isNaN(parsed) || parsed <= 0) { showCyberAlert('ERRO DE INPUT', 'Valor de venda inválido. Insere um número positivo.', 'error'); return; }
 
-        savedAssets[index].forSale  = true;
-        savedAssets[index].price    = parsed;
-        savedAssets[index].isListed = true; // CUSTÓDIA (Ponto 2)
-
-        // Ponto 1: remove entry antiga e insere actualizada no mercado
-        marketAssets = marketAssets.filter(m => m.id !== savedAssets[index].id);
-        marketAssets.push({...savedAssets[index]});
-        saveMarket(marketAssets);
+        // listCardOnMarket persiste no Supabase (cards.for_sale / is_listed / price)
+        // e já atualiza savedAssets[index] em memória (mesma referência de objeto).
+        const ok = await listCardOnMarket(savedAssets[index], parsed);
+        if (!ok) {
+            showCyberAlert('ERRO_DE_REDE', 'Falha ao listar o card no mercado. Tenta novamente.', 'error');
+            return;
+        }
 
         // Ledger (Ponto 4)
         pushLedger(`${currentUser.username} listou o card ${savedAssets[index].id} [${savedAssets[index].rarityNameEN}] por ${parsed} B$`);
-
-        // Persiste o estado do card no Supabase
-        await updateCardInSupabase(savedAssets[index], { forSale: true, price: parsed, isListed: true });
 
         renderVaultGrid();
     }
@@ -2159,14 +2151,19 @@ async function logoutSession() {
         });
     }
 
-    function renderMarketGrid() {
+    async function renderMarketGrid() {
         const grid = document.getElementById('marketGrid'); if(!grid) return;
-        grid.innerHTML = '';
+        grid.innerHTML = '<div class="empty-vault-notice">CARREGANDO MERCADO...</div>';
+
+        // Fonte de verdade real: tabela `cards` (for_sale + is_listed = true).
+        marketAssets = await loadMarketFromSupabase();
+
         document.getElementById('market-count-badge').innerText = `${marketAssets.length} CARDS`;
 
         const filtered = marketFilter === 'all' ? marketAssets : marketAssets.filter(a => a.rarityType === marketFilter);
         const pageItems = filtered.slice(marketPage * PAGE_SIZE, (marketPage + 1) * PAGE_SIZE);
 
+        grid.innerHTML = '';
         if(filtered.length === 0) { grid.innerHTML = '<div class="empty-vault-notice">NENHUM ATIVO NESTA CATEGORIA.</div>'; renderPagination('marketPagination',0,0,()=>{}); return; }
 
         pageItems.forEach((a) => {
@@ -2196,7 +2193,7 @@ async function logoutSession() {
                 const buyBtn = document.createElement('button');
                 buyBtn.className = 'btn-action'; buyBtn.style.cssText = "background:#ffaa00; color:#000;";
                 buyBtn.innerText = "COMPRAR DIRETO";
-                buyBtn.addEventListener('click', () => buyMarketAsset(a.id));
+                buyBtn.addEventListener('click', () => buyMarketAsset(a));
 
                 const tradeBtn = document.createElement('button');
                 tradeBtn.className = 'btn-action'; tradeBtn.style.borderColor = '#ff00ff';
@@ -2209,7 +2206,7 @@ async function logoutSession() {
                 const removeBtn = document.createElement('button');
                 removeBtn.className = 'btn-action'; removeBtn.style.borderColor = '#ff0044';
                 removeBtn.innerText = "REMOVER ANÚNCIO";
-                removeBtn.addEventListener('click', () => removeAssetFromMarket(a.id));
+                removeBtn.addEventListener('click', () => removeAssetFromMarket(a));
                 actionsZone.appendChild(removeBtn);
             }
             grid.appendChild(card);
@@ -2218,11 +2215,12 @@ async function logoutSession() {
         renderPagination('marketPagination', filtered.length, marketPage, (p) => { marketPage = p; renderMarketGrid(); });
     }
 
-    async function buyMarketAsset(id) {
-        const asset = marketAssets.find(m => m.id === id); if (!asset) return;
+    // `asset` aqui é um objeto vindo de marketAssets (já tem _dbId, pois veio
+    // de rowToCard via loadMarketFromSupabase).
+    async function buyMarketAsset(asset) {
+        if (!asset) return;
         if (!currentUser.loggedIn) { navigateTo('auth'); return; }
 
-        // Valida saldo do comprador
         if (currentUser.bumps < asset.price) {
             playTerminalSound('error');
             showCyberAlert('FUNDOS INSUFICIENTES', `Saldo actual: <b>${currentUser.bumps} B$</b><br>Custo do ativo: <b>${asset.price} B$</b><br><br>Carregue o saldo no teu perfil.`, 'warn');
@@ -2231,32 +2229,16 @@ async function logoutSession() {
 
         const sellerName = asset.creator;
 
-        // Debita comprador
-        currentUser.bumps -= asset.price;
-        await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
+        // buyCardFromMarket faz a transação inteira de forma atômica no banco
+        // (débito do comprador, crédito do vendedor, transferência da linha
+        // do card) via a function security definer buy_market_card — não dá
+        // pra fazer isso com updates diretos porque a RLS de `cards` só
+        // libera update para o dono da linha.
+        const result = await buyCardFromMarket(asset._dbId);
+        if (!result.ok) return; // buyCardFromMarket já mostra o alerta de erro
 
-        // Credita vendedor e transfere o card dele para o comprador no Supabase
-        if (sellerName !== currentUser.username) {
-            const sellerProfile = await fetchProfileByUsername(sellerName);
-            if (sellerProfile) {
-                const newSellerBumps = (sellerProfile.bumps || 0) + asset.price;
-                await updateProfileInSupabase(sellerProfile.id, { bumps: newSellerBumps });
-            }
-        }
-
-        // Move card para o cofre do comprador (actualiza creator + limpa custódia)
-        const acquiredAsset = { ...asset, forSale: false, exposed: false, isListed: false, creator: currentUser.username };
-        delete acquiredAsset._dbId; // será uma linha nova no Supabase, dono diferente
-        const alreadyOwned = savedAssets.some(a => a.id === acquiredAsset.id);
-        if (!alreadyOwned) {
-            const inserted = await insertCardToSupabase(acquiredAsset, currentUser.id);
-            if (inserted) savedAssets.push(inserted);
-        }
-        if (asset._dbId) await deleteCardFromSupabase(asset._dbId);
-
-        // Remove do mercado e persiste
-        marketAssets = marketAssets.filter(m => m.id !== id);
-        saveMarket(marketAssets);
+        // Reflete o card recém-adquirido no cofre local (currentUser já é o dono na linha do banco)
+        savedAssets.push(result.card);
 
         // Ledger (Ponto 4)
         pushLedger(`${currentUser.username} comprou o card ${asset.id} de ${sellerName} por ${asset.price} B$`);
@@ -2276,20 +2258,21 @@ async function logoutSession() {
             'success'
         );
 
-        // Actualiza UI
-        const profBumpsEl = document.getElementById('profBumps');
-        if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
         renderMarketGrid();
     }
 
-    async function removeAssetFromMarket(id) {
-        marketAssets = marketAssets.filter(m => m.id !== id);
-        saveMarket(marketAssets);
-        const vaultItem = savedAssets.find(m => m.id === id);
-        if (vaultItem) {
-            vaultItem.forSale = false; vaultItem.exposed = false; vaultItem.isListed = false; // liberta custódia
-            await updateCardInSupabase(vaultItem, { forSale: false, isListed: false });
+    // `asset` aqui é um objeto vindo de marketAssets (já tem _dbId).
+    async function removeAssetFromMarket(asset) {
+        if (!asset) return;
+        const ok = await unlistCardFromMarket(asset);
+        if (!ok) {
+            showCyberAlert('ERRO_DE_REDE', 'Falha ao remover o anúncio. Tenta novamente.', 'error');
+            return;
         }
+        // Espelha a mudança no objeto correspondente em savedAssets (cofre local),
+        // caso seja o mesmo card que o usuário tem carregado em memória.
+        const vaultItem = savedAssets.find(m => m.id === asset.id);
+        if (vaultItem) { vaultItem.forSale = false; vaultItem.exposed = false; vaultItem.isListed = false; }
         renderMarketGrid();
     }
 
@@ -3401,8 +3384,9 @@ async function logoutSession() {
                 // (Núcleo de Backup: se a fusão falhar, o card principal (c1) é preservado)
                 const insuranceWillSave = nucleoBackupAtivo && roll < pb;
                 savedAssets = savedAssets.filter(a => a.id !== id1 && a.id !== id2);
-                marketAssets = marketAssets.filter(m => m.id !== id1 && m.id !== id2);
-                saveMarket(marketAssets);
+                // Nota: cards em custódia no mercado (isListed) não podem ser fundidos
+                // (validado antes, no início de fuseCards), então não há necessidade
+                // de tocar em marketAssets/Supabase aqui.
                 if (insuranceWillSave) savedAssets.push(snap1); // c2 é consumido pelo seguro; c1 retorna ao cofre
     
                 // ── SUPABASE: apaga do banco os cards realmente consumidos ──
@@ -3590,9 +3574,12 @@ async function logoutSession() {
         if (inputBio) inputBio.value = isOwner ? (bio || '') : '';
 
         // Vitrine: assets expostos do usuário-alvo
+        // (também usado pra obter o id real do usuário-alvo, necessário pro follow)
         let sourceAssets = savedAssets;
+        let targetUserId = isOwner ? currentUser.id : null;
         if (!isOwner) {
             const targetProfile = await fetchProfileByUsername(username);
+            targetUserId = targetProfile ? targetProfile.id : null;
             sourceAssets = targetProfile ? await loadCardsFromSupabase(targetProfile.id) : [];
         }
         const exposedAssets = sourceAssets.filter(a => a.exposed);
@@ -3620,6 +3607,33 @@ async function logoutSession() {
 
         const showcaseRankArea = document.getElementById('showcaseRankArea');
         if (showcaseRankArea) computeCollectionLevel(sourceAssets, showcaseRankArea);
+
+        // ── FOLLOW: contadores reais (tabela public.followers) + botão seguir ──
+        // (ver Parte 5/4: fetchFollowState / followUser / unfollowUser)
+        const followersLbl = document.getElementById('lbl-followers');
+        const followingLbl = document.getElementById('lbl-following');
+        const socialActionZone = document.getElementById('socialActionZone');
+        if (targetUserId) {
+            const followState = await fetchFollowState(targetUserId);
+            if (followersLbl) followersLbl.innerText = followState.followers;
+            if (followingLbl) followingLbl.innerText = followState.following;
+
+            if (socialActionZone) {
+                socialActionZone.innerHTML = '';
+                if (!isOwner && currentUser.loggedIn) {
+                    const followBtn = document.createElement('button');
+                    followBtn.className = 'btn-action follow-toggle-btn';
+                    followBtn.innerText = followState.followedByMe ? 'SEGUINDO' : 'SEGUIR';
+                    followBtn.classList.toggle('following-active', followState.followedByMe);
+                    followBtn.addEventListener('click', () => toggleFollowTarget(targetUserId, followBtn));
+                    socialActionZone.appendChild(followBtn);
+                }
+            }
+        } else {
+            if (followersLbl) followersLbl.innerText = '0';
+            if (followingLbl) followingLbl.innerText = '0';
+            if (socialActionZone) socialActionZone.innerHTML = '';
+        }
 
         renderProfileBadges(username);
     }
@@ -4384,12 +4398,10 @@ async function toggleExposeAsset(index) {
         return;
     }
 
-    // sincroniza com dr0p_market se o item for para venda e exposto
-    if (asset.forSale) {
-        marketAssets = marketAssets.filter(m => m.id !== asset.id);
-        if (asset.exposed) marketAssets.push(asset);
-        saveMarket(marketAssets);
-    }
+    // Nota: não há mais sincronia manual com um array local de mercado —
+    // a visibilidade no mercado é 100% derivada de cards.for_sale/is_listed
+    // no Supabase, lida sob demanda por loadMarketFromSupabase() sempre que
+    // a tela de mercado é aberta.
     renderVaultGrid();
 }
 // =========================================================
@@ -4574,3 +4586,202 @@ async function deleteInventoryItem(item) {
 
 
 
+// =========================================================
+// DROP STATION — PARTE 5/4: FOLLOW REAL + MERCADO REAL (SUPABASE)
+// Requer rodar antes: schema_passo5_followers_e_mercado.sql
+// (cria public.followers + function buy_market_card)
+//
+// SUBSTITUI no script.js original:
+//   - toda a "PERSISTÊNCIA DO MERCADO (dr0p_market)" baseada em
+//     localStorage (MARKET_KEY, loadMarket, saveMarket, marketAssets
+//     como array em memória solta)
+//   - currentUser.followedByMe / followers hardcoded (12, 4, false)
+//
+// ADICIONA (novo):
+//   - loadMarketFromSupabase / listCardOnMarket / unlistCardFromMarket / buyCardFromMarket
+//   - fetchFollowState / followUser / unfollowUser / getFollowerCount / getFollowingCount
+//
+// INTEGRAÇÃO:
+//   1) Em renderMarketGrid() (script.js ~linha 2163), troque a leitura
+//      de `marketAssets` (array local) por `await loadMarketFromSupabase()`
+//      no início da função, ou chame loadMarketFromSupabase() sempre que
+//      `navigateTo('market')` for disparado (ver navigateTo, linha 1055)
+//      e guarde o resultado na MESMA variável `marketAssets` que o resto
+//      do código já lê — assim você não precisa reescrever renderMarketGrid
+//      inteira, só a fonte dos dados.
+//   2) Troque marketListPrompt (linha 2066) e os pontos que fazem
+//      `marketAssets.push(...)` / `marketAssets.filter(...)` + `saveMarket(...)`
+//      por chamadas a listCardOnMarket / unlistCardFromMarket / buyCardFromMarket.
+//   3) Em viewTargetUserCollection (linha 3564), depois de carregar o
+//      perfil-alvo, chame fetchFollowState(targetUserId) pra popular o
+//      botão de seguir e os contadores reais.
+// =========================================================
+
+// =========================================================
+// MERCADO — fonte de verdade é a tabela `cards` (for_sale + is_listed)
+// Não existe mais array local persistido em localStorage.
+// =========================================================
+
+async function loadMarketFromSupabase() {
+    const { data, error } = await sb.from('cards')
+        .select('*')
+        .eq('for_sale', true)
+        .eq('is_listed', true)
+        .order('created_at', { ascending: false });
+    if (error) { console.error('loadMarketFromSupabase:', error.message); return []; }
+    return data.map(rowToCard);
+}
+
+// Lista um card do PRÓPRIO cofre no mercado (dono = usuário logado,
+// então isso usa o update normal, já coberto pela policy cards_update_own).
+async function listCardOnMarket(card, price) {
+    if (!card._dbId) { console.warn('listCardOnMarket: card sem _dbId', card.id); return false; }
+    if (!price || price <= 0) { console.warn('listCardOnMarket: preço inválido', price); return false; }
+
+    const { error } = await sb.from('cards')
+        .update({ for_sale: true, is_listed: true, price })
+        .eq('id', card._dbId)
+        .eq('id_usuario', currentUser.id); // defesa extra além da RLS
+    if (error) { console.error('listCardOnMarket:', error.message); return false; }
+
+    card.forSale = true;
+    card.isListed = true;
+    card.price = price;
+    return true;
+}
+
+// Remove o próprio card do mercado (volta pro cofre normal).
+async function unlistCardFromMarket(card) {
+    if (!card._dbId) { console.warn('unlistCardFromMarket: card sem _dbId', card.id); return false; }
+
+    const { error } = await sb.from('cards')
+        .update({ for_sale: false, is_listed: false, price: 0 })
+        .eq('id', card._dbId)
+        .eq('id_usuario', currentUser.id);
+    if (error) { console.error('unlistCardFromMarket:', error.message); return false; }
+
+    card.forSale = false;
+    card.isListed = false;
+    card.price = 0;
+    return true;
+}
+
+// Compra um card de OUTRO usuário. Não pode ser um update direto via RLS
+// (a policy cards_update_own só libera o dono), então passa pela function
+// security definer `buy_market_card`, que valida saldo/listagem e faz a
+// transferência (débito/crédito de bumps + troca de id_usuario) de forma
+// atômica no banco.
+async function buyCardFromMarket(cardDbId) {
+    if (!currentUser.loggedIn) {
+        showCyberAlert('ACESSO_NEGADO:', 'Faça login para comprar no mercado.', 'error');
+        return { ok: false, reason: 'NOT_LOGGED_IN' };
+    }
+
+    const { data, error } = await sb.rpc('buy_market_card', {
+        p_card_id: cardDbId,
+        p_buyer_id: currentUser.id
+    });
+
+    if (error) {
+        const reason = error.message || '';
+        const MENSAGENS = {
+            CARD_NAO_ENCONTRADO: 'Este card não existe mais.',
+            CARD_NAO_ESTA_LISTADO: 'Este card não está mais à venda.',
+            NAO_PODE_COMPRAR_PROPRIO_CARD: 'Você não pode comprar seu próprio card.',
+            SALDO_INSUFICIENTE: 'Saldo insuficiente para esta compra.',
+            COMPRADOR_NAO_ENCONTRADO: 'Falha ao validar seu perfil. Tenta novamente.'
+        };
+        const friendly = Object.keys(MENSAGENS).find(k => reason.includes(k));
+        showCyberAlert('ERRO_DE_COMPRA:', friendly ? MENSAGENS[friendly] : 'Falha ao concluir a compra. Tenta novamente.', 'error');
+        console.error('buyCardFromMarket:', reason);
+        return { ok: false, reason };
+    }
+
+    // Atualiza saldo local do comprador refazendo fetch do profile
+    // (mais seguro que decrementar localmente, já que o débito real
+    // aconteceu dentro da function no banco).
+    const refreshedProfile = await fetchProfile(currentUser.id);
+    if (refreshedProfile) {
+        currentUser.bumps = refreshedProfile.bumps;
+        const profBumpsEl = document.getElementById('profBumps');
+        if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
+    }
+
+    return { ok: true, card: rowToCard(data) };
+}
+
+// =========================================================
+// FOLLOW — tabela public.followers (follower_id, following_id)
+// =========================================================
+
+async function fetchFollowState(targetUserId) {
+    if (!targetUserId) return { followedByMe: false, followers: 0, following: 0 };
+
+    const [meFollowsThemQ, followersCountQ, followingCountQ] = await Promise.all([
+        currentUser.loggedIn
+            ? sb.from('followers').select('id', { count: 'exact', head: true })
+                .eq('follower_id', currentUser.id).eq('following_id', targetUserId)
+            : Promise.resolve({ count: 0 }),
+        sb.from('followers').select('id', { count: 'exact', head: true }).eq('following_id', targetUserId),
+        sb.from('followers').select('id', { count: 'exact', head: true }).eq('follower_id', targetUserId)
+    ]);
+
+    return {
+        followedByMe: (meFollowsThemQ.count || 0) > 0,
+        followers: followersCountQ.count || 0,
+        following: followingCountQ.count || 0
+    };
+}
+
+async function followUser(targetUserId) {
+    if (!currentUser.loggedIn) {
+        showCyberAlert('ACESSO_NEGADO:', 'Faça login para seguir outros operadores.', 'error');
+        return false;
+    }
+    if (targetUserId === currentUser.id) return false;
+
+    const { error } = await sb.from('followers').insert({
+        follower_id: currentUser.id,
+        following_id: targetUserId
+    });
+    // unique constraint: se já seguia, o insert falha com 23505 — trata como sucesso silencioso
+    if (error && error.code !== '23505') {
+        console.error('followUser:', error.message);
+        showCyberAlert('ERRO_DE_REDE:', 'Não foi possível seguir este operador. Tenta novamente.', 'error');
+        return false;
+    }
+    return true;
+}
+
+async function unfollowUser(targetUserId) {
+    if (!currentUser.loggedIn) return false;
+
+    const { error } = await sb.from('followers').delete()
+        .eq('follower_id', currentUser.id)
+        .eq('following_id', targetUserId);
+    if (error) {
+        console.error('unfollowUser:', error.message);
+        showCyberAlert('ERRO_DE_REDE:', 'Não foi possível deixar de seguir. Tenta novamente.', 'error');
+        return false;
+    }
+    return true;
+}
+
+// Helper de UI: alterna follow/unfollow e re-renderiza o estado do botão.
+// Chame isso a partir do onclick do botão de seguir na tela de perfil.
+async function toggleFollowTarget(targetUserId, btnEl) {
+    if (!targetUserId || targetUserId === currentUser.id) return;
+    if (btnEl) btnEl.disabled = true;
+
+    const state = await fetchFollowState(targetUserId);
+    const ok = state.followedByMe ? await unfollowUser(targetUserId) : await followUser(targetUserId);
+
+    if (ok && btnEl) {
+        const newState = await fetchFollowState(targetUserId);
+        btnEl.innerText = newState.followedByMe ? 'SEGUINDO' : 'SEGUIR';
+        btnEl.classList.toggle('following-active', newState.followedByMe);
+        const followersCountEl = document.getElementById('lbl-followers');
+        if (followersCountEl) followersCountEl.innerText = newState.followers;
+    }
+    if (btnEl) btnEl.disabled = false;
+}
