@@ -264,30 +264,45 @@ sb.auth.onAuthStateChange((event) => {
 // =========================================================
 async function handleAuthSubmit(event) {
     event.preventDefault();
-    const rawUser = document.getElementById('authUsername').value;
-    const rawPass = document.getElementById('authPassword').value;
     const errorEl = document.getElementById('authErrorMsg');
-    errorEl.style.display = 'none';
-
-    if (authMode === 'login') {
-        const lockedSecs = secondsLoginLocked();
-        if (lockedSecs > 0) {
-            errorEl.innerText = `Muitas tentativas falhas. Aguarda ${lockedSecs}s antes de tentar novamente.`;
-            errorEl.style.display = 'block';
-            return;
-        }
+    if (!errorEl) {
+        // Se isso disparar, o próprio elemento #authErrorMsg não existe no DOM
+        // no momento do clique — usa alert() porque não dá pra escrever em
+        // um elemento que não existe. Isso por si só já seria a causa raiz.
+        alert('DEBUG: #authErrorMsg não encontrado no DOM.');
+        return;
     }
-
-    const userCheck = validateUsername(rawUser);
-    if (!userCheck.ok) { errorEl.innerText = userCheck.msg; errorEl.style.display = 'block'; return; }
-    const formattedUser = userCheck.value;
-
-    const passCheck = validatePassword(rawPass);
-    if (!passCheck.ok) { errorEl.innerText = passCheck.msg; errorEl.style.display = 'block'; return; }
-
+    errorEl.style.display = 'none';
     const submitBtn = document.getElementById('authSubmitBtn');
 
+    // TUDO dentro do try/catch agora — incluindo validações de username/senha
+    // e a checagem de bloqueio por tentativas falhas. Antes essas checagens
+    // rodavam ANTES do try, então qualquer erro inesperado ali (ex: acesso a
+    // sessionStorage bloqueado pelo navegador) travava o clique inteiro sem
+    // nenhuma mensagem visível — exatamente o sintoma relatado. Agora, se
+    // algo desse tipo acontecer, cai no catch e mostra "Falha de comunicação
+    // com a rede" em vez de não fazer nada.
     try {
+        const rawUser = document.getElementById('authUsername').value;
+        const rawPass = document.getElementById('authPassword').value;
+
+        if (authMode === 'login') {
+            const lockedSecs = secondsLoginLocked();
+            if (lockedSecs > 0) {
+                errorEl.innerText = `Muitas tentativas falhas. Aguarda ${lockedSecs}s antes de tentar novamente.`;
+                errorEl.style.display = 'block';
+                return;
+            }
+        }
+
+        const userCheck = validateUsername(rawUser);
+        if (!userCheck.ok) { errorEl.innerText = userCheck.msg; errorEl.style.display = 'block'; return; }
+        const formattedUser = userCheck.value;
+
+        const passCheck = validatePassword(rawPass);
+        if (!passCheck.ok) { errorEl.innerText = passCheck.msg; errorEl.style.display = 'block'; return; }
+
+        submitBtn.disabled = true;
         if (authMode === 'register') {
             const rawEmail = (document.getElementById('authEmail').value || '').trim();
             const confirmPass = document.getElementById('authConfirmPassword').value;
@@ -323,7 +338,6 @@ async function handleAuthSubmit(event) {
                 return;
             }
 
-            submitBtn.disabled = true;
             const { data, error } = await sb.auth.signUp({ email: rawEmail, password: rawPass });
             if (error) {
                 errorEl.innerText = (error.message.includes('already registered') || error.message.includes('already been registered'))
@@ -361,7 +375,6 @@ async function handleAuthSubmit(event) {
         }
 
         // LOGIN — resolve o e-mail real a partir do @username/alias
-        submitBtn.disabled = true;
         const loginEmail = await fetchEmailByUsername(formattedUser);
         if (!loginEmail) {
             registerFailedLogin();
