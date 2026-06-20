@@ -4182,4 +4182,277 @@ restoreCurrentSession();
 
     // Retoma contratos se sessão já estava restaurada
     if (currentUser.loggedIn) showContractsBtnAndResume();
+// =========================================================
+// DROP STATION — PARTE 2/4: CARDS / COFRE (SUPABASE)
+// SUBSTITUI no script.js original:
+//   - função claimAssetLogic
+//   - função toggleExposeAsset
+// ADICIONA (novo, não existia antes):
+//   - rowToCard / cardToInsertRow  (conversão DB <-> objeto em memória)
+//   - loadCardsFromSupabase
+//   - insertCardToSupabase / updateCardInSupabase / deleteCardFromSupabase
+//
+// INTEGRAÇÃO COM A PARTE 1 (auth-supabase-part.js):
+//   No arquivo da Parte 1, dentro de `restoreCurrentSession()` e dentro do
+//   bloco de LOGIN em `handleAuthSubmit`, troque a linha:
+//       savedAssets = [];
+//   por:
+//       savedAssets = await loadCardsFromSupabase(currentUser.id);
+//
+// IMPORTANTE: o `id` usado em todo o resto do app (ex: "#449201") continua
+// sendo o campo visual. O uuid real da linha no Supabase fica guardado em
+// `_dbId` em cada card, usado só internamente pra update/delete.
+// =========================================================
+
+// =========================================================
+// MAPEAMENTO DB (snake_case) <-> OBJETO EM MEMÓRIA (shape original do app)
+// =========================================================
+function rowToCard(row) {
+    return {
+        _dbId: row.id,
+        id: row.display_id,
+        rarityType: row.rarity_type,
+        rarityName: row.rarity_name,
+        rarityNameEN: row.rarity_name_en,
+        styleName: row.style_name,
+        styleNameEN: row.style_name_en,
+        creator: row.creator,
+        registered: row.registered,
+        exposed: row.exposed,
+        forSale: row.for_sale,
+        isListed: row.is_listed,
+        price: Number(row.price) || 0,
+        imgSrc: row.img_src,
+        tags: row.tags || [],
+        isFused: row.is_fused,
+        fusion_count: row.fusion_count,
+        eliteEligible: row.elite_eligible,
+        genetic_history: row.genetic_history || [],
+        parent_ids: row.parent_ids || null,
+        provenance: row.provenance_hash ? {
+            hash: row.provenance_hash,
+            timestamp: row.provenance_timestamp,
+            origin: row.provenance_origin
+        } : null,
+        isTokenized: row.is_tokenized,
+        qr_code_hash: row.qr_code_hash,
+        qr_payload_url: row.qr_payload_url,
+        watermarkColor: row.watermark_color,
+        filterStyle: row.filter_style,
+        resolutions: row.resolutions || { ui: { w: 500, h: 500 }, hd: { w: 4000, h: 4000, src: null } }
+    };
+}
+
+function cardToInsertRow(card, userId) {
+    return {
+        id_usuario: userId,
+        display_id: card.id,
+        rarity_type: card.rarityType,
+        rarity_name: card.rarityName,
+        rarity_name_en: card.rarityNameEN,
+        style_name: card.styleName,
+        style_name_en: card.styleNameEN,
+        creator: card.creator,
+        registered: card.registered ?? true,
+        exposed: card.exposed ?? false,
+        for_sale: card.forSale ?? false,
+        is_listed: card.isListed ?? false,
+        price: card.price ?? 0,
+        img_src: card.imgSrc,
+        tags: card.tags || [],
+        is_fused: card.isFused ?? false,
+        fusion_count: card.fusion_count ?? 0,
+        elite_eligible: card.eliteEligible ?? false,
+        genetic_history: card.genetic_history || [],
+        parent_ids: card.parent_ids || null,
+        provenance_hash: card.provenance?.hash || null,
+        provenance_timestamp: card.provenance?.timestamp || null,
+        provenance_origin: card.provenance?.origin || 'DROP_STATION_INTERNAL',
+        is_tokenized: card.isTokenized ?? false,
+        qr_code_hash: card.qr_code_hash || null,
+        qr_payload_url: card.qr_payload_url || null,
+        watermark_color: card.watermarkColor || '#ffffff',
+        filter_style: card.filterStyle || null,
+        resolutions: card.resolutions || { ui: { w: 500, h: 500 }, hd: { w: 4000, h: 4000, src: null } }
+    };
+}
+
+// =========================================================
+// LEITURA: carrega todo o cofre do usuário ao logar / restaurar sessão
+// =========================================================
+async function loadCardsFromSupabase(userId) {
+    const { data, error } = await sb.from('cards').select('*').eq('id_usuario', userId).order('created_at', { ascending: true });
+    if (error) { console.error('loadCardsFromSupabase:', error.message); return []; }
+    return data.map(rowToCard);
+}
+
+// =========================================================
+// CRIAÇÃO: insere um novo card no cofre
+// =========================================================
+async function insertCardToSupabase(card, userId) {
+    const row = cardToInsertRow(card, userId);
+    const { data, error } = await sb.from('cards').insert(row).select().single();
+    if (error) { console.error('insertCardToSupabase:', error.message); return null; }
+    card._dbId = data.id; // necessário para updates/deletes futuros nesse card
+    return card;
+}
+
+// =========================================================
+// ATUALIZAÇÃO PARCIAL: usado sempre que o estado de um card muda
+// (exposed, forSale, price, isListed, fusion_count, etc.)
+// `fieldsCamel` usa as MESMAS chaves do objeto em memória (ex: { exposed: true }),
+// a função se encarrega de converter pro nome de coluna do banco.
+// =========================================================
+const CARD_FIELD_TO_COLUMN = {
+    exposed: 'exposed', forSale: 'for_sale', isListed: 'is_listed', price: 'price',
+    fusion_count: 'fusion_count', eliteEligible: 'elite_eligible',
+    genetic_history: 'genetic_history', qr_code_hash: 'qr_code_hash',
+    qr_payload_url: 'qr_payload_url', isTokenized: 'is_tokenized',
+    watermarkColor: 'watermark_color', tags: 'tags', registered: 'registered'
+};
+
+async function updateCardInSupabase(card, fieldsCamel) {
+    if (!card._dbId) { console.warn('updateCardInSupabase: card sem _dbId, ignorando update remoto.', card.id); return false; }
+    const updatePayload = {};
+    Object.keys(fieldsCamel).forEach(key => {
+        const col = CARD_FIELD_TO_COLUMN[key];
+        if (col) updatePayload[col] = fieldsCamel[key];
+    });
+    if (Object.keys(updatePayload).length === 0) return false;
+
+    const { error } = await sb.from('cards').update(updatePayload).eq('id', card._dbId);
+    if (error) { console.error('updateCardInSupabase:', error.message); return false; }
+    return true;
+}
+
+// =========================================================
+// EXCLUSÃO: usado quando um card é consumido (fusão, troca, etc.)
+// =========================================================
+async function deleteCardFromSupabase(cardDbId) {
+    if (!cardDbId) return false;
+    const { error } = await sb.from('cards').delete().eq('id', cardDbId);
+    if (error) { console.error('deleteCardFromSupabase:', error.message); return false; }
+    return true;
+}
+
+// =========================================================
+// CLAIM: resgata o card que acabou de "rolar" pro cofre do usuário
+// =========================================================
+async function claimAssetLogic() {
+    // MUTEX GLOBAL: bloqueia qualquer clique duplicado antes de qualquer operação
+    if (isProcessingClaim) return;
+    if (!activeAssetData) return;
+
+    isProcessingClaim = true;
+    downloadBtn.disabled = true;
+    const originalBtnText = downloadBtn.innerText;
+    downloadBtn.innerText = currentLang === 'PT' ? "SALVANDO..." : "SAVING...";
+
+    // FREE ROLL sem login: bloqueia envio ao cofre, liberta mutex imediatamente
+    if (!currentUser.loggedIn) {
+        showCyberAlert('ACESSO_NEGADO:', currentLang === 'PT'
+            ? 'COFRE BLOQUEADO: Faça login para salvar este ativo no seu cofre seguro. O card será perdido se não consolidar.'
+            : 'VAULT LOCKED: Login required to save this asset to your secure vault. Card will be lost if not consolidated.', 'error');
+        downloadBtn.disabled = false;
+        downloadBtn.innerText = originalBtnText;
+        isProcessingClaim = false;
+        navigateTo('auth');
+        return;
+    }
+
+    // Saldo insuficiente: aborta sem debitar nada
+    if (activeAssetData.costToClaim > 0 && currentUser.bumps < activeAssetData.costToClaim) {
+        downloadBtn.disabled = false;
+        downloadBtn.innerText = originalBtnText;
+        isProcessingClaim = false;
+        playTerminalSound('error');
+        openDepositModal();
+        return;
+    }
+
+    try {
+        // === ZONA CRÍTICA ===
+        if (activeAssetData.costToClaim > 0) {
+            const newBumps = currentUser.bumps - activeAssetData.costToClaim;
+            const { error: bumpsErr } = await sb.from('profiles').update({ bumps: newBumps }).eq('id', currentUser.id);
+            if (bumpsErr) { console.error('debitar bumps:', bumpsErr.message); throw bumpsErr; }
+            currentUser.bumps = newBumps;
+            const profBumpsEl = document.getElementById('profBumps');
+            if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
+        }
+        clearInterval(decayInterval);
+
+        // Clona dados antes de qualquer limpeza de estado
+        const assetSnapshot = { ...activeAssetData, creator: currentUser.username, registered: true };
+
+        // ── PROVENIÊNCIA: injeta hash + timestamp de nascimento ──
+        attachProvenance(assetSnapshot);
+
+        // Salvaguarda extra: impede duplicado se ID já existir no cofre
+        const alreadyOwned = savedAssets.some(a => a.id === assetSnapshot.id);
+        if (!alreadyOwned) {
+            const inserted = await insertCardToSupabase(assetSnapshot, currentUser.id);
+            if (!inserted) throw new Error('Falha ao gravar card no Supabase.');
+            savedAssets.push(inserted);
+        }
+
+        // Limpa estado do drop ANTES do alert
+        activeAssetData = null;
+        lastMintedBuffer = null;
+        downloadBtn.style.display = "none";
+        downloadBtn.disabled = false;
+        downloadBtn.innerText = originalBtnText;
+        stabilityWrapper.style.display = "none";
+        document.getElementById('status-text').innerText = currentLang === 'PT' ? "ATIVO_SALVO_NO_COFRE" : "ASSET_SAVED_TO_VAULT";
+
+        playTerminalSound('claim');
+        speakPhrase("Ativo integrado ao seu cofre.", "Asset integrated into your vault.");
+
+        // Ledger entry
+        pushLedger(`${currentUser.username} resgatou o card ${assetSnapshot.id} [${assetSnapshot.rarityNameEN}]`);
+
+        showCyberAlert('PROCESSO_CONCLUÍDO:', currentLang === 'PT' ? 'Consolidado no seu cofre seguro!' : 'Consolidated into your secure vault!', 'success');
+
+    } catch (e) {
+        console.error(e);
+        showCyberAlert('ERRO_DE_REDE:', currentLang === 'PT' ? 'Falha ao salvar no cofre. Tenta novamente.' : 'Failed to save to vault. Try again.', 'error');
+        downloadBtn.disabled = false;
+        downloadBtn.innerText = originalBtnText;
+    } finally {
+        isProcessingClaim = false;
+    }
+}
+
+// =========================================================
+// EXPOR/RETIRAR DA VITRINE — exemplo do padrão a seguir para as
+// demais ações do cofre (venda, presente, etc., nas próximas partes)
+// =========================================================
+async function toggleExposeAsset(index) {
+    const asset = savedAssets[index];
+    if (asset.isListed) {
+        playSynthSound('shatter');
+        showCyberAlert('🔒 ATIVO BLOQUEADO EM CUSTÓDIA NO MERCADO', 'Este card está listado no mercado e está em custódia. Remove o anúncio primeiro para alterar o seu estado.', 'error');
+        return;
+    }
+    const novoEstado = !asset.exposed;
+    savedAssets[index].exposed = novoEstado;
+
+    const ok = await updateCardInSupabase(asset, { exposed: novoEstado });
+    if (!ok) {
+        // rollback do estado local se a escrita remota falhar
+        savedAssets[index].exposed = !novoEstado;
+        showCyberAlert('ERRO_DE_REDE:', 'Não foi possível atualizar a vitrine. Tenta novamente.', 'error');
+        renderVaultGrid();
+        return;
+    }
+
+    // sincroniza com dr0p_market se o item for para venda e exposto
+    if (asset.forSale) {
+        marketAssets = marketAssets.filter(m => m.id !== asset.id);
+        if (asset.exposed) marketAssets.push(asset);
+        saveMarket(marketAssets);
+    }
+    renderVaultGrid();
+}
+
 
