@@ -1397,6 +1397,8 @@
             'success'
         );
     }
+
+    function triggerLogoGlitch() {
         const logo = document.getElementById('appLogo');
         if (!logo) return;
         logo.classList.add('logo-shortcircuit');
