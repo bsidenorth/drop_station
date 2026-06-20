@@ -25,7 +25,7 @@ let authMode = 'login';
 
 let currentUser = {
     loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
-    bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
+    bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
     followers: 12, following: 4, followedByMe: false,
     inventory: [] // populado na Parte 3 (inventário)
 };
@@ -90,7 +90,7 @@ function secondsLoginLocked() {
 // select('email'). A resolução de e-mail para login passa pela
 // function security definer `email_by_username` (ver fetchEmailByUsername).
 // =========================================================
-const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, banner, status, following, fusion_count, created_at, updated_at';
+const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, banner, status, following, fusion_count, created_at, updated_at';
 
 async function fetchProfile(userId) {
     const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('id', userId).single();
@@ -113,6 +113,7 @@ async function createProfile(userId, username, email) {
         code: "#" + Math.floor(1000 + Math.random() * 9000),
         bio: "Membro verificado.",
         avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg",
+        avatar_frame: "frame-style-1",
         banner: ""
     };
     // BUGFIX: trocado de .upsert(...) para .insert(...) puro.
@@ -164,7 +165,7 @@ async function fetchProfileByUsername(username) {
 // Funciona tanto para o currentUser (passa currentUser.id) como para outro usuário
 // (passa o id obtido via fetchProfileByUsername).
 const PROFILE_FIELD_TO_COLUMN = {
-    bumps: 'bumps', bio: 'bio', avatar: 'avatar', banner: 'banner',
+    bumps: 'bumps', bio: 'bio', avatar: 'avatar', avatarFrame: 'avatar_frame', banner: 'banner',
     status: 'status', following: 'following', code: 'code', username: 'username',
     fusion_count: 'fusion_count'
 };
@@ -191,6 +192,7 @@ function applyProfileToCurrentUser(profile) {
         code: profile.code,
         bio: profile.bio,
         avatar: profile.avatar,
+        avatarFrame: profile.avatar_frame || 'frame-style-1',
         banner: profile.banner,
         status: profile.status || 'online',
         followingList: profile.following || [],
@@ -212,7 +214,7 @@ function applyProfileToCurrentUser(profile) {
 function resetCurrentUserToAnon() {
     currentUser = {
         loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
-        bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
+        bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
         followers: 12, following: 4, followedByMe: false, inventory: []
     };
     messageThreads = {};
@@ -1084,7 +1086,7 @@ async function logoutSession() {
         ans.style.display = (ans.style.display === 'block') ? 'none' : 'block';
     }
 
-    function navigateTo(screenId) {
+    function navigateTo(screenId, skipProfileReload) {
         playSynthSound('click');
 
         // Limpa estado anterior do drop ao sair do engine, evitando botão travado/duplicação
@@ -1105,7 +1107,15 @@ async function logoutSession() {
         if (screenId === 'vault') renderVaultGrid();
         if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); }
         if (screenId === 'messages') { renderChatThreads(); renderGlobalOffers('offersContainer'); }
-        if (screenId === 'profile') viewTargetUserCollection(currentUser.username, currentUser.code, currentUser.bio, currentUser.avatar, currentUser.banner, true);
+        // BUGFIX (redirecionamento): navegar para 'profile' SEMPRE recarregava os dados
+        // do usuário logado, mesmo quando vínhamos de viewExternalProfile() (clique em
+        // "VER PERFIL" no Inspect). Isso fazia a tela "voltar" pro próprio perfil
+        // imediatamente após abrir o perfil de outra pessoa. Agora, quem já carregou
+        // o perfil-alvo (ex: viewExternalProfile) passa skipProfileReload=true e
+        // navigateTo não pisa em cima dos dados já renderizados.
+        if (screenId === 'profile' && !skipProfileReload) {
+            viewTargetUserCollection(currentUser.username, currentUser.code, currentUser.bio, currentUser.avatar, currentUser.banner, true);
+        }
         if (screenId === 'contracts') renderContractsScreen();
     }
 
@@ -2331,7 +2341,7 @@ async function logoutSession() {
         renderMarketGrid();
     }
 
-    function openInspectModal(cardAsset) {
+    async function openInspectModal(cardAsset) {
         if(!cardAsset) return;
         const ownerName = cardAsset.creator || cardAsset.owner;
 
@@ -2366,8 +2376,18 @@ async function logoutSession() {
             `> RNG // SEED: ${cardAsset.id}`,
         ];
 
-        let ownerItems = globalFeed.filter(f => f.creator === ownerName);
-        let score = ownerItems.length * 5;
+        // BUGFIX (veracidade do nível): antes este número vinha de uma fórmula
+        // paralela (globalFeed.filter(creator).length * 5), que ficava estática/errada
+        // e não batia com o nível mostrado na Vitrine do perfil. Agora busca a coleção
+        // REAL do dono do card e usa a MESMA fórmula (scoreFromAssets) da Vitrine.
+        let ownerScore;
+        if (ownerName === currentUser.username) {
+            ownerScore = scoreFromAssets(savedAssets);
+        } else {
+            const ownerProfile = await fetchProfileByUsername(ownerName);
+            const ownerAssets = ownerProfile ? await loadCardsFromSupabase(ownerProfile.id) : [];
+            ownerScore = scoreFromAssets(ownerAssets);
+        }
 
         const metaBox = document.getElementById('inspectMetaBox');
         metaBox.innerHTML = `
@@ -2381,7 +2401,7 @@ async function logoutSession() {
             <b>CÓDIGO IDENTIFICADOR:</b> ${cardAsset.id}<br>
             <b>ESTILO VISUAL:</b> ${currentLang === 'PT' ? cardAsset.styleName : (cardAsset.styleNameEN || cardAsset.styleName)}<br>
             <b>RARIDADE DO ATIVO:</b> <span style="color:${rarityColor}">${(currentLang === 'PT' ? cardAsset.rarityName : cardAsset.rarityNameEN).toUpperCase()}</span><br>
-            <b>NÍVEL DE COLECIONADOR DO PROPRIETÁRIO:</b> LVL ${score || 1}<br>
+            <b>NÍVEL DE COLECIONADOR DO PROPRIETÁRIO:</b> LVL ${ownerScore || 1}<br>
             <b>DONO DA ASSINATURA:</b> <span style="color:#00ff66; text-decoration:underline; cursor:pointer;" class="inspect-author">${ownerName}</span> (CLIQUE PARA VER PERFIL)<br>
             <b>ESTADO NA REDE:</b> ${cardAsset.registered ? 'CRIPTOGRAFADO EM WALLET' : 'FLUXO VOLÁTIL'}
         `;
@@ -3611,6 +3631,12 @@ async function logoutSession() {
         // Avatar do usuário logado/visitado (BUGFIX: avatar sumido da tela de perfil)
         const avatarImg = document.getElementById('profAvatarImg');
         if (avatarImg) avatarImg.src = avatar || 'https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg';
+        const avatarFrameWrap = document.getElementById('avatarFrameWrap');
+        if (avatarFrameWrap) {
+            const frameClass = (isOwner ? currentUser.avatarFrame : null) || 'frame-style-1';
+            avatarFrameWrap.classList.remove('frame-style-1', 'frame-style-2');
+            avatarFrameWrap.classList.add(frameClass);
+        }
 
         // Banner
         const bannerEl = document.getElementById('profBannerView');
@@ -3627,6 +3653,9 @@ async function logoutSession() {
         if (editZone) editZone.style.display = isOwner ? 'block' : 'none';
         const inputBio = document.getElementById('inputBio');
         if (inputBio) inputBio.value = isOwner ? (bio || '') : '';
+        // Sempre volta o editor de bio pro estado fechado (botão visível, textarea oculta)
+        // ao trocar de perfil, evitando que a área de edição "vaze" do usuário A pro B.
+        cancelBioEdit();
 
         // Vitrine: assets expostos do usuário-alvo
         // (também usado pra obter o id real do usuário-alvo, necessário pro follow)
@@ -3693,28 +3722,77 @@ async function logoutSession() {
         renderProfileBadges(username);
     }
 
-    function computeCollectionLevel(items, areaElement) {
-        if(!areaElement) return;
+    // ── NÍVEL DE COLEÇÃO ──────────────────────────────────────────
+    // BUGFIX (veracidade do nível): esta é a ÚNICA fonte de verdade
+    // para o cálculo do nível de coleção. openInspectModal() agora
+    // chama esta mesma função (em vez de uma fórmula paralela baseada
+    // em globalFeed) para que o nível mostrado no Inspect bata 1:1
+    // com o nível mostrado na Vitrine do perfil.
+    const COLLECTION_TIERS = [
+        { min: 0,  label: 'RECRUTA DA RECEPTAÇÃO',                         icon: '⚙️', cls: 'rank-basic'   },
+        { min: 10, label: 'HYPE HUSTLER // ENGRAZADO DA REDE',             icon: '🔥', cls: 'rank-hype'    },
+        { min: 24, label: 'MUTANTE ANCESTRAL // COLECIONADOR SUPERIOR',    icon: '⚡', cls: 'rank-godlike' }
+    ];
+
+    function scoreFromAssets(items) {
         let score = 0;
-        items.forEach(i => {
+        (items || []).forEach(i => {
             if (i.rarityType === 'legendary') score += 12;
             else if (i.rarityType === 'epic') score += 6;
             else score += 2;
         });
+        return score;
+    }
 
-        if (score >= 24) {
-            areaElement.innerHTML = `<div class="showcase-rank-badge rank-godlike">⚡ STATUS: MUTANTE ANCESTRAL // COLECIONADOR SUPERIOR (LVL ${score}) ⚡</div>`;
-        } else if (score >= 10) {
-            areaElement.innerHTML = `<div class="showcase-rank-badge rank-hype">🔥 STATUS: HYPE HUSTLER // ENGRAZADO DA REDE (LVL ${score})</div>`;
-        } else {
-            areaElement.innerHTML = `<div class="showcase-rank-badge rank-basic">⚙️ STATUS: RECRUTA DA RECEPTAÇÃO (LVL ${score || 1})</div>`;
+    function computeCollectionLevel(items, areaElement) {
+        if(!areaElement) return;
+        const score = scoreFromAssets(items);
+
+        let tierIndex = 0;
+        for (let i = 0; i < COLLECTION_TIERS.length; i++) {
+            if (score >= COLLECTION_TIERS[i].min) tierIndex = i;
         }
+        const tier = COLLECTION_TIERS[tierIndex];
+        const nextTier = COLLECTION_TIERS[tierIndex + 1] || null;
+        const isMaxed = !nextTier;
+        const pointsToNext = isMaxed ? 0 : (nextTier.min - score);
+        const pct = isMaxed ? 100 : Math.max(4, Math.min(100, Math.round(((score - tier.min) / (nextTier.min - tier.min)) * 100)));
+
+        // 10 "pontos" de progresso em estilo terminal (cada bolinha = 10% do trajeto até o próximo nível)
+        const totalDots = 10;
+        const filledDots = Math.round((pct / 100) * totalDots);
+        const dotsHtml = Array.from({ length: totalDots }, (_, idx) =>
+            `<span class="${idx < filledDots ? 'dot-filled' : ''}">${idx < filledDots ? '●' : '○'}</span>`
+        ).join(' ');
+
+        const nextLabel = isMaxed
+            ? '<span class="next-lvl-tag">NÍVEL MÁXIMO ATINGIDO</span>'
+            : `<span class="next-lvl-tag">FALTAM <b style="color:#00ffff;">${pointsToNext} PTS</b> P/ PRÓXIMO NÍVEL</span>`;
+
+        areaElement.innerHTML = `
+            <div class="showcase-rank-badge ${tier.cls}">${tier.icon} STATUS: ${tier.label} (LVL ${score || 1})</div>
+            <div class="collection-progress-wrap">
+                <div class="collection-progress-terminal">
+                    <span>&gt; SCORE_ATUAL: <b style="color:#00ff66;">${score}</b> PTS</span>
+                    ${nextLabel}
+                </div>
+                <div class="collection-progress-bar-track">
+                    <div class="collection-progress-bar-fill${isMaxed ? ' maxed' : ''}" style="width:${pct}%;"></div>
+                </div>
+                <div class="collection-progress-dots">${dotsHtml}</div>
+            </div>
+        `;
     }
 
     function openAvatarSelector() {
         if(selectedProfileUser !== currentUser.username) return;
         document.getElementById('avatarSelectorModal').style.display = 'flex';
         const grid = document.getElementById('avatarSelectorGrid'); grid.innerHTML = '';
+
+        // Destaca a moldura atualmente ativa
+        document.querySelectorAll('#frameSelectorRow [data-frame]').forEach(b => {
+            b.style.opacity = (b.dataset.frame === (currentUser.avatarFrame || 'frame-style-1')) ? '1' : '0.45';
+        });
 
         // Apenas avatares no cofre que NÃO estão em custódia/listados no mercado
         const availableAssets = savedAssets.filter(a => a.isListed === false && a.forSale === false);
@@ -3733,6 +3811,22 @@ async function logoutSession() {
             div.innerHTML = `<div class="album-preview-wrapper"><img src="${a.imgSrc}"></div>`;
             grid.appendChild(div);
         });
+    }
+
+    // ── MOLDURAS CYBERPUNK: 2 modelos pré-definidos (frame-style-1 "NEON HEXLOCK"
+    // e frame-style-2 "CIRCUIT RING"). Substitui o antigo design de TV antiga. ──
+    async function setAvatarFrame(frameId) {
+        if(selectedProfileUser !== currentUser.username) return;
+        currentUser.avatarFrame = frameId;
+        const avatarFrameWrap = document.getElementById('avatarFrameWrap');
+        if (avatarFrameWrap) {
+            avatarFrameWrap.classList.remove('frame-style-1', 'frame-style-2');
+            avatarFrameWrap.classList.add(frameId);
+        }
+        document.querySelectorAll('#frameSelectorRow [data-frame]').forEach(b => {
+            b.style.opacity = (b.dataset.frame === frameId) ? '1' : '0.45';
+        });
+        await updateProfileInSupabase(currentUser.id, { avatarFrame: frameId });
     }
     function closeAvatarSelector() { document.getElementById('avatarSelectorModal').style.display = 'none'; }
 
@@ -3771,16 +3865,18 @@ async function logoutSession() {
         defaultSection.appendChild(defaultGrid);
         grid.appendChild(defaultSection);
 
-        // Event-tagged cards only
-        const eventItems = savedAssets.filter(i => i.tags && i.tags.includes('evento') || i.isFused);
-        const legacyLegendary = savedAssets.filter(i => i.rarityType === 'legendary' && !(i.tags && i.tags.includes('evento')) && !i.isFused);
+        // FILTRO ESTRITO: apenas itens com a tag 'evento'. Cards 'Fundidos' (Fused)
+        // são EXCLUÍDOS mesmo que tragam a tag evento, pois não têm o tamanho/proporção
+        // corretos para banner. Itens lendários "legados" sem a tag também não entram mais —
+        // a regra agora é estritamente por tag, conforme solicitado.
+        const eventItems = savedAssets.filter(i => i.tags && i.tags.includes('evento') && !i.isFused);
 
         const eventSection = document.createElement('div');
         eventSection.innerHTML = '<div style="font-size:0.55rem; color:#ff00ff; letter-spacing:2px; margin:12px 0 8px;">BANNERS DE EVENTO (CARDS TAG: EVENTO)</div>';
 
-        const allEventCards = [...eventItems, ...legacyLegendary];
+        const allEventCards = eventItems;
         if (allEventCards.length === 0) {
-            eventSection.innerHTML += '<div style="color:#666; font-size:0.6rem; padding:8px;">Nenhum card de evento no cofre. Cards [LENDÁRIO] ou com tag Evento desbloqueiam banners personalizados.</div>';
+            eventSection.innerHTML += '<div style="color:#666; font-size:0.6rem; padding:8px;">Nenhum card de evento elegível no cofre. Apenas cards com tag [EVENTO] (não-fundidos) desbloqueiam banners personalizados.</div>';
         } else {
             allEventCards.forEach(item => {
                 const row = document.createElement('div');
@@ -3809,19 +3905,44 @@ async function logoutSession() {
     async function viewExternalProfile(username) {
         closeInspectModal();
         const p = await fetchProfileByUsername(username);
+        // BUGFIX (redirecionamento): troca a tela ANTES de popular os dados,
+        // e usa skipProfileReload=true para impedir que navigateTo('profile')
+        // recarregue o perfil do usuário logado por cima do perfil-alvo.
+        navigateTo('profile', true);
         if(p) {
             await viewTargetUserCollection(p.username, p.code, p.bio, p.avatar, p.banner, p.username === currentUser.username);
         } else {
             await viewTargetUserCollection(username, "#9999", "Membro estável.", "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", "", false);
         }
-        navigateTo('profile');
+    }
+
+    function toggleBioEdit() {
+        const textarea = document.getElementById('inputBio');
+        const actions = document.getElementById('bioEditActions');
+        const btn = document.getElementById('btnEditBio');
+        if (!textarea) return;
+        textarea.value = currentUser.bio || '';
+        textarea.classList.add('active');
+        actions.classList.add('active');
+        btn.style.display = 'none';
+        textarea.focus();
+    }
+
+    function cancelBioEdit() {
+        const textarea = document.getElementById('inputBio');
+        const actions = document.getElementById('bioEditActions');
+        const btn = document.getElementById('btnEditBio');
+        if (textarea) textarea.classList.remove('active');
+        if (actions) actions.classList.remove('active');
+        if (btn) btn.style.display = '';
     }
 
     async function saveProfileCustoms() {
-        const bioVal = document.getElementById('inputBio').value;
+        const bioVal = document.getElementById('inputBio').value.trim();
         currentUser.bio = bioVal;
         const bioView = document.getElementById('profBioView');
         if (bioView) bioView.innerText = bioVal;
+        cancelBioEdit();
         await updateProfileInSupabase(currentUser.id, { bio: bioVal });
     }
 
