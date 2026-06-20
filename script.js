@@ -1,74 +1,408 @@
 // =========================================================
-// DROP STATION — PARTE 1/4: AUTH (SUPABASE)
+// DROP STATION — PARTE 4/4: FUSÃO / ALQUIMIA (SUPABASE)
 // SUBSTITUI no script.js original:
-//   - bloco "PERSISTÊNCIA DA SESSÃO ATIVA" (saveCurrentSession / restoreCurrentSession)
-//   - bloco "REGISTRY CENTRALIZADO DE UTILIZADORES" (REGISTRY_KEY, SEED_USERS,
-//     loadRegistry, saveRegistry, registryGet, registrySet, initRegistry IIFE)
-//   - função handleAuthSubmit
-//   - função logoutSession
-// MANTÉM como está: switchAuthMode, sanitizeInput, validateUsername,
-//   RESERVED_USERNAMES, navigateTo, handleProfileNavClick
-// SUBSTITUI TAMBÉM: validatePassword (regras de força mais rígidas)
+//   - função forjarFusao
+//   - função fuseCards
+// REMOVE (deixou de existir desde a Parte 1):
+//   - o bloco de persistência antigo dentro de fuseCards que chamava
+//     registryGet(currentUser.username) / registrySet(...) — essas
+//     funções não existem mais, cada mudança agora é gravada direto
+//     no Supabase no momento em que acontece.
+// MANTÉM como está: renderFusedCardVisual, regenerateQrSignature,
+//   attachProvenance, registerFusionForBadges, triggerAncestralFlash,
+//   buildStoriesMarquee, saveGlobalFeed, pushLedger, ITEMS_DB.
+//
+// O QUE MUDOU:
+//   1) `modificadores.forEach(m => consumeInventoryItem(m.itemId))`
+//      virou `for (const m of modificadores) { await consumeInventoryItem(m.itemId); }`
+//      (consumeInventoryItem é assíncrona desde a Parte 3).
+//   2) Ambas as funções agora são `async` (precisam dos awaits acima
+//      e dos awaits novos abaixo).
+//   3) fuseCards() agora persiste tudo no Supabase no momento certo:
+//        - card(s) consumido(s) na fusão → deleteCardFromSupabase(_dbId)
+//        - card novo gerado (resultado comum ou raro)  → insertCardToSupabase(...)
+//        - se o Núcleo de Backup salvar o card principal (c1), ele
+//          NÃO é tocado no banco — só o card sacrificado (c2) é apagado.
+//   4) forjarFusao() (não usada em lugar nenhum do app no momento, mas
+//      mantida coerente) agora também persiste a evolução do card
+//      principal via updateCardInSupabase e apaga o sacrificado.
+//
+// INTEGRAÇÃO:
+//   No script.js, localiza o bloco que começa em
+//     "function forjarFusao(cardPrincipal, cardSacrificado, modificadores = []) {"
+//   e vai até o final de
+//     "function fuseCards(id1, id2, modificadores = []) { ... }"
+//   (esse bloco fica dentro do wrapper principal do app, perto do
+//   painel de Alquimia). Apaga essas duas funções inteiras e cola as
+//   versões abaixo no final do ficheiro, junto com as Partes 2 e 3.
+//   O botão "⚡ EXECUTAR FUSÃO" no index.html chama fuseCards(...) sem
+//   `await` — não precisa mexer no HTML, função async funciona normal
+//   sendo chamada "fire-and-forget" a partir de um onclick.
 // =========================================================
 
-const sb = window.supabaseClient;
+async function forjarFusao(cardPrincipal, cardSacrificado, modificadores = []) {
+    const score = c => c.rarityType === 'legendary' ? 3 : c.rarityType === 'epic' ? 2 : 1;
+    const total = score(cardPrincipal) + score(cardSacrificado);
 
-let currentUser = {
-    loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
-    bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
-    followers: 12, following: 4, followedByMe: false,
-    inventory: [] // populado na Parte 3 (inventário)
-};
+    let ps, pb;
+    if (total >= 6)      { ps = 0.70; pb = 0.10; }
+    else if (total >= 4) { ps = 0.45; pb = 0.15; }
+    else if (total >= 3) { ps = 0.25; pb = 0.20; }
+    else                  { ps = 0.10; pb = 0.25; }
 
-// ── Username "@alias" <-> email sintético exigido pelo Supabase Auth ──
-function usernameToEmail(username) {
-    const clean = username.replace(/^@/, '').toLowerCase();
-    return `${clean}@dropstation.app`;
-}
+    let nucleoBackupAtivo = false;
+    let forcedPalette = null;
+    let fusionCountBonus = 0;
 
-// =========================================================
-// SEGURANÇA: REGRAS DE FORÇA DA SENHA
-// (substitui o validatePassword original, que só exigia 6 chars)
-// =========================================================
-function validatePassword(raw) {
-    if (!raw || raw.length < 8) return { ok: false, msg: 'Chave deve ter no mínimo 8 caracteres.' };
-    if (raw.length > 128) return { ok: false, msg: 'Chave demasiado longa (máx. 128 chars).' };
-    if (!/[a-z]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 letra minúscula.' };
-    if (!/[A-Z]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 letra maiúscula.' };
-    if (!/[0-9]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 número.' };
-    const COMMON_WEAK = ['12345678', 'password', 'senha123', 'qwerty123', '11111111', 'abc12345', 'Password1'];
-    if (COMMON_WEAK.some(w => w.toLowerCase() === raw.toLowerCase())) {
-        return { ok: false, msg: 'Chave demasiado comum/fraca. Escolhe outra.' };
+    modificadores.forEach(m => {
+        const tpl = ITEMS_DB[m.templateId];
+        if (!tpl) return;
+        if (tpl.effect.type === 'SURVIVAL_BONUS')  ps = Math.min(0.95, ps + tpl.effect.value);
+        if (tpl.effect.type === 'INSURANCE_BREAK')  nucleoBackupAtivo = true;
+        if (tpl.effect.type === 'FORCE_PALETTE')    forcedPalette = tpl.effect.value;
+        if (tpl.effect.type === 'OVERCLOCK') {
+            pb = Math.min(0.95, pb + tpl.effect.riskDelta);
+            fusionCountBonus += tpl.effect.fusionCountBonus;
+        }
+    });
+    pb = Math.max(0, Math.min(1 - ps, pb)); // normaliza, nunca deixa ps+pb > 1
+
+    const roll = Math.random();
+    const fusionId = `FUS-${(cardPrincipal.fusion_count || 0).toString().padStart(4, '0')}`;
+
+    // Consome itens-moeda e modificadores usados (independente do resultado)
+    // ⚠️ agora aguarda cada consumo terminar no Supabase antes de seguir
+    for (const m of modificadores) { await consumeInventoryItem(m.itemId); }
+
+    if (roll < pb) {
+        if (nucleoBackupAtivo) {
+            return { resultado: 'seguro_ativado', cardPrincipal, roll, ps, pb,
+                mensagem: 'Núcleo de Backup absorveu a falha — card principal preservado.' };
+        }
+        // destruição total: nenhum dos dois sobrevive
+        if (cardPrincipal._dbId) await deleteCardFromSupabase(cardPrincipal._dbId);
+        if (cardSacrificado._dbId) await deleteCardFromSupabase(cardSacrificado._dbId);
+        return { resultado: 'destruicao_total', cardsPerdidos: [cardPrincipal.id, cardSacrificado.id], roll, ps, pb };
     }
-    return { ok: true };
+
+    // SUCESSO: card principal sobrevive e evolui
+    cardPrincipal.fusion_count = (cardPrincipal.fusion_count || 0) + 1 + fusionCountBonus;
+    cardPrincipal.genetic_history = cardPrincipal.genetic_history || [];
+    cardPrincipal.genetic_history.push({
+        fusionId, ts: Date.now(),
+        sacrificedCardId: cardSacrificado.id,
+        sacrificedSnapshot: { rarityType: cardSacrificado.rarityType, styleName: cardSacrificado.styleName },
+        itemsConsumidos: modificadores.map(m => m.itemId),
+        survivalRollResult: roll,
+        mutation: forcedPalette ? { huePalette: forcedPalette } : null
+    });
+    cardPrincipal.eliteEligible = cardPrincipal.fusion_count >= 3;
+    regenerateQrSignature(cardPrincipal); // estado mudou → QR muta
+
+    // ── persiste a evolução do card principal no Supabase ──
+    await updateCardInSupabase(cardPrincipal, {
+        fusion_count: cardPrincipal.fusion_count,
+        eliteEligible: cardPrincipal.eliteEligible,
+        genetic_history: cardPrincipal.genetic_history,
+        qr_code_hash: cardPrincipal.qr_code_hash,
+        qr_payload_url: cardPrincipal.qr_payload_url
+    });
+    // ── apaga o card sacrificado, que deixou de existir ──
+    if (cardSacrificado._dbId) await deleteCardFromSupabase(cardSacrificado._dbId);
+
+    return { resultado: 'sucesso', cardPrincipal, fusionId, roll, ps, pb, forcedPalette };
 }
 
-// =========================================================
-// SEGURANÇA: ANTI-BRUTEFORCE NO LOGIN (client-side)
-// Trava tentativas após N falhas seguidas. Isso é só uma camada
-// de UX/atrito — a proteção real fica no painel Supabase:
-// Authentication → Settings → habilite "Leaked password protection",
-// reduza o rate limit de signInWithPassword e ative captcha (hCaptcha/Turnstile).
-// =========================================================
-const LOGIN_LOCK_KEY = 'dr0p_login_attempts';
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_MS = 30000; // 30s
+async function fuseCards(id1, id2, modificadores = []) {
+    if (!id1 || !id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Seleciona 2 cards diferentes.' : 'Select 2 different cards.', 'error'); return; }
+    if (id1 === id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Os 2 cards devem ser diferentes.' : 'Both cards must be different.', 'error'); return; }
 
-function getLoginAttemptState() {
-    try { return JSON.parse(sessionStorage.getItem(LOGIN_LOCK_KEY)) || { count: 0, lockedUntil: 0 }; }
-    catch (e) { return { count: 0, lockedUntil: 0 }; }
-}
-function setLoginAttemptState(state) {
-    try { sessionStorage.setItem(LOGIN_LOCK_KEY, JSON.stringify(state)); } catch (e) {}
-}
-function registerFailedLogin() {
-    const state = getLoginAttemptState();
-    state.count += 1;
-    if (state.count >= MAX_LOGIN_ATTEMPTS) state.lockedUntil = Date.now() + LOCKOUT_MS;
-    setLoginAttemptState(state);
-}
-function clearLoginAttempts() {
-    setLoginAttemptState({ count: 0, lockedUntil: 0 });
+    const c1 = savedAssets.find(a => a.id === id1);
+    const c2 = savedAssets.find(a => a.id === id2);
+    if (!c1 || !c2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Card não encontrado no cofre.' : 'Card not found in vault.', 'error'); return; }
+    if (c1.isListed || c2.isListed) { showCyberAlert('🔒 CUSTÓDIA ATIVA', currentLang === 'PT' ? 'Cards em custódia no mercado não podem ser fundidos.' : 'Cards listed on market cannot be fused.', 'error'); return; }
+
+    // Snapshot antes de qualquer alteração
+    const snap1 = {...c1}; const snap2 = {...c2};
+
+    const score = (c) => c.rarityType === 'legendary' ? 3 : c.rarityType === 'epic' ? 2 : 1;
+    const total = score(c1) + score(c2);
+
+    let ps, pb;
+    if (total >= 6)      { ps = 0.70; pb = 0.10; }
+    else if (total >= 4) { ps = 0.45; pb = 0.15; }
+    else if (total >= 3) { ps = 0.25; pb = 0.20; }
+    else                 { ps = 0.10; pb = 0.25; }
+
+    // ── ALQUIMIA AVANÇADA: aplica efeito dos itens modificadores selecionados ──
+    let nucleoBackupAtivo = false;
+    let forcedPalette = null;
+    let fusionCountBonus = 0;
+    modificadores.forEach(m => {
+        const tpl = ITEMS_DB[m.templateId];
+        if (!tpl) return;
+        if (tpl.effect.type === 'SURVIVAL_BONUS') ps = Math.min(0.95, ps + tpl.effect.value);
+        if (tpl.effect.type === 'INSURANCE_BREAK') nucleoBackupAtivo = true;
+        if (tpl.effect.type === 'FORCE_PALETTE') forcedPalette = tpl.effect.value;
+        if (tpl.effect.type === 'OVERCLOCK') {
+            pb = Math.min(0.95, pb + tpl.effect.riskDelta);
+            fusionCountBonus += tpl.effect.fusionCountBonus;
+        }
+    });
+    pb = Math.max(0, Math.min(1 - ps, pb)); // normaliza, nunca deixa ps+pb > 1
+
+    // consome itens já na entrada da fusão — agora aguarda cada baixa no Supabase
+    for (const m of modificadores) { await consumeInventoryItem(m.itemId); }
+
+    const roll = Math.random();
+
+    // ── FASE 1: animação visual do painel de alquimia ──────────────
+    const alchPanel = document.getElementById('alchemyPanel');
+    alchPanel.classList.add('alchemy-fusing');
+    playSynthSound('click');
+    speakPhrase("Iniciando fusão. Aguarde a estabilização.", "Initiating fusion sequence. Stand by.");
+
+    setTimeout(() => {
+        alchPanel.classList.remove('alchemy-fusing');
+
+        // ── FASE 2: overlay de glitch por 1500ms ───────────────────────
+        const glitchOverlay = document.createElement('div');
+        glitchOverlay.id = 'fusionGlitchOverlay';
+        glitchOverlay.className = 'fusion-glitch-active';
+        Object.assign(glitchOverlay.style, {
+            position:       'fixed',
+            inset:          '0',
+            zIndex:         '9999',
+            background:     'rgba(5, 5, 7, 0.92)',
+            display:        'flex',
+            flexDirection:  'column',
+            alignItems:     'center',
+            justifyContent: 'center',
+            gap:            '18px',
+            pointerEvents:  'all',
+        });
+
+        // Camada de flash de luz, dispara em pulsos aleatórios durante o overlay
+        const flashLayer = document.createElement('div');
+        flashLayer.className = 'fusion-flash-layer';
+        glitchOverlay.appendChild(flashLayer);
+
+        // Trepidação de tela (shake) no body inteiro durante a fusão
+        document.body.classList.add('fusion-screen-shake');
+
+        // Som de "máquina" em loop curto enquanto o overlay está ativo
+        playTerminalSound('alchemy');
+        const glitchSoundTimer = setInterval(() => playSynthSound('click'), 350);
+        // Flashes de luz em instantes aleatórios dentro da janela de 1500ms
+        const flashTimers = [300, 650, 1000, 1250].map(delay =>
+            setTimeout(() => {
+                flashLayer.classList.add('flash-pulse');
+                setTimeout(() => flashLayer.classList.remove('flash-pulse'), 90);
+                playSynthSound('click');
+            }, delay)
+        );
+
+        // Texto principal com efeito glitch
+        const glitchLabel = document.createElement('div');
+        glitchLabel.className = 'loading-glitch loading-glitch-cursor';
+        glitchLabel.setAttribute('data-text', currentLang === 'PT' ? 'EXECUTANDO_FUSÃO...' : 'EXECUTING_FUSION...');
+        glitchLabel.textContent = currentLang === 'PT' ? 'EXECUTANDO_FUSÃO...' : 'EXECUTING_FUSION...';
+        Object.assign(glitchLabel.style, { fontSize: '1.4rem', letterSpacing: '4px' });
+
+        // Linha de status secundária
+        const glitchSub = document.createElement('div');
+        glitchSub.style.cssText = 'font-family:"Space Mono",monospace; font-size:0.6rem; color:#444466; letter-spacing:2px;';
+        const subMessages = [
+            'QUEBRANDO VÍNCULOS MOLECULARES...',
+            'RECOMBINANDO SEQUÊNCIA DE DNA DIGITAL...',
+            'INSTABILIDADE DE REDE DETECTADA...',
+            'SINCRONIZANDO MATRIZ DE RARIDADE...',
+        ];
+        glitchSub.textContent = subMessages[Math.floor(Math.random() * subMessages.length)];
+
+        // Barra de progresso de terminal
+        const glitchBar = document.createElement('span');
+        glitchBar.className = 'loading-glitch-bar';
+        Object.assign(glitchBar.style, { width: '260px', display: 'block' });
+
+        // Scanline sobreposta
+        const scanline = document.createElement('div');
+        scanline.className = 'loading-glitch-scanline';
+
+        glitchOverlay.appendChild(scanline);
+        glitchOverlay.appendChild(glitchLabel);
+        glitchOverlay.appendChild(glitchSub);
+        glitchOverlay.appendChild(glitchBar);
+        document.body.appendChild(glitchOverlay);
+
+        // ── FASE 3: após 1500ms, remove glitch e processa resultado ───
+        setTimeout(async () => {
+            clearInterval(glitchSoundTimer);
+            document.body.classList.remove('fusion-screen-shake');
+            glitchOverlay.remove();
+
+            // Remove cartas originais ANTES de qualquer resultado
+            // (Núcleo de Backup: se a fusão falhar, o card principal (c1) é preservado)
+            const insuranceWillSave = nucleoBackupAtivo && roll < pb;
+            savedAssets = savedAssets.filter(a => a.id !== id1 && a.id !== id2);
+            marketAssets = marketAssets.filter(m => m.id !== id1 && m.id !== id2);
+            saveMarket(marketAssets);
+            if (insuranceWillSave) savedAssets.push(snap1); // c2 é consumido pelo seguro; c1 retorna ao cofre
+
+            // ── SUPABASE: apaga do banco os cards realmente consumidos ──
+            // Se o seguro salvou c1, só c2 sai do banco; senão, os dois saem.
+            if (insuranceWillSave) {
+                if (snap2._dbId) await deleteCardFromSupabase(snap2._dbId);
+            } else {
+                if (snap1._dbId) await deleteCardFromSupabase(snap1._dbId);
+                if (snap2._dbId) await deleteCardFromSupabase(snap2._dbId);
+            }
+
+            let result, fusedCard, alertTitle, alertMsg, alertType;
+
+            if (roll < pb) {
+                if (insuranceWillSave) {
+                    // SEGURO ATIVADO: Núcleo de Backup absorve a falha — c1 sobrevive intacto
+                    result = 'seguro_ativado';
+                    alertTitle = currentLang === 'PT' ? '🛡️ SEGURO ATIVADO' : '🛡️ INSURANCE TRIGGERED';
+                    alertMsg   = currentLang === 'PT'
+                        ? `O <b>Núcleo de Backup</b> quebrou no lugar do card principal.<br><b>${id1}</b> foi preservado intacto. <b>${id2}</b> foi perdido.`
+                        : `The <b>Backup Core</b> shattered in place of the main card.<br><b>${id1}</b> survived intact. <b>${id2}</b> was lost.`;
+                    alertType = 'warn';
+                    playSynthSound('success');
+                    speakPhrase("Seguro de alquimia ativado. Card principal preservado.", "Alchemy insurance triggered. Main card preserved.");
+                } else {
+                    // FALHA: cartas quebram — sem novo card
+                    result = 'break';
+                    alertTitle = currentLang === 'PT' ? '💀 FUSÃO DESTRUÍDA' : '💀 FUSION DESTROYED';
+                    alertMsg   = currentLang === 'PT'
+                        ? `Cards <b>${id1}</b> e <b>${id2}</b> foram destruídos na fusão instável. Nenhum ativo gerado.`
+                        : `Cards <b>${id1}</b> and <b>${id2}</b> were destroyed in the unstable fusion. No asset generated.`;
+                    alertType = 'error';
+                    triggerAncestralFlash('#ff0044'); // flash vermelho na quebra
+                    playSynthSound('shatter');
+                    speakPhrase("Fusão destruída. Perda total.", "Fusion destroyed. Total loss.");
+                }
+
+            } else if (roll < pb + (1 - ps - pb)) {
+                // ITEM COMUM
+                result = 'common';
+                const newId = "#" + Math.floor(100000 + Math.random() * 900000);
+                const fusedVisual = await renderFusedCardVisual(snap1.imgSrc);
+                fusedCard = {
+                    id: newId, rarityType: 'common', rarityName: 'COMUM', rarityNameEN: 'COMMON',
+                    styleName: 'RESÍDUO [FUSED]', styleNameEN: 'RESIDUE [FUSED]',
+                    creator: currentUser.username, registered: true, exposed: false,
+                    forSale: false, isListed: false, price: 0,
+                    imgSrc: fusedVisual, isFused: true, tags: ['fused'],
+                    fusion_count: 0, genetic_history: [] // resíduo instável — linhagem não sobrevive
+                };
+                // ── PROVENIÊNCIA: novo hash exclusivo do card fundido ──
+                attachProvenance(fusedCard);
+                savedAssets.push(fusedCard);
+                // ── SUPABASE: grava o novo card resultante da fusão ──
+                const insertedCommon = await insertCardToSupabase(fusedCard, currentUser.id);
+                if (!insertedCommon) console.error('fuseCards: falha ao gravar card comum no Supabase.');
+                alertTitle = currentLang === 'PT' ? '◆ FUSÃO PARCIAL' : '◆ PARTIAL FUSION';
+                alertMsg   = currentLang === 'PT'
+                    ? `Fusão instável resultou num card comum.<br><b>${newId}</b> — <span style="color:#aaa">COMUM</span>`
+                    : `Unstable fusion resulted in a common card.<br><b>${newId}</b> — <span style="color:#aaa">COMMON</span>`;
+                alertType = 'warn';
+                playSynthSound('success');
+                speakPhrase("Fusão parcial. Item comum gerado.", "Partial fusion. Common item generated.");
+
+            } else {
+                // SUCESSO — rarity baseada nos inputs + 1% Ancestral
+                result = 'success';
+                const rarityRoll = Math.random();
+                let newRarity;
+                if (rarityRoll < 0.01) {
+                    newRarity = 'ancestral';
+                } else if (total >= 6)      newRarity = rarityRoll < 0.75 ? 'legendary' : 'epic';
+                else if (total >= 4) newRarity = rarityRoll < 0.35 ? 'legendary' : 'epic';
+                else if (total >= 3) newRarity = rarityRoll < 0.08 ? 'legendary' : 'epic';
+                else                 newRarity = rarityRoll < 0.03 ? 'legendary' : 'epic';
+
+                const rarityColors = {
+                    ancestral: '#ff007f',
+                    legendary: '#00ffff',
+                    epic:      '#ffaa00'
+                };
+                const rN   = newRarity === 'ancestral' ? 'ANCESTRAL' : newRarity === 'legendary' ? 'LENDÁRIO' : 'ÉPICO';
+                const rNEN = newRarity === 'ancestral' ? 'ANCESTRAL' : newRarity === 'legendary' ? 'LEGENDARY' : 'EPIC';
+                const wc   = rarityColors[newRarity] || '#aaaaaa';
+                const nameParts = [snap1.styleName.split(' ')[0], snap2.styleName.split(' ')[0]];
+                const fusedStyle = nameParts.join('×') + ' [FUSED]';
+                const newId = "#" + Math.floor(100000 + Math.random() * 900000);
+                const baseVisualSrc = Math.random() > 0.5 ? snap1.imgSrc : snap2.imgSrc;
+                const fusedVisual = await renderFusedCardVisual(baseVisualSrc, forcedPalette);
+
+                // Flash ancestral (rosa) se for ancestral
+                if (newRarity === 'ancestral') triggerAncestralFlash('#ff007f');
+
+                // ── SURVIVAL COUNTER: o card resultante herda o maior fusion_count
+                // entre os dois cards de origem + 1 (esta fusão) + bônus de Overclock ──
+                const inheritedFusionCount = Math.max(snap1.fusion_count || 0, snap2.fusion_count || 0) + 1 + fusionCountBonus;
+                const inheritedHistory = [
+                    ...(snap1.genetic_history || []), ...(snap2.genetic_history || []),
+                    {
+                        fusionId: `FUS-${inheritedFusionCount.toString().padStart(4, '0')}`,
+                        ts: Date.now(),
+                        sacrificedCardId: id1 === snap1.id ? id2 : id1,
+                        itemsConsumidos: modificadores.map(m => m.itemId),
+                        survivalRollResult: roll,
+                        mutation: forcedPalette ? { huePalette: forcedPalette } : null
+                    }
+                ];
+
+                fusedCard = {
+                    id: newId, rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
+                    styleName: fusedStyle, styleNameEN: fusedStyle,
+                    creator: currentUser.username, registered: true, exposed: false,
+                    forSale: false, isListed: false, price: 0,
+                    imgSrc: fusedVisual,
+                    isFused: true, tags: ['fused', 'evento'],
+                    fusion_count: inheritedFusionCount,
+                    genetic_history: inheritedHistory,
+                    eliteEligible: inheritedFusionCount >= 3
+                };
+                // ── PROVENIÊNCIA: hash exclusivo + herança de linhagem (já regenera o QR) ──
+                attachProvenance(fusedCard);
+                fusedCard.provenance.parentIds = [id1, id2]; // rastreabilidade de linhagem
+                savedAssets.push(fusedCard);
+                // ── SUPABASE: grava o novo card resultante da fusão ──
+                const insertedSuccess = await insertCardToSupabase(fusedCard, currentUser.id);
+                if (!insertedSuccess) console.error('fuseCards: falha ao gravar card fundido no Supabase.');
+                alertTitle = currentLang === 'PT' ? '⚗️ FUSÃO CONCLUÍDA' : '⚗️ FUSION COMPLETE';
+                alertMsg   = currentLang === 'PT'
+                    ? `Novo ativo gerado com sucesso!<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span><br>Estilo: <b>${fusedStyle}</b><br><small style="color:#666">Este card tem tag [EVENTO] e pode ser usado como banner.</small>`
+                    : `New asset successfully generated!<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span><br>Style: <b>${fusedStyle}</b><br><small style="color:#666">This card has [EVENT] tag and can be used as banner.</small>`;
+                alertType = 'success';
+                playTerminalSound('alchemy');
+            }
+
+            // Já não há registry local para persistir — cada mudança (cards
+            // apagados/criados, itens de inventário consumidos) já foi
+            // gravada direto no Supabase nos pontos acima.
+            if (result === 'success' || result === 'common') registerFusionForBadges();
+            // Fusões bem-sucedidas (comum ou épico/lendário) entram no feed global,
+            // para que apareçam na Home e sobrevivam ao F5 — não só no cofre do usuário.
+            if (result === 'success' || result === 'common') {
+                globalFeed.unshift({...fusedCard});
+                saveGlobalFeed(globalFeed);
+                buildStoriesMarquee();
+            }
+            if (result === 'success' || result === 'common') pushLedger(`${currentUser.username} fundiu ${id1}+${id2} → ${fusedCard.id} [${fusedCard.rarityNameEN}]`);
+            else if (result === 'seguro_ativado') pushLedger(`${currentUser.username} ativou Núcleo de Backup em ${id1}+${id2} — ${id1} preservado`);
+            else pushLedger(`${currentUser.username} tentou fundir ${id1}+${id2} — FALHA TOTAL`);
+
+            document.getElementById('alchemyPanel').style.display = 'none';
+            _alchSelected = { alpha: null, beta: null };
+            renderVaultGrid();
+            showCyberAlert(alertTitle, alertMsg, alertType);
+
+        }, 1500); // ← 1500ms de glitch antes do pop-up
+    }, 1200);
 }
 function secondsLoginLocked() {
     const state = getLoginAttemptState();
