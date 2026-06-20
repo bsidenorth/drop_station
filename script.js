@@ -1,408 +1,74 @@
 // =========================================================
-// DROP STATION — PARTE 4/4: FUSÃO / ALQUIMIA (SUPABASE)
+// DROP STATION — PARTE 1/4: AUTH (SUPABASE)
 // SUBSTITUI no script.js original:
-//   - função forjarFusao
-//   - função fuseCards
-// REMOVE (deixou de existir desde a Parte 1):
-//   - o bloco de persistência antigo dentro de fuseCards que chamava
-//     registryGet(currentUser.username) / registrySet(...) — essas
-//     funções não existem mais, cada mudança agora é gravada direto
-//     no Supabase no momento em que acontece.
-// MANTÉM como está: renderFusedCardVisual, regenerateQrSignature,
-//   attachProvenance, registerFusionForBadges, triggerAncestralFlash,
-//   buildStoriesMarquee, saveGlobalFeed, pushLedger, ITEMS_DB.
-//
-// O QUE MUDOU:
-//   1) `modificadores.forEach(m => consumeInventoryItem(m.itemId))`
-//      virou `for (const m of modificadores) { await consumeInventoryItem(m.itemId); }`
-//      (consumeInventoryItem é assíncrona desde a Parte 3).
-//   2) Ambas as funções agora são `async` (precisam dos awaits acima
-//      e dos awaits novos abaixo).
-//   3) fuseCards() agora persiste tudo no Supabase no momento certo:
-//        - card(s) consumido(s) na fusão → deleteCardFromSupabase(_dbId)
-//        - card novo gerado (resultado comum ou raro)  → insertCardToSupabase(...)
-//        - se o Núcleo de Backup salvar o card principal (c1), ele
-//          NÃO é tocado no banco — só o card sacrificado (c2) é apagado.
-//   4) forjarFusao() (não usada em lugar nenhum do app no momento, mas
-//      mantida coerente) agora também persiste a evolução do card
-//      principal via updateCardInSupabase e apaga o sacrificado.
-//
-// INTEGRAÇÃO:
-//   No script.js, localiza o bloco que começa em
-//     "function forjarFusao(cardPrincipal, cardSacrificado, modificadores = []) {"
-//   e vai até o final de
-//     "function fuseCards(id1, id2, modificadores = []) { ... }"
-//   (esse bloco fica dentro do wrapper principal do app, perto do
-//   painel de Alquimia). Apaga essas duas funções inteiras e cola as
-//   versões abaixo no final do ficheiro, junto com as Partes 2 e 3.
-//   O botão "⚡ EXECUTAR FUSÃO" no index.html chama fuseCards(...) sem
-//   `await` — não precisa mexer no HTML, função async funciona normal
-//   sendo chamada "fire-and-forget" a partir de um onclick.
+//   - bloco "PERSISTÊNCIA DA SESSÃO ATIVA" (saveCurrentSession / restoreCurrentSession)
+//   - bloco "REGISTRY CENTRALIZADO DE UTILIZADORES" (REGISTRY_KEY, SEED_USERS,
+//     loadRegistry, saveRegistry, registryGet, registrySet, initRegistry IIFE)
+//   - função handleAuthSubmit
+//   - função logoutSession
+// MANTÉM como está: switchAuthMode, sanitizeInput, validateUsername,
+//   RESERVED_USERNAMES, navigateTo, handleProfileNavClick
+// SUBSTITUI TAMBÉM: validatePassword (regras de força mais rígidas)
 // =========================================================
 
-async function forjarFusao(cardPrincipal, cardSacrificado, modificadores = []) {
-    const score = c => c.rarityType === 'legendary' ? 3 : c.rarityType === 'epic' ? 2 : 1;
-    const total = score(cardPrincipal) + score(cardSacrificado);
+const sb = window.supabaseClient;
 
-    let ps, pb;
-    if (total >= 6)      { ps = 0.70; pb = 0.10; }
-    else if (total >= 4) { ps = 0.45; pb = 0.15; }
-    else if (total >= 3) { ps = 0.25; pb = 0.20; }
-    else                  { ps = 0.10; pb = 0.25; }
+let currentUser = {
+    loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
+    bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
+    followers: 12, following: 4, followedByMe: false,
+    inventory: [] // populado na Parte 3 (inventário)
+};
 
-    let nucleoBackupAtivo = false;
-    let forcedPalette = null;
-    let fusionCountBonus = 0;
-
-    modificadores.forEach(m => {
-        const tpl = ITEMS_DB[m.templateId];
-        if (!tpl) return;
-        if (tpl.effect.type === 'SURVIVAL_BONUS')  ps = Math.min(0.95, ps + tpl.effect.value);
-        if (tpl.effect.type === 'INSURANCE_BREAK')  nucleoBackupAtivo = true;
-        if (tpl.effect.type === 'FORCE_PALETTE')    forcedPalette = tpl.effect.value;
-        if (tpl.effect.type === 'OVERCLOCK') {
-            pb = Math.min(0.95, pb + tpl.effect.riskDelta);
-            fusionCountBonus += tpl.effect.fusionCountBonus;
-        }
-    });
-    pb = Math.max(0, Math.min(1 - ps, pb)); // normaliza, nunca deixa ps+pb > 1
-
-    const roll = Math.random();
-    const fusionId = `FUS-${(cardPrincipal.fusion_count || 0).toString().padStart(4, '0')}`;
-
-    // Consome itens-moeda e modificadores usados (independente do resultado)
-    // ⚠️ agora aguarda cada consumo terminar no Supabase antes de seguir
-    for (const m of modificadores) { await consumeInventoryItem(m.itemId); }
-
-    if (roll < pb) {
-        if (nucleoBackupAtivo) {
-            return { resultado: 'seguro_ativado', cardPrincipal, roll, ps, pb,
-                mensagem: 'Núcleo de Backup absorveu a falha — card principal preservado.' };
-        }
-        // destruição total: nenhum dos dois sobrevive
-        if (cardPrincipal._dbId) await deleteCardFromSupabase(cardPrincipal._dbId);
-        if (cardSacrificado._dbId) await deleteCardFromSupabase(cardSacrificado._dbId);
-        return { resultado: 'destruicao_total', cardsPerdidos: [cardPrincipal.id, cardSacrificado.id], roll, ps, pb };
-    }
-
-    // SUCESSO: card principal sobrevive e evolui
-    cardPrincipal.fusion_count = (cardPrincipal.fusion_count || 0) + 1 + fusionCountBonus;
-    cardPrincipal.genetic_history = cardPrincipal.genetic_history || [];
-    cardPrincipal.genetic_history.push({
-        fusionId, ts: Date.now(),
-        sacrificedCardId: cardSacrificado.id,
-        sacrificedSnapshot: { rarityType: cardSacrificado.rarityType, styleName: cardSacrificado.styleName },
-        itemsConsumidos: modificadores.map(m => m.itemId),
-        survivalRollResult: roll,
-        mutation: forcedPalette ? { huePalette: forcedPalette } : null
-    });
-    cardPrincipal.eliteEligible = cardPrincipal.fusion_count >= 3;
-    regenerateQrSignature(cardPrincipal); // estado mudou → QR muta
-
-    // ── persiste a evolução do card principal no Supabase ──
-    await updateCardInSupabase(cardPrincipal, {
-        fusion_count: cardPrincipal.fusion_count,
-        eliteEligible: cardPrincipal.eliteEligible,
-        genetic_history: cardPrincipal.genetic_history,
-        qr_code_hash: cardPrincipal.qr_code_hash,
-        qr_payload_url: cardPrincipal.qr_payload_url
-    });
-    // ── apaga o card sacrificado, que deixou de existir ──
-    if (cardSacrificado._dbId) await deleteCardFromSupabase(cardSacrificado._dbId);
-
-    return { resultado: 'sucesso', cardPrincipal, fusionId, roll, ps, pb, forcedPalette };
+// ── Username "@alias" <-> email sintético exigido pelo Supabase Auth ──
+function usernameToEmail(username) {
+    const clean = username.replace(/^@/, '').toLowerCase();
+    return `${clean}@dropstation.app`;
 }
 
-async function fuseCards(id1, id2, modificadores = []) {
-    if (!id1 || !id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Seleciona 2 cards diferentes.' : 'Select 2 different cards.', 'error'); return; }
-    if (id1 === id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Os 2 cards devem ser diferentes.' : 'Both cards must be different.', 'error'); return; }
+// =========================================================
+// SEGURANÇA: REGRAS DE FORÇA DA SENHA
+// (substitui o validatePassword original, que só exigia 6 chars)
+// =========================================================
+function validatePassword(raw) {
+    if (!raw || raw.length < 8) return { ok: false, msg: 'Chave deve ter no mínimo 8 caracteres.' };
+    if (raw.length > 128) return { ok: false, msg: 'Chave demasiado longa (máx. 128 chars).' };
+    if (!/[a-z]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 letra minúscula.' };
+    if (!/[A-Z]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 letra maiúscula.' };
+    if (!/[0-9]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 número.' };
+    const COMMON_WEAK = ['12345678', 'password', 'senha123', 'qwerty123', '11111111', 'abc12345', 'Password1'];
+    if (COMMON_WEAK.some(w => w.toLowerCase() === raw.toLowerCase())) {
+        return { ok: false, msg: 'Chave demasiado comum/fraca. Escolhe outra.' };
+    }
+    return { ok: true };
+}
 
-    const c1 = savedAssets.find(a => a.id === id1);
-    const c2 = savedAssets.find(a => a.id === id2);
-    if (!c1 || !c2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Card não encontrado no cofre.' : 'Card not found in vault.', 'error'); return; }
-    if (c1.isListed || c2.isListed) { showCyberAlert('🔒 CUSTÓDIA ATIVA', currentLang === 'PT' ? 'Cards em custódia no mercado não podem ser fundidos.' : 'Cards listed on market cannot be fused.', 'error'); return; }
+// =========================================================
+// SEGURANÇA: ANTI-BRUTEFORCE NO LOGIN (client-side)
+// Trava tentativas após N falhas seguidas. Isso é só uma camada
+// de UX/atrito — a proteção real fica no painel Supabase:
+// Authentication → Settings → habilite "Leaked password protection",
+// reduza o rate limit de signInWithPassword e ative captcha (hCaptcha/Turnstile).
+// =========================================================
+const LOGIN_LOCK_KEY = 'dr0p_login_attempts';
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_MS = 30000; // 30s
 
-    // Snapshot antes de qualquer alteração
-    const snap1 = {...c1}; const snap2 = {...c2};
-
-    const score = (c) => c.rarityType === 'legendary' ? 3 : c.rarityType === 'epic' ? 2 : 1;
-    const total = score(c1) + score(c2);
-
-    let ps, pb;
-    if (total >= 6)      { ps = 0.70; pb = 0.10; }
-    else if (total >= 4) { ps = 0.45; pb = 0.15; }
-    else if (total >= 3) { ps = 0.25; pb = 0.20; }
-    else                 { ps = 0.10; pb = 0.25; }
-
-    // ── ALQUIMIA AVANÇADA: aplica efeito dos itens modificadores selecionados ──
-    let nucleoBackupAtivo = false;
-    let forcedPalette = null;
-    let fusionCountBonus = 0;
-    modificadores.forEach(m => {
-        const tpl = ITEMS_DB[m.templateId];
-        if (!tpl) return;
-        if (tpl.effect.type === 'SURVIVAL_BONUS') ps = Math.min(0.95, ps + tpl.effect.value);
-        if (tpl.effect.type === 'INSURANCE_BREAK') nucleoBackupAtivo = true;
-        if (tpl.effect.type === 'FORCE_PALETTE') forcedPalette = tpl.effect.value;
-        if (tpl.effect.type === 'OVERCLOCK') {
-            pb = Math.min(0.95, pb + tpl.effect.riskDelta);
-            fusionCountBonus += tpl.effect.fusionCountBonus;
-        }
-    });
-    pb = Math.max(0, Math.min(1 - ps, pb)); // normaliza, nunca deixa ps+pb > 1
-
-    // consome itens já na entrada da fusão — agora aguarda cada baixa no Supabase
-    for (const m of modificadores) { await consumeInventoryItem(m.itemId); }
-
-    const roll = Math.random();
-
-    // ── FASE 1: animação visual do painel de alquimia ──────────────
-    const alchPanel = document.getElementById('alchemyPanel');
-    alchPanel.classList.add('alchemy-fusing');
-    playSynthSound('click');
-    speakPhrase("Iniciando fusão. Aguarde a estabilização.", "Initiating fusion sequence. Stand by.");
-
-    setTimeout(() => {
-        alchPanel.classList.remove('alchemy-fusing');
-
-        // ── FASE 2: overlay de glitch por 1500ms ───────────────────────
-        const glitchOverlay = document.createElement('div');
-        glitchOverlay.id = 'fusionGlitchOverlay';
-        glitchOverlay.className = 'fusion-glitch-active';
-        Object.assign(glitchOverlay.style, {
-            position:       'fixed',
-            inset:          '0',
-            zIndex:         '9999',
-            background:     'rgba(5, 5, 7, 0.92)',
-            display:        'flex',
-            flexDirection:  'column',
-            alignItems:     'center',
-            justifyContent: 'center',
-            gap:            '18px',
-            pointerEvents:  'all',
-        });
-
-        // Camada de flash de luz, dispara em pulsos aleatórios durante o overlay
-        const flashLayer = document.createElement('div');
-        flashLayer.className = 'fusion-flash-layer';
-        glitchOverlay.appendChild(flashLayer);
-
-        // Trepidação de tela (shake) no body inteiro durante a fusão
-        document.body.classList.add('fusion-screen-shake');
-
-        // Som de "máquina" em loop curto enquanto o overlay está ativo
-        playTerminalSound('alchemy');
-        const glitchSoundTimer = setInterval(() => playSynthSound('click'), 350);
-        // Flashes de luz em instantes aleatórios dentro da janela de 1500ms
-        const flashTimers = [300, 650, 1000, 1250].map(delay =>
-            setTimeout(() => {
-                flashLayer.classList.add('flash-pulse');
-                setTimeout(() => flashLayer.classList.remove('flash-pulse'), 90);
-                playSynthSound('click');
-            }, delay)
-        );
-
-        // Texto principal com efeito glitch
-        const glitchLabel = document.createElement('div');
-        glitchLabel.className = 'loading-glitch loading-glitch-cursor';
-        glitchLabel.setAttribute('data-text', currentLang === 'PT' ? 'EXECUTANDO_FUSÃO...' : 'EXECUTING_FUSION...');
-        glitchLabel.textContent = currentLang === 'PT' ? 'EXECUTANDO_FUSÃO...' : 'EXECUTING_FUSION...';
-        Object.assign(glitchLabel.style, { fontSize: '1.4rem', letterSpacing: '4px' });
-
-        // Linha de status secundária
-        const glitchSub = document.createElement('div');
-        glitchSub.style.cssText = 'font-family:"Space Mono",monospace; font-size:0.6rem; color:#444466; letter-spacing:2px;';
-        const subMessages = [
-            'QUEBRANDO VÍNCULOS MOLECULARES...',
-            'RECOMBINANDO SEQUÊNCIA DE DNA DIGITAL...',
-            'INSTABILIDADE DE REDE DETECTADA...',
-            'SINCRONIZANDO MATRIZ DE RARIDADE...',
-        ];
-        glitchSub.textContent = subMessages[Math.floor(Math.random() * subMessages.length)];
-
-        // Barra de progresso de terminal
-        const glitchBar = document.createElement('span');
-        glitchBar.className = 'loading-glitch-bar';
-        Object.assign(glitchBar.style, { width: '260px', display: 'block' });
-
-        // Scanline sobreposta
-        const scanline = document.createElement('div');
-        scanline.className = 'loading-glitch-scanline';
-
-        glitchOverlay.appendChild(scanline);
-        glitchOverlay.appendChild(glitchLabel);
-        glitchOverlay.appendChild(glitchSub);
-        glitchOverlay.appendChild(glitchBar);
-        document.body.appendChild(glitchOverlay);
-
-        // ── FASE 3: após 1500ms, remove glitch e processa resultado ───
-        setTimeout(async () => {
-            clearInterval(glitchSoundTimer);
-            document.body.classList.remove('fusion-screen-shake');
-            glitchOverlay.remove();
-
-            // Remove cartas originais ANTES de qualquer resultado
-            // (Núcleo de Backup: se a fusão falhar, o card principal (c1) é preservado)
-            const insuranceWillSave = nucleoBackupAtivo && roll < pb;
-            savedAssets = savedAssets.filter(a => a.id !== id1 && a.id !== id2);
-            marketAssets = marketAssets.filter(m => m.id !== id1 && m.id !== id2);
-            saveMarket(marketAssets);
-            if (insuranceWillSave) savedAssets.push(snap1); // c2 é consumido pelo seguro; c1 retorna ao cofre
-
-            // ── SUPABASE: apaga do banco os cards realmente consumidos ──
-            // Se o seguro salvou c1, só c2 sai do banco; senão, os dois saem.
-            if (insuranceWillSave) {
-                if (snap2._dbId) await deleteCardFromSupabase(snap2._dbId);
-            } else {
-                if (snap1._dbId) await deleteCardFromSupabase(snap1._dbId);
-                if (snap2._dbId) await deleteCardFromSupabase(snap2._dbId);
-            }
-
-            let result, fusedCard, alertTitle, alertMsg, alertType;
-
-            if (roll < pb) {
-                if (insuranceWillSave) {
-                    // SEGURO ATIVADO: Núcleo de Backup absorve a falha — c1 sobrevive intacto
-                    result = 'seguro_ativado';
-                    alertTitle = currentLang === 'PT' ? '🛡️ SEGURO ATIVADO' : '🛡️ INSURANCE TRIGGERED';
-                    alertMsg   = currentLang === 'PT'
-                        ? `O <b>Núcleo de Backup</b> quebrou no lugar do card principal.<br><b>${id1}</b> foi preservado intacto. <b>${id2}</b> foi perdido.`
-                        : `The <b>Backup Core</b> shattered in place of the main card.<br><b>${id1}</b> survived intact. <b>${id2}</b> was lost.`;
-                    alertType = 'warn';
-                    playSynthSound('success');
-                    speakPhrase("Seguro de alquimia ativado. Card principal preservado.", "Alchemy insurance triggered. Main card preserved.");
-                } else {
-                    // FALHA: cartas quebram — sem novo card
-                    result = 'break';
-                    alertTitle = currentLang === 'PT' ? '💀 FUSÃO DESTRUÍDA' : '💀 FUSION DESTROYED';
-                    alertMsg   = currentLang === 'PT'
-                        ? `Cards <b>${id1}</b> e <b>${id2}</b> foram destruídos na fusão instável. Nenhum ativo gerado.`
-                        : `Cards <b>${id1}</b> and <b>${id2}</b> were destroyed in the unstable fusion. No asset generated.`;
-                    alertType = 'error';
-                    triggerAncestralFlash('#ff0044'); // flash vermelho na quebra
-                    playSynthSound('shatter');
-                    speakPhrase("Fusão destruída. Perda total.", "Fusion destroyed. Total loss.");
-                }
-
-            } else if (roll < pb + (1 - ps - pb)) {
-                // ITEM COMUM
-                result = 'common';
-                const newId = "#" + Math.floor(100000 + Math.random() * 900000);
-                const fusedVisual = await renderFusedCardVisual(snap1.imgSrc);
-                fusedCard = {
-                    id: newId, rarityType: 'common', rarityName: 'COMUM', rarityNameEN: 'COMMON',
-                    styleName: 'RESÍDUO [FUSED]', styleNameEN: 'RESIDUE [FUSED]',
-                    creator: currentUser.username, registered: true, exposed: false,
-                    forSale: false, isListed: false, price: 0,
-                    imgSrc: fusedVisual, isFused: true, tags: ['fused'],
-                    fusion_count: 0, genetic_history: [] // resíduo instável — linhagem não sobrevive
-                };
-                // ── PROVENIÊNCIA: novo hash exclusivo do card fundido ──
-                attachProvenance(fusedCard);
-                savedAssets.push(fusedCard);
-                // ── SUPABASE: grava o novo card resultante da fusão ──
-                const insertedCommon = await insertCardToSupabase(fusedCard, currentUser.id);
-                if (!insertedCommon) console.error('fuseCards: falha ao gravar card comum no Supabase.');
-                alertTitle = currentLang === 'PT' ? '◆ FUSÃO PARCIAL' : '◆ PARTIAL FUSION';
-                alertMsg   = currentLang === 'PT'
-                    ? `Fusão instável resultou num card comum.<br><b>${newId}</b> — <span style="color:#aaa">COMUM</span>`
-                    : `Unstable fusion resulted in a common card.<br><b>${newId}</b> — <span style="color:#aaa">COMMON</span>`;
-                alertType = 'warn';
-                playSynthSound('success');
-                speakPhrase("Fusão parcial. Item comum gerado.", "Partial fusion. Common item generated.");
-
-            } else {
-                // SUCESSO — rarity baseada nos inputs + 1% Ancestral
-                result = 'success';
-                const rarityRoll = Math.random();
-                let newRarity;
-                if (rarityRoll < 0.01) {
-                    newRarity = 'ancestral';
-                } else if (total >= 6)      newRarity = rarityRoll < 0.75 ? 'legendary' : 'epic';
-                else if (total >= 4) newRarity = rarityRoll < 0.35 ? 'legendary' : 'epic';
-                else if (total >= 3) newRarity = rarityRoll < 0.08 ? 'legendary' : 'epic';
-                else                 newRarity = rarityRoll < 0.03 ? 'legendary' : 'epic';
-
-                const rarityColors = {
-                    ancestral: '#ff007f',
-                    legendary: '#00ffff',
-                    epic:      '#ffaa00'
-                };
-                const rN   = newRarity === 'ancestral' ? 'ANCESTRAL' : newRarity === 'legendary' ? 'LENDÁRIO' : 'ÉPICO';
-                const rNEN = newRarity === 'ancestral' ? 'ANCESTRAL' : newRarity === 'legendary' ? 'LEGENDARY' : 'EPIC';
-                const wc   = rarityColors[newRarity] || '#aaaaaa';
-                const nameParts = [snap1.styleName.split(' ')[0], snap2.styleName.split(' ')[0]];
-                const fusedStyle = nameParts.join('×') + ' [FUSED]';
-                const newId = "#" + Math.floor(100000 + Math.random() * 900000);
-                const baseVisualSrc = Math.random() > 0.5 ? snap1.imgSrc : snap2.imgSrc;
-                const fusedVisual = await renderFusedCardVisual(baseVisualSrc, forcedPalette);
-
-                // Flash ancestral (rosa) se for ancestral
-                if (newRarity === 'ancestral') triggerAncestralFlash('#ff007f');
-
-                // ── SURVIVAL COUNTER: o card resultante herda o maior fusion_count
-                // entre os dois cards de origem + 1 (esta fusão) + bônus de Overclock ──
-                const inheritedFusionCount = Math.max(snap1.fusion_count || 0, snap2.fusion_count || 0) + 1 + fusionCountBonus;
-                const inheritedHistory = [
-                    ...(snap1.genetic_history || []), ...(snap2.genetic_history || []),
-                    {
-                        fusionId: `FUS-${inheritedFusionCount.toString().padStart(4, '0')}`,
-                        ts: Date.now(),
-                        sacrificedCardId: id1 === snap1.id ? id2 : id1,
-                        itemsConsumidos: modificadores.map(m => m.itemId),
-                        survivalRollResult: roll,
-                        mutation: forcedPalette ? { huePalette: forcedPalette } : null
-                    }
-                ];
-
-                fusedCard = {
-                    id: newId, rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
-                    styleName: fusedStyle, styleNameEN: fusedStyle,
-                    creator: currentUser.username, registered: true, exposed: false,
-                    forSale: false, isListed: false, price: 0,
-                    imgSrc: fusedVisual,
-                    isFused: true, tags: ['fused', 'evento'],
-                    fusion_count: inheritedFusionCount,
-                    genetic_history: inheritedHistory,
-                    eliteEligible: inheritedFusionCount >= 3
-                };
-                // ── PROVENIÊNCIA: hash exclusivo + herança de linhagem (já regenera o QR) ──
-                attachProvenance(fusedCard);
-                fusedCard.provenance.parentIds = [id1, id2]; // rastreabilidade de linhagem
-                savedAssets.push(fusedCard);
-                // ── SUPABASE: grava o novo card resultante da fusão ──
-                const insertedSuccess = await insertCardToSupabase(fusedCard, currentUser.id);
-                if (!insertedSuccess) console.error('fuseCards: falha ao gravar card fundido no Supabase.');
-                alertTitle = currentLang === 'PT' ? '⚗️ FUSÃO CONCLUÍDA' : '⚗️ FUSION COMPLETE';
-                alertMsg   = currentLang === 'PT'
-                    ? `Novo ativo gerado com sucesso!<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span><br>Estilo: <b>${fusedStyle}</b><br><small style="color:#666">Este card tem tag [EVENTO] e pode ser usado como banner.</small>`
-                    : `New asset successfully generated!<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span><br>Style: <b>${fusedStyle}</b><br><small style="color:#666">This card has [EVENT] tag and can be used as banner.</small>`;
-                alertType = 'success';
-                playTerminalSound('alchemy');
-            }
-
-            // Já não há registry local para persistir — cada mudança (cards
-            // apagados/criados, itens de inventário consumidos) já foi
-            // gravada direto no Supabase nos pontos acima.
-            if (result === 'success' || result === 'common') registerFusionForBadges();
-            // Fusões bem-sucedidas (comum ou épico/lendário) entram no feed global,
-            // para que apareçam na Home e sobrevivam ao F5 — não só no cofre do usuário.
-            if (result === 'success' || result === 'common') {
-                globalFeed.unshift({...fusedCard});
-                saveGlobalFeed(globalFeed);
-                buildStoriesMarquee();
-            }
-            if (result === 'success' || result === 'common') pushLedger(`${currentUser.username} fundiu ${id1}+${id2} → ${fusedCard.id} [${fusedCard.rarityNameEN}]`);
-            else if (result === 'seguro_ativado') pushLedger(`${currentUser.username} ativou Núcleo de Backup em ${id1}+${id2} — ${id1} preservado`);
-            else pushLedger(`${currentUser.username} tentou fundir ${id1}+${id2} — FALHA TOTAL`);
-
-            document.getElementById('alchemyPanel').style.display = 'none';
-            _alchSelected = { alpha: null, beta: null };
-            renderVaultGrid();
-            showCyberAlert(alertTitle, alertMsg, alertType);
-
-        }, 1500); // ← 1500ms de glitch antes do pop-up
-    }, 1200);
+function getLoginAttemptState() {
+    try { return JSON.parse(sessionStorage.getItem(LOGIN_LOCK_KEY)) || { count: 0, lockedUntil: 0 }; }
+    catch (e) { return { count: 0, lockedUntil: 0 }; }
+}
+function setLoginAttemptState(state) {
+    try { sessionStorage.setItem(LOGIN_LOCK_KEY, JSON.stringify(state)); } catch (e) {}
+}
+function registerFailedLogin() {
+    const state = getLoginAttemptState();
+    state.count += 1;
+    if (state.count >= MAX_LOGIN_ATTEMPTS) state.lockedUntil = Date.now() + LOCKOUT_MS;
+    setLoginAttemptState(state);
+}
+function clearLoginAttempts() {
+    setLoginAttemptState({ count: 0, lockedUntil: 0 });
 }
 function secondsLoginLocked() {
     const state = getLoginAttemptState();
@@ -461,6 +127,40 @@ async function createProfile(userId, username) {
     const { data, error } = await sb.from('profiles').insert(payload).select().single();
     if (error) { console.error('createProfile:', error.message); return null; }
     return data;
+}
+
+// =========================================================
+// PERFIL DE TERCEIROS: leitura/escrita por username
+// (substitui registryGet/registrySet, que liam/escreviam o
+// "registry" inteiro no localStorage; agora cada operação é
+// uma query direta à tabela `profiles` no Supabase)
+// =========================================================
+async function fetchProfileByUsername(username) {
+    const { data, error } = await sb.from('profiles').select('*').eq('username', username).maybeSingle();
+    if (error) { console.error('fetchProfileByUsername:', error.message); return null; }
+    return data;
+}
+
+// `fieldsCamel` usa as MESMAS chaves do objeto em memória (ex: { bumps: 120, bio: '...' }).
+// Funciona tanto para o currentUser (passa currentUser.id) como para outro usuário
+// (passa o id obtido via fetchProfileByUsername).
+const PROFILE_FIELD_TO_COLUMN = {
+    bumps: 'bumps', bio: 'bio', avatar: 'avatar', banner: 'banner',
+    status: 'status', following: 'following', code: 'code', username: 'username',
+    fusion_count: 'fusion_count'
+};
+async function updateProfileInSupabase(userId, fieldsCamel) {
+    if (!userId) { console.warn('updateProfileInSupabase: userId ausente, ignorando update remoto.'); return false; }
+    const updatePayload = {};
+    Object.keys(fieldsCamel).forEach(key => {
+        const col = PROFILE_FIELD_TO_COLUMN[key];
+        if (col) updatePayload[col] = fieldsCamel[key];
+    });
+    if (Object.keys(updatePayload).length === 0) return false;
+
+    const { error } = await sb.from('profiles').update(updatePayload).eq('id', userId);
+    if (error) { console.error('updateProfileInSupabase:', error.message); return false; }
+    return true;
 }
 
 function applyProfileToCurrentUser(profile) {
@@ -647,40 +347,6 @@ async function logoutSession() {
 // BOOT: tenta restaurar sessão ao carregar a página
 // =========================================================
 restoreCurrentSession();
-    function saveRegistry(reg) {
-        try { localStorage.setItem(REGISTRY_KEY, JSON.stringify(reg)); } catch(e) {}
-    }
-    function registryGet(username) {
-        // Lê do registry centralizado (fonte de verdade)
-        const reg = loadRegistry();
-        return reg[username] || null;
-    }
-    function registrySet(username, data) {
-        const reg = loadRegistry();
-        reg[username] = data;
-        saveRegistry(reg);
-        // Mantém compatibilidade com código legado que usa `user_${username}`
-        try { localStorage.setItem(`user_${username}`, JSON.stringify(data)); } catch(e) {}
-    }
-
-    // Inicialização: semeia utilizadores padrão se o registry ainda não existir
-    (function initRegistry() {
-        const reg = loadRegistry();
-        let changed = false;
-        SEED_USERS.forEach(u => {
-            if (!reg[u.username]) {
-                reg[u.username] = u;
-                // Retrocompatibilidade com chave individual
-                try { localStorage.setItem(`user_${u.username}`, JSON.stringify(u)); } catch(e) {}
-                changed = true;
-            }
-        });
-        if (changed) saveRegistry(reg);
-    })();
-
-    // Restaura sessão ativa (se existir) logo após o registry estar pronto
-    restoreCurrentSession();
-
 
     // =========================================================
     // PERSISTÊNCIA DO MERCADO (dr0p_market) — Ponto 1
@@ -1292,30 +958,6 @@ restoreCurrentSession();
         navigateTo('profile');
     }
 
-    function logoutSession() {
-        // Reseta o objeto currentUser para estado anônimo
-        currentUser = {
-            loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: fixedSessionCode,
-            bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
-            followers: 12, following: 4, followedByMe: false
-        };
-        // Limpa o estado de chat/propostas em memória — sem isso, a próxima
-        // conta logada no mesmo navegador herdava as threads da conta anterior.
-        messageThreads = {};
-        activeThreadUser = null;
-        savedAssets = [];
-        // Limpa APENAS a sessão ativa — registry e demais chaves preservados
-        localStorage.removeItem(CURRENT_USER_KEY);
-        document.getElementById('nav-btn-text').innerText = "ACESSAR TERMINAL";
-        document.getElementById('navVaultBtn').style.display = 'none';
-        document.getElementById('navMessagesBtn').style.display = 'none';
-        document.getElementById('navLogoutBtn').style.display = 'none';
-        const cBtn = document.getElementById('navContractsBtn'); if(cBtn) cBtn.style.display = 'none';
-        // navMarketBtn NÃO é escondido: visitantes deslogados podem navegar
-        // e visualizar o mercado/perfis, só não podem comprar/interagir.
-        navigateTo('engine');
-    }
-
     function switchAuthMode(mode) {
         authMode = mode;
         document.getElementById('authErrorMsg').style.display = 'none';
@@ -1350,69 +992,6 @@ restoreCurrentSession();
         if (RESERVED_USERNAMES.includes(lower)) return { ok: false, msg: 'Username reservado. Escolhe outro alias.' };
         if (!/^@?[a-zA-Z0-9_\-\.]{2,30}$/.test(clean)) return { ok: false, msg: 'Username inválido. Use apenas letras, números, _ ou -' };
         return { ok: true, value: clean.startsWith('@') ? clean : '@' + clean };
-    }
-
-    function validatePassword(raw) {
-        if (!raw || raw.length < 6) return { ok: false, msg: 'Chave deve ter no mínimo 6 caracteres.' };
-        if (raw.length > 128) return { ok: false, msg: 'Chave demasiado longa (máx. 128 chars).' };
-        return { ok: true };
-    }
-
-    function handleAuthSubmit(event) {
-        event.preventDefault();
-        const rawUser = document.getElementById('authUsername').value;
-        const rawPass = document.getElementById('authPassword').value;
-        const errorEl = document.getElementById('authErrorMsg');
-        errorEl.style.display = 'none';
-
-        // Validar username
-        const userCheck = validateUsername(rawUser);
-        if (!userCheck.ok) { errorEl.innerText = userCheck.msg; errorEl.style.display = 'block'; return; }
-        const formattedUser = userCheck.value;
-
-        // Validar password
-        const passCheck = validatePassword(rawPass);
-        if (!passCheck.ok) { errorEl.innerText = passCheck.msg; errorEl.style.display = 'block'; return; }
-
-        if (authMode === 'register') {
-            if (registryGet(formattedUser)) {
-                errorEl.innerText = "Este terminal alias já está registrado na rede."; errorEl.style.display = 'block'; return;
-            }
-            const newUserObj = {
-                username: formattedUser, password: rawPass, bumps: 100, code: fixedSessionCode,
-                bio: "Membro verificado.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "", savedAssets: []
-            };
-            registrySet(formattedUser, newUserObj);
-            showCyberAlert('// NÓ CONSOLIDADO //', 'Registo concluído. Realiza a conexão agora.', 'success');
-            switchAuthMode('login'); return;
-        }
-
-        const storedUser = registryGet(formattedUser);
-        if (!storedUser) { errorEl.innerText = "Nó de rede inexistente."; errorEl.style.display = 'block'; return; }
-        if (storedUser.password !== rawPass) { errorEl.innerText = "Assinatura incorreta."; errorEl.style.display = 'block'; return; }
-
-        const reg = loadRegistry();
-        const realFollowers = Object.values(reg).filter(u => u.following && u.following.includes && u.following.includes(formattedUser)).length;
-        const realFollowing = Array.isArray(storedUser.following) ? storedUser.following.length : 0;
-
-        currentUser = { ...storedUser, loggedIn: true, followers: realFollowers, following: realFollowing, followingList: storedUser.following || [], status: storedUser.status || 'online' };
-        // Garante que nenhuma thread/proposta de uma sessão anterior (de outra
-        // conta) sobreviva no estado em memória ao entrar com a conta nova.
-        messageThreads = {};
-        activeThreadUser = null;
-        const prevAssets = [...(savedAssets || [])];
-        savedAssets = storedUser.savedAssets || [];
-        checkIncomingGifts(prevAssets, savedAssets);
-
-        document.getElementById('nav-btn-text').innerText = currentUser.username.toUpperCase();
-        document.getElementById('navVaultBtn').style.display = 'flex'; document.getElementById('navMarketBtn').style.display = 'flex';
-        document.getElementById('navMessagesBtn').style.display = 'flex'; document.getElementById('navLogoutBtn').style.display = 'flex';
-        const _cBtn = document.getElementById('navContractsBtn'); if (_cBtn) _cBtn.style.display = 'flex';
-
-        saveCurrentSession();
-        playTerminalSound('login');
-        resumePendingContracts();
-        navigateTo('engine');
     }
 
     function pauseMarquee() { document.getElementById('storiesContainer').classList.remove('animated'); }
@@ -1505,7 +1084,7 @@ restoreCurrentSession();
         return data;
     }
 
-    function claimDailyMission(missionId) {
+    async function claimDailyMission(missionId) {
         if (!currentUser.loggedIn) { navigateTo('auth'); return; }
         const mission = DAILY_MISSIONS_DB.find(m => m.id === missionId);
         if (!mission) return;
@@ -1533,9 +1112,7 @@ restoreCurrentSession();
 
         // Credita recompensa
         currentUser.bumps += mission.reward;
-        const userData = registryGet(currentUser.username);
-        if (userData) { userData.bumps = currentUser.bumps; registrySet(currentUser.username, userData); }
-        saveCurrentSession();
+        await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
 
         // Marca missão como concluída
         data.completed.push(missionId);
@@ -1718,57 +1295,7 @@ restoreCurrentSession();
         });
     }
 
-    // =========================================================
-    // SISTEMA DE ALQUIMIA AVANÇADA — Itens Modificadores
-    // =========================================================
-    const ITEMS_DB = {
-        catalisador_estabilidade: {
-            category: 'PROTETOR', consumedOnUse: true,
-            effect: { type: 'SURVIVAL_BONUS', value: 0.15 },
-            name: 'Catalisador de Estabilidade', nameEN: 'Stability Catalyst'
-        },
-        nucleo_backup: {
-            category: 'PROTETOR', consumedOnUse: true,
-            effect: { type: 'INSURANCE_BREAK' }, // quebra no lugar do card em caso de falha total
-            name: 'Núcleo de Backup', nameEN: 'Backup Core'
-        },
-        essencia_neon_amarelo: {
-            category: 'CATALISADOR', consumedOnUse: true,
-            effect: { type: 'FORCE_PALETTE', value: 'gold' },
-            name: 'Essência de Neon Amarelo', nameEN: 'Yellow Neon Essence'
-        },
-        injetor_overclock: {
-            category: 'CATALISADOR', consumedOnUse: true,
-            effect: { type: 'OVERCLOCK', riskDelta: 0.20, fusionCountBonus: 2 },
-            name: 'Injetor de Overclock', nameEN: 'Overclock Injector'
-        },
-        poeira_silicio: {
-            category: 'MOEDA_ENTRADA', consumedOnUse: true,
-            effect: { type: 'COST' },
-            name: 'Poeira de Silício', nameEN: 'Silicon Dust'
-        },
-        sucata_circuitos: {
-            category: 'MOEDA_ENTRADA', consumedOnUse: true,
-            effect: { type: 'COST' },
-            name: 'Sucata de Circuitos', nameEN: 'Circuit Scrap'
-        }
-    };
-
-    function getUserInventory() {
-        if (!Array.isArray(currentUser.inventory)) currentUser.inventory = [];
-        return currentUser.inventory;
-    }
-
-    /** Remove (ou decrementa) um item do inventário do usuário após o uso numa fusão. */
-    function consumeInventoryItem(itemId) {
-        const inv = getUserInventory();
-        const idx = inv.findIndex(i => i.itemId === itemId);
-        if (idx === -1) return false;
-        const item = inv[idx];
-        if (item.qty && item.qty > 1) { item.qty -= 1; }
-        else { inv.splice(idx, 1); }
-        return true;
-    }
+    // ITEMS_DB, getUserInventory e consumeInventoryItem agora vêm da Parte 3 (Supabase), no final do arquivo.
 
     // DAILY DROPS — Recompensa diária (cooldown de 24h)
     const DAILY_DROP_REWARD_BUMPS = 15;
@@ -1777,7 +1304,7 @@ restoreCurrentSession();
         return `cyber_daily_drop_${currentUser.username}`;
     }
 
-    function claimDailyDrop() {
+    async function claimDailyDrop() {
         if (!currentUser.loggedIn) { navigateTo('auth'); return; }
         const key = getDailyDropKey();
         const last = parseInt(localStorage.getItem(key) || '0', 10);
@@ -1786,8 +1313,7 @@ restoreCurrentSession();
 
         currentUser.bumps += DAILY_DROP_REWARD_BUMPS;
         localStorage.setItem(key, String(now));
-        const userData = registryGet(currentUser.username);
-        if (userData) { userData.bumps = currentUser.bumps; registrySet(currentUser.username, userData); }
+        await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
 
         showCyberAlert('PROCESSO_CONCLUÍDO:', `Subsídio de rede coletado! +${DAILY_DROP_REWARD_BUMPS} B$ creditados na conta.`, 'success');
         playTerminalSound('claim');
@@ -1828,15 +1354,22 @@ restoreCurrentSession();
         renderLeaderboard();
     }
 
-    function renderLeaderboard() {
+    async function renderLeaderboard() {
         const list = document.getElementById('leaderboardList');
         if (!list) return;
-        const reg = loadRegistry();
 
-        const rows = Object.values(reg).map(u => {
-            const legendaryCount = (u.savedAssets || []).filter(a => a.rarityType === 'legendary').length;
-            return { username: u.username, bumps: u.bumps || 0, legendaryCount };
-        });
+        // Busca todos os perfis (substitui loadRegistry()) + contagem de lendários por usuário
+        const { data: profilesData, error: profErr } = await sb.from('profiles').select('id, username, bumps, fusion_count');
+        if (profErr) { console.error('renderLeaderboard (profiles):', profErr.message); list.innerHTML = '<div class="empty-vault-notice">FALHA AO CARREGAR PLACAR.</div>'; return; }
+
+        const { data: legendaryRows, error: cardsErr } = await sb.from('cards').select('id_usuario').eq('rarity_type', 'legendary');
+        if (cardsErr) console.error('renderLeaderboard (cards):', cardsErr.message);
+        const legendaryCounts = {};
+        (legendaryRows || []).forEach(r => { legendaryCounts[r.id_usuario] = (legendaryCounts[r.id_usuario] || 0) + 1; });
+
+        const rows = (profilesData || []).map(u => ({
+            username: u.username, bumps: u.bumps || 0, legendaryCount: legendaryCounts[u.id] || 0
+        }));
 
         rows.sort((a, b) => leaderboardMode === 'bumps' ? (b.bumps - a.bumps) : (b.legendaryCount - a.legendaryCount));
         const top5 = rows.slice(0, 5);
@@ -1868,21 +1401,28 @@ restoreCurrentSession();
         return badges;
     }
 
-    function renderProfileBadges(username) {
+    async function renderProfileBadges(username) {
         const zone = document.getElementById('profBadgesZone');
         if (!zone) return;
-        const userData = registryGet(username);
+        const profile = await fetchProfileByUsername(username);
+        if (!profile) { zone.innerHTML = '<span class="badge-tag badge-empty">SEM INSÍGNIAS REGISTRADAS</span>'; return; }
+        const { data: legendaryRows } = await sb.from('cards').select('id').eq('id_usuario', profile.id).eq('rarity_type', 'legendary');
+        const userData = {
+            fusionCount: profile.fusion_count || 0,
+            bumps: profile.bumps || 0,
+            savedAssets: (legendaryRows || []).map(() => ({ rarityType: 'legendary' }))
+        };
         const badges = computeBadges(userData);
         zone.innerHTML = badges.length === 0
             ? '<span class="badge-tag badge-empty">SEM INSÍGNIAS REGISTRADAS</span>'
             : badges.map(b => `<span class="badge-tag">${b.icon} ${b.label}</span>`).join('');
     }
 
-    function registerFusionForBadges() {
-        const userData = registryGet(currentUser.username);
-        if (!userData) return;
-        userData.fusionCount = (userData.fusionCount || 0) + 1;
-        registrySet(currentUser.username, userData);
+    async function registerFusionForBadges() {
+        if (!currentUser.id) return;
+        const newCount = (currentUser.fusionCount || 0) + 1;
+        currentUser.fusionCount = newCount;
+        await updateProfileInSupabase(currentUser.id, { fusion_count: newCount });
     }
 
     // =========================================================
@@ -2280,87 +1820,7 @@ restoreCurrentSession();
         setTimeout(() => { targetContainer.classList.remove("shattering"); }, 800);
     }
 
-    function claimAssetLogic() {
-        // MUTEX GLOBAL: bloqueia qualquer clique duplicado antes de qualquer operação
-        if (isProcessingClaim) return;
-        if (!activeAssetData) return;
-
-        isProcessingClaim = true;
-        downloadBtn.disabled = true;
-        const originalBtnText = downloadBtn.innerText;
-        downloadBtn.innerText = currentLang === 'PT' ? "SALVANDO..." : "SAVING...";
-
-        // FREE ROLL sem login: bloqueia envio ao cofre, liberta mutex imediatamente
-        if (!currentUser.loggedIn) {
-            showCyberAlert('ACESSO_NEGADO:', currentLang === 'PT'
-                ? 'COFRE BLOQUEADO: Faça login para salvar este ativo no seu cofre seguro. O card será perdido se não consolidar.'
-                : 'VAULT LOCKED: Login required to save this asset to your secure vault. Card will be lost if not consolidated.', 'error');
-            downloadBtn.disabled = false;
-            downloadBtn.innerText = originalBtnText;
-            isProcessingClaim = false;
-            navigateTo('auth');
-            return;
-        }
-
-        // Saldo insuficiente: aborta sem debitar nada
-        if (activeAssetData.costToClaim > 0 && currentUser.bumps < activeAssetData.costToClaim) {
-            downloadBtn.disabled = false;
-            downloadBtn.innerText = originalBtnText;
-            isProcessingClaim = false;
-            playTerminalSound('error');
-            openDepositModal();
-            return;
-        }
-
-        // === ZONA CRÍTICA: executa UMA única vez por mutex ===
-        if (activeAssetData.costToClaim > 0) {
-            currentUser.bumps -= activeAssetData.costToClaim;
-            const profBumpsEl = document.getElementById('profBumps');
-            if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
-        }
-        clearInterval(decayInterval);
-
-        // Clona dados antes de qualquer limpeza de estado
-        const assetSnapshot = { ...activeAssetData, creator: currentUser.username, registered: true };
-
-        // ── PROVENIÊNCIA: injeta hash + timestamp de nascimento ──
-        attachProvenance(assetSnapshot);
-
-        // Salvaguarda extra: impede duplicado se ID já existir no cofre
-        const alreadyOwned = savedAssets.some(a => a.id === assetSnapshot.id);
-        if (!alreadyOwned) {
-            savedAssets.push(assetSnapshot);
-        }
-
-        // Persiste no localStorage via registry centralizado
-        try {
-            const userData = registryGet(currentUser.username);
-            if (userData) {
-                userData.savedAssets = savedAssets;
-                userData.bumps = currentUser.bumps;
-                registrySet(currentUser.username, userData);
-            }
-        } catch(e) { console.error("Erro ao salvar no localStorage:", e); }
-
-        // Limpa estado do drop ANTES do alert
-        activeAssetData = null;
-        lastMintedBuffer = null;
-        downloadBtn.style.display = "none";
-        downloadBtn.disabled = false;
-        downloadBtn.innerText = originalBtnText;
-        stabilityWrapper.style.display = "none";
-        document.getElementById('status-text').innerText = currentLang === 'PT' ? "ATIVO_SALVO_NO_COFRE" : "ASSET_SAVED_TO_VAULT";
-
-        playTerminalSound('claim');
-        speakPhrase("Ativo integrado ao seu cofre.", "Asset integrated into your vault.");
-
-        // Ledger entry
-        pushLedger(`${currentUser.username} resgatou o card ${assetSnapshot.id} [${assetSnapshot.rarityNameEN}]`);
-
-        // Liberta mutex após o alert (alert é síncrono, bloqueia a thread até dismiss)
-        showCyberAlert('PROCESSO_CONCLUÍDO:', currentLang === 'PT' ? 'Consolidado no seu cofre seguro!' : 'Consolidated into your secure vault!', 'success');
-        isProcessingClaim = false;
-    }
+    // claimAssetLogic agora vem da Parte 2 (Supabase), no final do arquivo.
 
     function buildStoriesMarquee() {
         const container = document.getElementById('storiesContainer'); 
@@ -2450,28 +1910,9 @@ restoreCurrentSession();
         renderPagination('vaultPagination', filtered.length, vaultPage, (p) => { vaultPage = p; renderVaultGrid(); });
     }
 
-    function toggleExposeAsset(index) {
-        const asset = savedAssets[index];
-        if (asset.isListed) {
-            playSynthSound('shatter');
-            showCyberAlert('🔒 ATIVO BLOQUEADO EM CUSTÓDIA NO MERCADO', 'Este card está listado no mercado e está em custódia. Remove o anúncio primeiro para alterar o seu estado.', 'error');
-            return;
-        }
-        savedAssets[index].exposed = !savedAssets[index].exposed;
-        // Ponto 1: persiste usuário no registry
-        const userData = registryGet(currentUser.username);
-        if(userData) { userData.savedAssets = savedAssets; registrySet(currentUser.username, userData); }
+    // toggleExposeAsset agora vem da Parte 2 (Supabase), no final do arquivo.
 
-        // Ponto 1: sincroniza com dr0p_market se o item for para venda e exposto
-        if (asset.forSale) {
-            marketAssets = marketAssets.filter(m => m.id !== asset.id);
-            if (asset.exposed) marketAssets.push(asset);
-            saveMarket(marketAssets);
-        }
-        renderVaultGrid();
-    }
-
-    function marketListPrompt(index) {
+    async function marketListPrompt(index) {
         if (savedAssets[index].isListed) {
             playSynthSound('shatter');
             showCyberAlert('🔒 ATIVO BLOQUEADO EM CUSTÓDIA NO MERCADO', 'Este card já está em custódia no mercado. Remove o anúncio primeiro.', 'error');
@@ -2493,36 +1934,38 @@ restoreCurrentSession();
         // Ledger (Ponto 4)
         pushLedger(`${currentUser.username} listou o card ${savedAssets[index].id} [${savedAssets[index].rarityNameEN}] por ${parsed} B$`);
 
-        // Persiste utilizador
-        const userData = registryGet(currentUser.username);
-        if(userData) { userData.savedAssets = savedAssets; registrySet(currentUser.username, userData); }
+        // Persiste o estado do card no Supabase
+        await updateCardInSupabase(savedAssets[index], { forSale: true, price: parsed, isListed: true });
 
         renderVaultGrid();
     }
 
-    function giftAssetPrompt(index) {
+    async function giftAssetPrompt(index) {
         const targetUser = prompt("Digite o @username exato do destinatário da rede (Ex: @cyber_k1ng):");
         if (!targetUser) return;
         if (!targetUser.startsWith('@')) { showCyberAlert('FORMATO INVÁLIDO', 'O username deve iniciar com @', 'error'); return; }
 
-        const targetData = registryGet(targetUser);
-        if (!targetData) {
+        const targetProfile = await fetchProfileByUsername(targetUser);
+        if (!targetProfile) {
             showCyberAlert('ERRO_REDE', 'Esse nó de usuário não existe ou está desconectado.', 'error'); return;
         }
 
-        let targetObject = { ...savedAssets[index] };
         const giftedCard = savedAssets[index];
+        let targetObject = { ...giftedCard };
+        delete targetObject._dbId; // será uma linha nova no Supabase, dono diferente
         targetObject.creator = targetUser;
         targetObject.exposed = false;
         targetObject.forSale = false;
 
-        if (!targetData.savedAssets) targetData.savedAssets = [];
-        targetData.savedAssets.push(targetObject);
-        registrySet(targetUser, targetData);
+        // ── SUPABASE: cria a cópia na conta do destinatário, depois apaga a original ──
+        const inserted = await insertCardToSupabase(targetObject, targetProfile.id);
+        if (!inserted) {
+            showCyberAlert('ERRO_DE_REDE', 'Falha ao transferir o card. Tenta novamente.', 'error');
+            return;
+        }
+        if (giftedCard._dbId) await deleteCardFromSupabase(giftedCard._dbId);
 
         savedAssets.splice(index, 1);
-        const myData = registryGet(currentUser.username);
-        if (myData) { myData.savedAssets = savedAssets; registrySet(currentUser.username, myData); }
 
         // Efeito sonoro de presente
         playSynthSound('success');
@@ -2624,7 +2067,7 @@ restoreCurrentSession();
         renderPagination('marketPagination', filtered.length, marketPage, (p) => { marketPage = p; renderMarketGrid(); });
     }
 
-    function buyMarketAsset(id) {
+    async function buyMarketAsset(id) {
         const asset = marketAssets.find(m => m.id === id); if (!asset) return;
         if (!currentUser.loggedIn) { navigateTo('auth'); return; }
 
@@ -2639,36 +2082,30 @@ restoreCurrentSession();
 
         // Debita comprador
         currentUser.bumps -= asset.price;
+        await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
 
-        // Credita vendedor no registry e REMOVE o card do cofre do vendedor
+        // Credita vendedor e transfere o card dele para o comprador no Supabase
         if (sellerName !== currentUser.username) {
-            const sellerData = registryGet(sellerName);
-            if (sellerData) {
-                sellerData.bumps = (sellerData.bumps || 0) + asset.price;
-                // Remove card do cofre do vendedor (Ponto 1)
-                if (sellerData.savedAssets) {
-                    sellerData.savedAssets = sellerData.savedAssets.filter(a => a.id !== id);
-                }
-                registrySet(sellerName, sellerData);
+            const sellerProfile = await fetchProfileByUsername(sellerName);
+            if (sellerProfile) {
+                const newSellerBumps = (sellerProfile.bumps || 0) + asset.price;
+                await updateProfileInSupabase(sellerProfile.id, { bumps: newSellerBumps });
             }
         }
 
         // Move card para o cofre do comprador (actualiza creator + limpa custódia)
         const acquiredAsset = { ...asset, forSale: false, exposed: false, isListed: false, creator: currentUser.username };
+        delete acquiredAsset._dbId; // será uma linha nova no Supabase, dono diferente
         const alreadyOwned = savedAssets.some(a => a.id === acquiredAsset.id);
-        if (!alreadyOwned) savedAssets.push(acquiredAsset);
+        if (!alreadyOwned) {
+            const inserted = await insertCardToSupabase(acquiredAsset, currentUser.id);
+            if (inserted) savedAssets.push(inserted);
+        }
+        if (asset._dbId) await deleteCardFromSupabase(asset._dbId);
 
         // Remove do mercado e persiste
         marketAssets = marketAssets.filter(m => m.id !== id);
         saveMarket(marketAssets);
-
-        // Persiste comprador no registry
-        const myData = registryGet(currentUser.username);
-        if (myData) {
-            myData.savedAssets = savedAssets;
-            myData.bumps = currentUser.bumps;
-            registrySet(currentUser.username, myData);
-        }
 
         // Ledger (Ponto 4)
         pushLedger(`${currentUser.username} comprou o card ${asset.id} de ${sellerName} por ${asset.price} B$`);
@@ -2694,14 +2131,14 @@ restoreCurrentSession();
         renderMarketGrid();
     }
 
-    function removeAssetFromMarket(id) {
+    async function removeAssetFromMarket(id) {
         marketAssets = marketAssets.filter(m => m.id !== id);
         saveMarket(marketAssets);
         const vaultItem = savedAssets.find(m => m.id === id);
-        if (vaultItem) { vaultItem.forSale = false; vaultItem.exposed = false; vaultItem.isListed = false; } // liberta custódia
-        // Persiste utilizador
-        const userData = registryGet(currentUser.username);
-        if(userData) { userData.savedAssets = savedAssets; registrySet(currentUser.username, userData); }
+        if (vaultItem) {
+            vaultItem.forSale = false; vaultItem.exposed = false; vaultItem.isListed = false; // liberta custódia
+            await updateCardInSupabase(vaultItem, { forSale: false, isListed: false });
+        }
         renderMarketGrid();
     }
 
@@ -3607,20 +3044,20 @@ restoreCurrentSession();
      * @param {object[]} modificadores  itens do inventário usados (templateId)
      * @returns {{resultado:string, ...}}
      */
-    function forjarFusao(cardPrincipal, cardSacrificado, modificadores = []) {
+    async function forjarFusao(cardPrincipal, cardSacrificado, modificadores = []) {
         const score = c => c.rarityType === 'legendary' ? 3 : c.rarityType === 'epic' ? 2 : 1;
         const total = score(cardPrincipal) + score(cardSacrificado);
-
+    
         let ps, pb;
         if (total >= 6)      { ps = 0.70; pb = 0.10; }
         else if (total >= 4) { ps = 0.45; pb = 0.15; }
         else if (total >= 3) { ps = 0.25; pb = 0.20; }
         else                  { ps = 0.10; pb = 0.25; }
-
+    
         let nucleoBackupAtivo = false;
         let forcedPalette = null;
         let fusionCountBonus = 0;
-
+    
         modificadores.forEach(m => {
             const tpl = ITEMS_DB[m.templateId];
             if (!tpl) return;
@@ -3633,21 +3070,25 @@ restoreCurrentSession();
             }
         });
         pb = Math.max(0, Math.min(1 - ps, pb)); // normaliza, nunca deixa ps+pb > 1
-
+    
         const roll = Math.random();
         const fusionId = `FUS-${(cardPrincipal.fusion_count || 0).toString().padStart(4, '0')}`;
-
+    
         // Consome itens-moeda e modificadores usados (independente do resultado)
-        modificadores.forEach(m => consumeInventoryItem(m.itemId));
-
+        // ⚠️ agora aguarda cada consumo terminar no Supabase antes de seguir
+        for (const m of modificadores) { await consumeInventoryItem(m.itemId); }
+    
         if (roll < pb) {
             if (nucleoBackupAtivo) {
                 return { resultado: 'seguro_ativado', cardPrincipal, roll, ps, pb,
                     mensagem: 'Núcleo de Backup absorveu a falha — card principal preservado.' };
             }
+            // destruição total: nenhum dos dois sobrevive
+            if (cardPrincipal._dbId) await deleteCardFromSupabase(cardPrincipal._dbId);
+            if (cardSacrificado._dbId) await deleteCardFromSupabase(cardSacrificado._dbId);
             return { resultado: 'destruicao_total', cardsPerdidos: [cardPrincipal.id, cardSacrificado.id], roll, ps, pb };
         }
-
+    
         // SUCESSO: card principal sobrevive e evolui
         cardPrincipal.fusion_count = (cardPrincipal.fusion_count || 0) + 1 + fusionCountBonus;
         cardPrincipal.genetic_history = cardPrincipal.genetic_history || [];
@@ -3661,31 +3102,42 @@ restoreCurrentSession();
         });
         cardPrincipal.eliteEligible = cardPrincipal.fusion_count >= 3;
         regenerateQrSignature(cardPrincipal); // estado mudou → QR muta
-
+    
+        // ── persiste a evolução do card principal no Supabase ──
+        await updateCardInSupabase(cardPrincipal, {
+            fusion_count: cardPrincipal.fusion_count,
+            eliteEligible: cardPrincipal.eliteEligible,
+            genetic_history: cardPrincipal.genetic_history,
+            qr_code_hash: cardPrincipal.qr_code_hash,
+            qr_payload_url: cardPrincipal.qr_payload_url
+        });
+        // ── apaga o card sacrificado, que deixou de existir ──
+        if (cardSacrificado._dbId) await deleteCardFromSupabase(cardSacrificado._dbId);
+    
         return { resultado: 'sucesso', cardPrincipal, fusionId, roll, ps, pb, forcedPalette };
     }
-
-    function fuseCards(id1, id2, modificadores = []) {
+    
+    async function fuseCards(id1, id2, modificadores = []) {
         if (!id1 || !id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Seleciona 2 cards diferentes.' : 'Select 2 different cards.', 'error'); return; }
         if (id1 === id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Os 2 cards devem ser diferentes.' : 'Both cards must be different.', 'error'); return; }
-
+    
         const c1 = savedAssets.find(a => a.id === id1);
         const c2 = savedAssets.find(a => a.id === id2);
         if (!c1 || !c2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Card não encontrado no cofre.' : 'Card not found in vault.', 'error'); return; }
         if (c1.isListed || c2.isListed) { showCyberAlert('🔒 CUSTÓDIA ATIVA', currentLang === 'PT' ? 'Cards em custódia no mercado não podem ser fundidos.' : 'Cards listed on market cannot be fused.', 'error'); return; }
-
+    
         // Snapshot antes de qualquer alteração
         const snap1 = {...c1}; const snap2 = {...c2};
-
+    
         const score = (c) => c.rarityType === 'legendary' ? 3 : c.rarityType === 'epic' ? 2 : 1;
         const total = score(c1) + score(c2);
-
+    
         let ps, pb;
         if (total >= 6)      { ps = 0.70; pb = 0.10; }
         else if (total >= 4) { ps = 0.45; pb = 0.15; }
         else if (total >= 3) { ps = 0.25; pb = 0.20; }
         else                 { ps = 0.10; pb = 0.25; }
-
+    
         // ── ALQUIMIA AVANÇADA: aplica efeito dos itens modificadores selecionados ──
         let nucleoBackupAtivo = false;
         let forcedPalette = null;
@@ -3702,19 +3154,21 @@ restoreCurrentSession();
             }
         });
         pb = Math.max(0, Math.min(1 - ps, pb)); // normaliza, nunca deixa ps+pb > 1
-        modificadores.forEach(m => consumeInventoryItem(m.itemId)); // consome itens já na entrada da fusão
-
+    
+        // consome itens já na entrada da fusão — agora aguarda cada baixa no Supabase
+        for (const m of modificadores) { await consumeInventoryItem(m.itemId); }
+    
         const roll = Math.random();
-
+    
         // ── FASE 1: animação visual do painel de alquimia ──────────────
         const alchPanel = document.getElementById('alchemyPanel');
         alchPanel.classList.add('alchemy-fusing');
         playSynthSound('click');
         speakPhrase("Iniciando fusão. Aguarde a estabilização.", "Initiating fusion sequence. Stand by.");
-
+    
         setTimeout(() => {
             alchPanel.classList.remove('alchemy-fusing');
-
+    
             // ── FASE 2: overlay de glitch por 1500ms ───────────────────────
             const glitchOverlay = document.createElement('div');
             glitchOverlay.id = 'fusionGlitchOverlay';
@@ -3731,15 +3185,15 @@ restoreCurrentSession();
                 gap:            '18px',
                 pointerEvents:  'all',
             });
-
+    
             // Camada de flash de luz, dispara em pulsos aleatórios durante o overlay
             const flashLayer = document.createElement('div');
             flashLayer.className = 'fusion-flash-layer';
             glitchOverlay.appendChild(flashLayer);
-
+    
             // Trepidação de tela (shake) no body inteiro durante a fusão
             document.body.classList.add('fusion-screen-shake');
-
+    
             // Som de "máquina" em loop curto enquanto o overlay está ativo
             playTerminalSound('alchemy');
             const glitchSoundTimer = setInterval(() => playSynthSound('click'), 350);
@@ -3751,14 +3205,14 @@ restoreCurrentSession();
                     playSynthSound('click');
                 }, delay)
             );
-
+    
             // Texto principal com efeito glitch
             const glitchLabel = document.createElement('div');
             glitchLabel.className = 'loading-glitch loading-glitch-cursor';
             glitchLabel.setAttribute('data-text', currentLang === 'PT' ? 'EXECUTANDO_FUSÃO...' : 'EXECUTING_FUSION...');
             glitchLabel.textContent = currentLang === 'PT' ? 'EXECUTANDO_FUSÃO...' : 'EXECUTING_FUSION...';
             Object.assign(glitchLabel.style, { fontSize: '1.4rem', letterSpacing: '4px' });
-
+    
             // Linha de status secundária
             const glitchSub = document.createElement('div');
             glitchSub.style.cssText = 'font-family:"Space Mono",monospace; font-size:0.6rem; color:#444466; letter-spacing:2px;';
@@ -3769,28 +3223,28 @@ restoreCurrentSession();
                 'SINCRONIZANDO MATRIZ DE RARIDADE...',
             ];
             glitchSub.textContent = subMessages[Math.floor(Math.random() * subMessages.length)];
-
+    
             // Barra de progresso de terminal
             const glitchBar = document.createElement('span');
             glitchBar.className = 'loading-glitch-bar';
             Object.assign(glitchBar.style, { width: '260px', display: 'block' });
-
+    
             // Scanline sobreposta
             const scanline = document.createElement('div');
             scanline.className = 'loading-glitch-scanline';
-
+    
             glitchOverlay.appendChild(scanline);
             glitchOverlay.appendChild(glitchLabel);
             glitchOverlay.appendChild(glitchSub);
             glitchOverlay.appendChild(glitchBar);
             document.body.appendChild(glitchOverlay);
-
+    
             // ── FASE 3: após 1500ms, remove glitch e processa resultado ───
             setTimeout(async () => {
                 clearInterval(glitchSoundTimer);
                 document.body.classList.remove('fusion-screen-shake');
                 glitchOverlay.remove();
-
+    
                 // Remove cartas originais ANTES de qualquer resultado
                 // (Núcleo de Backup: se a fusão falhar, o card principal (c1) é preservado)
                 const insuranceWillSave = nucleoBackupAtivo && roll < pb;
@@ -3798,9 +3252,18 @@ restoreCurrentSession();
                 marketAssets = marketAssets.filter(m => m.id !== id1 && m.id !== id2);
                 saveMarket(marketAssets);
                 if (insuranceWillSave) savedAssets.push(snap1); // c2 é consumido pelo seguro; c1 retorna ao cofre
-
+    
+                // ── SUPABASE: apaga do banco os cards realmente consumidos ──
+                // Se o seguro salvou c1, só c2 sai do banco; senão, os dois saem.
+                if (insuranceWillSave) {
+                    if (snap2._dbId) await deleteCardFromSupabase(snap2._dbId);
+                } else {
+                    if (snap1._dbId) await deleteCardFromSupabase(snap1._dbId);
+                    if (snap2._dbId) await deleteCardFromSupabase(snap2._dbId);
+                }
+    
                 let result, fusedCard, alertTitle, alertMsg, alertType;
-
+    
                 if (roll < pb) {
                     if (insuranceWillSave) {
                         // SEGURO ATIVADO: Núcleo de Backup absorve a falha — c1 sobrevive intacto
@@ -3824,7 +3287,7 @@ restoreCurrentSession();
                         playSynthSound('shatter');
                         speakPhrase("Fusão destruída. Perda total.", "Fusion destroyed. Total loss.");
                     }
-
+    
                 } else if (roll < pb + (1 - ps - pb)) {
                     // ITEM COMUM
                     result = 'common';
@@ -3841,6 +3304,9 @@ restoreCurrentSession();
                     // ── PROVENIÊNCIA: novo hash exclusivo do card fundido ──
                     attachProvenance(fusedCard);
                     savedAssets.push(fusedCard);
+                    // ── SUPABASE: grava o novo card resultante da fusão ──
+                    const insertedCommon = await insertCardToSupabase(fusedCard, currentUser.id);
+                    if (!insertedCommon) console.error('fuseCards: falha ao gravar card comum no Supabase.');
                     alertTitle = currentLang === 'PT' ? '◆ FUSÃO PARCIAL' : '◆ PARTIAL FUSION';
                     alertMsg   = currentLang === 'PT'
                         ? `Fusão instável resultou num card comum.<br><b>${newId}</b> — <span style="color:#aaa">COMUM</span>`
@@ -3848,7 +3314,7 @@ restoreCurrentSession();
                     alertType = 'warn';
                     playSynthSound('success');
                     speakPhrase("Fusão parcial. Item comum gerado.", "Partial fusion. Common item generated.");
-
+    
                 } else {
                     // SUCESSO — rarity baseada nos inputs + 1% Ancestral
                     result = 'success';
@@ -3860,7 +3326,7 @@ restoreCurrentSession();
                     else if (total >= 4) newRarity = rarityRoll < 0.35 ? 'legendary' : 'epic';
                     else if (total >= 3) newRarity = rarityRoll < 0.08 ? 'legendary' : 'epic';
                     else                 newRarity = rarityRoll < 0.03 ? 'legendary' : 'epic';
-
+    
                     const rarityColors = {
                         ancestral: '#ff007f',
                         legendary: '#00ffff',
@@ -3874,10 +3340,10 @@ restoreCurrentSession();
                     const newId = "#" + Math.floor(100000 + Math.random() * 900000);
                     const baseVisualSrc = Math.random() > 0.5 ? snap1.imgSrc : snap2.imgSrc;
                     const fusedVisual = await renderFusedCardVisual(baseVisualSrc, forcedPalette);
-
+    
                     // Flash ancestral (rosa) se for ancestral
                     if (newRarity === 'ancestral') triggerAncestralFlash('#ff007f');
-
+    
                     // ── SURVIVAL COUNTER: o card resultante herda o maior fusion_count
                     // entre os dois cards de origem + 1 (esta fusão) + bônus de Overclock ──
                     const inheritedFusionCount = Math.max(snap1.fusion_count || 0, snap2.fusion_count || 0) + 1 + fusionCountBonus;
@@ -3892,7 +3358,7 @@ restoreCurrentSession();
                             mutation: forcedPalette ? { huePalette: forcedPalette } : null
                         }
                     ];
-
+    
                     fusedCard = {
                         id: newId, rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
                         styleName: fusedStyle, styleNameEN: fusedStyle,
@@ -3908,6 +3374,9 @@ restoreCurrentSession();
                     attachProvenance(fusedCard);
                     fusedCard.provenance.parentIds = [id1, id2]; // rastreabilidade de linhagem
                     savedAssets.push(fusedCard);
+                    // ── SUPABASE: grava o novo card resultante da fusão ──
+                    const insertedSuccess = await insertCardToSupabase(fusedCard, currentUser.id);
+                    if (!insertedSuccess) console.error('fuseCards: falha ao gravar card fundido no Supabase.');
                     alertTitle = currentLang === 'PT' ? '⚗️ FUSÃO CONCLUÍDA' : '⚗️ FUSION COMPLETE';
                     alertMsg   = currentLang === 'PT'
                         ? `Novo ativo gerado com sucesso!<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span><br>Estilo: <b>${fusedStyle}</b><br><small style="color:#666">Este card tem tag [EVENTO] e pode ser usado como banner.</small>`
@@ -3915,14 +3384,10 @@ restoreCurrentSession();
                     alertType = 'success';
                     playTerminalSound('alchemy');
                 }
-
-                // Persiste
-                const userData = registryGet(currentUser.username);
-                if (userData) {
-                    userData.savedAssets = savedAssets;
-                    userData.inventory = currentUser.inventory;
-                    registrySet(currentUser.username, userData);
-                }
+    
+                // Já não há registry local para persistir — cada mudança (cards
+                // apagados/criados, itens de inventário consumidos) já foi
+                // gravada direto no Supabase nos pontos acima.
                 if (result === 'success' || result === 'common') registerFusionForBadges();
                 // Fusões bem-sucedidas (comum ou épico/lendário) entram no feed global,
                 // para que apareçam na Home e sobrevivam ao F5 — não só no cofre do usuário.
@@ -3934,17 +3399,17 @@ restoreCurrentSession();
                 if (result === 'success' || result === 'common') pushLedger(`${currentUser.username} fundiu ${id1}+${id2} → ${fusedCard.id} [${fusedCard.rarityNameEN}]`);
                 else if (result === 'seguro_ativado') pushLedger(`${currentUser.username} ativou Núcleo de Backup em ${id1}+${id2} — ${id1} preservado`);
                 else pushLedger(`${currentUser.username} tentou fundir ${id1}+${id2} — FALHA TOTAL`);
-
+    
                 document.getElementById('alchemyPanel').style.display = 'none';
                 _alchSelected = { alpha: null, beta: null };
                 renderVaultGrid();
                 showCyberAlert(alertTitle, alertMsg, alertType);
-
+    
             }, 1500); // ← 1500ms de glitch antes do pop-up
         }, 1200);
     }
 
-    function viewTargetUserCollection(username, code, bio, avatar, banner, isOwner) {
+    async function viewTargetUserCollection(username, code, bio, avatar, banner, isOwner) {
         selectedProfileUser = username;
 
         // Identidade
@@ -3973,7 +3438,11 @@ restoreCurrentSession();
         if (inputBio) inputBio.value = isOwner ? (bio || '') : '';
 
         // Vitrine: assets expostos do usuário-alvo
-        const sourceAssets = isOwner ? savedAssets : ((registryGet(username) || {}).savedAssets || []);
+        let sourceAssets = savedAssets;
+        if (!isOwner) {
+            const targetProfile = await fetchProfileByUsername(username);
+            sourceAssets = targetProfile ? await loadCardsFromSupabase(targetProfile.id) : [];
+        }
         const exposedAssets = sourceAssets.filter(a => a.exposed);
         const showcaseGrid = document.getElementById('showcaseGrid');
         if (showcaseGrid) {
@@ -4034,11 +3503,10 @@ restoreCurrentSession();
         }
         availableAssets.forEach((a) => {
             const div = document.createElement('div'); div.className = 'album-card'; div.style.padding = '5px';
-            div.onclick = () => {
+            div.onclick = async () => {
                 currentUser.avatar = a.imgSrc;
                 document.getElementById('profAvatarImg').src = a.imgSrc;
-                const userData = registryGet(currentUser.username);
-                if(userData) { userData.avatar = a.imgSrc; registrySet(currentUser.username, userData); }
+                await updateProfileInSupabase(currentUser.id, { avatar: a.imgSrc });
                 closeAvatarSelector();
             };
             div.innerHTML = `<div class="album-preview-wrapper"><img src="${a.imgSrc}"></div>`;
@@ -4067,15 +3535,14 @@ restoreCurrentSession();
             card.className = 'default-banner-card';
             card.style.background = b.css;
             card.innerHTML = `<span>${b.label}</span>`;
-            card.onclick = () => {
+            card.onclick = async () => {
                 currentUser.banner = b.css;
                 const bv = document.getElementById('profBannerView');
                 bv.style.backgroundImage = 'none';
                 bv.style.background = b.css;
                 document.getElementById('bannerLockStatus').innerText = b.label;
                 document.getElementById('bannerLockStatus').style.color = '#00ffff';
-                const ud = registryGet(currentUser.username);
-                if (ud) { ud.banner = b.css; registrySet(currentUser.username, ud); }
+                await updateProfileInSupabase(currentUser.id, { banner: b.css });
                 closeBannerSelector();
             };
             defaultGrid.appendChild(card);
@@ -4102,13 +3569,12 @@ restoreCurrentSession();
                 } else {
                     row.style.cssText = "background:#111; border:1px solid #ff00ff; padding:10px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; margin-bottom:6px;";
                     row.innerHTML = `<img src="${item.imgSrc}" style="width:40px;height:40px;object-fit:cover;border:1px solid #ff00ff;margin-right:10px;"><span style="font-size:0.65rem; color:#fff; flex:1;">${item.id} [${item.rarityNameEN}]</span>`;
-                    row.onclick = () => {
+                    row.onclick = async () => {
                         currentUser.banner = item.imgSrc;
                         document.getElementById('profBannerView').style.backgroundImage = `url(${item.imgSrc})`;
                         document.getElementById('bannerLockStatus').innerText = `BANNER: ${item.id}`;
                         document.getElementById('bannerLockStatus').style.color = '#00ffff';
-                        const ud = registryGet(currentUser.username);
-                        if(ud) { ud.banner = item.imgSrc; registrySet(currentUser.username, ud); }
+                        await updateProfileInSupabase(currentUser.id, { banner: item.imgSrc });
                         closeBannerSelector();
                     };
                 }
@@ -4119,44 +3585,39 @@ restoreCurrentSession();
     }
     function closeBannerSelector() { document.getElementById('bannerSelectorModal').style.display = 'none'; }
 
-    function viewExternalProfile(username) {
+    async function viewExternalProfile(username) {
         closeInspectModal();
-        // Lê sempre do registry centralizado
-        const p = registryGet(username);
+        const p = await fetchProfileByUsername(username);
         if(p) {
-            viewTargetUserCollection(p.username, p.code, p.bio, p.avatar, p.banner, p.username === currentUser.username);
+            await viewTargetUserCollection(p.username, p.code, p.bio, p.avatar, p.banner, p.username === currentUser.username);
         } else {
-            viewTargetUserCollection(username, "#9999", "Membro estável.", "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", "", false);
+            await viewTargetUserCollection(username, "#9999", "Membro estável.", "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", "", false);
         }
         navigateTo('profile');
     }
 
-    function saveProfileCustoms() {
+    async function saveProfileCustoms() {
         const bioVal = document.getElementById('inputBio').value;
         currentUser.bio = bioVal;
         const bioView = document.getElementById('profBioView');
         if (bioView) bioView.innerText = bioVal;
-        const userData = registryGet(currentUser.username);
-        if(userData) { userData.bio = bioVal; registrySet(currentUser.username, userData); }
+        await updateProfileInSupabase(currentUser.id, { bio: bioVal });
     }
 
     function openDepositModal() { document.getElementById('depositModal').style.display = 'flex'; }
     function closeDepositModal() { document.getElementById('depositModal').style.display = 'none'; }
 
-    function simularDeposito(amount) {
+    async function simularDeposito(amount) {
         currentUser.bumps += amount;
         const profBumpsEl = document.getElementById('profBumps');
         if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
-        // Ponto 1: persiste saldo actualizado
-        const userData = registryGet(currentUser.username);
-        if(userData) { userData.bumps = currentUser.bumps; registrySet(currentUser.username, userData); }
+        await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
         playSynthSound('success');
         closeDepositModal();
-        // Ponto 2: alerta cyberpunk em vez de browser alert
         showCyberAlert('// INJEÇÃO DE CARGA CONCLUÍDA //', `+<b>${amount} B$</b> adicionados ao teu terminal.<br>Saldo actual: <b>${currentUser.bumps} B$</b>`, 'success');
     }
 
-    function setUserStatus(status) {
+    async function setUserStatus(status) {
         currentUser.status = status;
         const dot = document.getElementById('userStatusDot');
         const sc = status === 'away' ? 'status-away' : status === 'busy' ? 'status-busy' : 'status-online';
@@ -4164,8 +3625,7 @@ restoreCurrentSession();
         document.querySelectorAll('#statusSelectorZone .status-btn').forEach(b => {
             b.className = 'status-btn' + (b.dataset.s === status ? ` active-${status === 'online' ? 'online' : status === 'away' ? 'away' : 'busy'}` : '');
         });
-        const ud = registryGet(currentUser.username);
-        if (ud) { ud.status = status; registrySet(currentUser.username, ud); }
+        await updateProfileInSupabase(currentUser.id, { status });
     }
 
     buildStoriesMarquee();
@@ -4267,7 +3727,7 @@ restoreCurrentSession();
         return m > 0 ? `${m}m ${s.toString().padStart(2,'0')}s` : `${s}s`;
     }
 
-    function concludeContract(contractId, cardIds) {
+    async function concludeContract(contractId, cardIds) {
         const contract = CONTRACTS_DB.find(c => c.id === contractId);
         if (!contract) return;
 
@@ -4279,13 +3739,7 @@ restoreCurrentSession();
 
         // Adiciona recompensa
         currentUser.bumps += contract.reward;
-        const userData = registryGet(currentUser.username);
-        if (userData) {
-            userData.bumps = currentUser.bumps;
-            userData.savedAssets = savedAssets;
-            registrySet(currentUser.username, userData);
-        }
-        saveCurrentSession();
+        await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
 
         // Remove contrato ativo
         const active = loadActiveContracts();
@@ -4488,10 +3942,8 @@ restoreCurrentSession();
         active[contract.id] = { endTs, cardIds: [..._selectedContractCards] };
         saveActiveContracts(active);
 
-        // Salva estado dos cards no registry
-        const userData = registryGet(currentUser.username);
-        if (userData) { userData.savedAssets = savedAssets; registrySet(currentUser.username, userData); }
-        saveCurrentSession();
+        // Estado de "em contrato" já persiste via saveActiveContracts() acima
+        // (isLocked é só um flag de UI local, reconstruído a partir de active[] no boot).
 
         closeContractCardModal();
         startContractTimer(contract.id, endTs, active[contract.id].cardIds);
