@@ -4454,5 +4454,185 @@ async function toggleExposeAsset(index) {
     }
     renderVaultGrid();
 }
+// =========================================================
+// DROP STATION — PARTE 3/4: INVENTÁRIO / ITENS (SUPABASE)
+// SUBSTITUI no script.js original:
+//   - função getUserInventory
+//   - função consumeInventoryItem (agora assíncrona!)
+// ADICIONA (novo):
+//   - loadInventoryFromSupabase
+//   - grantInventoryItem
+//   - seedStarterInventory
+//
+// ⚠️ BREAKING CHANGE: consumeInventoryItem agora é async (precisa de
+// `await`). Em forjarFusao() e fuseCards() (Parte 4), as linhas:
+//     modificadores.forEach(m => consumeInventoryItem(m.itemId));
+// devem virar:
+//     for (const m of modificadores) { await consumeInventoryItem(m.itemId); }
+// Isso já vai estar pronto na Parte 4 — só citando aqui pra não estranhar.
+//
+// INTEGRAÇÃO COM A PARTE 1 (auth-supabase-part.js):
+//   1) Em createProfile(), depois do insert do profile, chame:
+//        await seedStarterInventory(userId);
+//   2) Em applyProfileToCurrentUser(profile), a linha `inventory: []`
+//      é só o valor inicial — o carregamento real entra logo depois,
+//      em restoreCurrentSession() e no LOGIN de handleAuthSubmit:
+//        currentUser.inventory = await loadInventoryFromSupabase(currentUser.id);
+// =========================================================
+
+// =========================================================
+// CATÁLOGO DE ITENS (mantido client-side — é config estática, não dado de usuário)
+// Mesma definição do ITEMS_DB original do script.js.
+// =========================================================
+const ITEMS_DB = {
+    catalisador_estabilidade: {
+        category: 'PROTETOR', consumedOnUse: true,
+        effect: { type: 'SURVIVAL_BONUS', value: 0.15 },
+        name: 'Catalisador de Estabilidade', nameEN: 'Stability Catalyst'
+    },
+    nucleo_backup: {
+        category: 'PROTETOR', consumedOnUse: true,
+        effect: { type: 'INSURANCE_BREAK' },
+        name: 'Núcleo de Backup', nameEN: 'Backup Core'
+    },
+    essencia_neon_amarelo: {
+        category: 'CATALISADOR', consumedOnUse: true,
+        effect: { type: 'FORCE_PALETTE', value: 'gold' },
+        name: 'Essência de Neon Amarelo', nameEN: 'Yellow Neon Essence'
+    },
+    injetor_overclock: {
+        category: 'CATALISADOR', consumedOnUse: true,
+        effect: { type: 'OVERCLOCK', riskDelta: 0.20, fusionCountBonus: 2 },
+        name: 'Injetor de Overclock', nameEN: 'Overclock Injector'
+    },
+    poeira_silicio: {
+        category: 'MOEDA_ENTRADA', consumedOnUse: true,
+        effect: { type: 'COST' },
+        name: 'Poeira de Silício', nameEN: 'Silicon Dust'
+    },
+    sucata_circuitos: {
+        category: 'MOEDA_ENTRADA', consumedOnUse: true,
+        effect: { type: 'COST' },
+        name: 'Sucata de Circuitos', nameEN: 'Circuit Scrap'
+    }
+};
+
+// Kit inicial dado a todo usuário recém-registrado (substitui o que os SEED_USERS faziam)
+const STARTER_KIT = [
+    { templateId: 'poeira_silicio', category: 'MOEDA_ENTRADA', qty: 5 },
+    { templateId: 'catalisador_estabilidade', category: 'PROTETOR', qty: 1 }
+];
+
+// =========================================================
+// MAPEAMENTO DB <-> OBJETO EM MEMÓRIA
+// (mantém o mesmo shape original: { itemId, templateId, category, qty })
+// =========================================================
+function rowToInventoryItem(row) {
+    return {
+        _dbId: row.id,
+        itemId: row.item_id,
+        templateId: row.template_id,
+        category: row.category,
+        qty: row.qty
+    };
+}
+
+// =========================================================
+// LEITURA: carrega o inventário completo do usuário
+// =========================================================
+async function loadInventoryFromSupabase(userId) {
+    const { data, error } = await sb.from('inventario').select('*').eq('id_usuario', userId).order('created_at', { ascending: true });
+    if (error) { console.error('loadInventoryFromSupabase:', error.message); return []; }
+    return data.map(rowToInventoryItem);
+}
+
+// =========================================================
+// CONCESSÃO: adiciona (ou incrementa) um item no inventário do usuário
+// Usado pro kit inicial, recompensas de missão, drops especiais, etc.
+// =========================================================
+async function grantInventoryItem(userId, templateId, qty = 1) {
+    const tpl = ITEMS_DB[templateId];
+    if (!tpl) { console.warn('grantInventoryItem: template desconhecido', templateId); return null; }
+
+    // Se já existe uma pilha desse item pro usuário, incrementa em vez de duplicar linha
+    const { data: existing, error: findErr } = await sb.from('inventario')
+        .select('*').eq('id_usuario', userId).eq('template_id', templateId).maybeSingle();
+    if (findErr) { console.error('grantInventoryItem (find):', findErr.message); return null; }
+
+    if (existing) {
+        const { data, error } = await sb.from('inventario')
+            .update({ qty: existing.qty + qty })
+            .eq('id', existing.id).select().single();
+        if (error) { console.error('grantInventoryItem (update):', error.message); return null; }
+        return rowToInventoryItem(data);
+    }
+
+    const itemId = `item_${templateId}_${Date.now().toString(36)}`;
+    const { data, error } = await sb.from('inventario').insert({
+        id_usuario: userId,
+        item_id: itemId,
+        template_id: templateId,
+        category: tpl.category,
+        qty,
+        effect: tpl.effect,
+        consumed_on_use: tpl.consumedOnUse
+    }).select().single();
+    if (error) { console.error('grantInventoryItem (insert):', error.message); return null; }
+    return rowToInventoryItem(data);
+}
+
+// =========================================================
+// SEED: dá o kit inicial a um usuário recém-registrado
+// =========================================================
+async function seedStarterInventory(userId) {
+    for (const item of STARTER_KIT) {
+        await grantInventoryItem(userId, item.templateId, item.qty);
+    }
+}
+
+// =========================================================
+// LEITURA LOCAL: acessor do inventário em memória (mantém compat. com chamadas existentes)
+// =========================================================
+function getUserInventory() {
+    if (!Array.isArray(currentUser.inventory)) currentUser.inventory = [];
+    return currentUser.inventory;
+}
+
+// =========================================================
+// CONSUMO: remove (ou decrementa) um item após uso numa fusão
+// ⚠️ Agora é ASYNC — quem chama precisa usar `await`.
+// =========================================================
+async function consumeInventoryItem(itemId) {
+    const inv = getUserInventory();
+    const idx = inv.findIndex(i => i.itemId === itemId);
+    if (idx === -1) return false;
+    const item = inv[idx];
+
+    if (item.qty && item.qty > 1) {
+        const ok = await updateInventoryItemQty(item, item.qty - 1);
+        if (!ok) return false;
+        item.qty -= 1;
+    } else {
+        const ok = await deleteInventoryItem(item);
+        if (!ok) return false;
+        inv.splice(idx, 1);
+    }
+    return true;
+}
+
+async function updateInventoryItemQty(item, newQty) {
+    if (!item._dbId) { console.warn('updateInventoryItemQty: item sem _dbId', item.itemId); return false; }
+    const { error } = await sb.from('inventario').update({ qty: newQty }).eq('id', item._dbId);
+    if (error) { console.error('updateInventoryItemQty:', error.message); return false; }
+    return true;
+}
+
+async function deleteInventoryItem(item) {
+    if (!item._dbId) { console.warn('deleteInventoryItem: item sem _dbId', item.itemId); return false; }
+    const { error } = await sb.from('inventario').delete().eq('id', item._dbId);
+    if (error) { console.error('deleteInventoryItem:', error.message); return false; }
+    return true;
+}
+
 
 
