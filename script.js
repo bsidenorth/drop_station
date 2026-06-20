@@ -424,6 +424,8 @@ restoreCurrentSession();
         try { localStorage.setItem(QUOTES_KEY, JSON.stringify(quotes)); } catch(e) {}
     }
 
+    let currentLang = (localStorage.getItem('dr0p_lang') || 'PT');
+
     let marketQuotes = loadMarketQuotes();
 
     /**
@@ -828,6 +830,7 @@ restoreCurrentSession();
 
     function toggleLanguage() {
         currentLang = currentLang === 'PT' ? 'EN' : 'PT';
+        try { localStorage.setItem('dr0p_lang', currentLang); } catch(e) {}
         document.getElementById('langLabel').innerText = currentLang;
         document.querySelectorAll('[data-i18n]').forEach(el => {
             const key = el.getAttribute('data-i18n');
