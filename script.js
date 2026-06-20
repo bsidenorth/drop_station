@@ -287,11 +287,12 @@ sb.auth.onAuthStateChange((event) => {
     }
 });
 
-// REALTIME GLOBAL: assina os canais públicos (eventos_globais + cards)
-// imediatamente, sem esperar login/sessão. Isto é o que garante que uma
-// aba anônima (ou qualquer conta) veja a MESMA atividade da rede ao vivo,
-// em vez de uma tela "zerada" — ver definição em initGlobalRealtime().
-initGlobalRealtime();
+// REALTIME GLOBAL: a chamada de initGlobalRealtime() roda lá no FINAL deste
+// arquivo (depois de globalFeed/ledgerCache/etc. já estarem declarados) —
+// ver bloco "BOOT: REALTIME GLOBAL" no fim do script.js. Chamá-la aqui em
+// cima lançava ReferenceError (TDZ: as variáveis que a function usa ainda
+// não tinham sido declaradas nesse ponto da execução), o que travava TODO
+// o resto do script — nenhum clique/listener depois desse ponto rodava.
 
 // =========================================================
 // LOGIN / REGISTRO
@@ -5109,3 +5110,16 @@ async function toggleFollowTarget(targetUserId, btnEl) {
     }
     if (btnEl) btnEl.disabled = false;
 }
+
+// =========================================================
+// BOOT: REALTIME GLOBAL
+// Chamada movida pra cá (fim do arquivo) DE PROPÓSITO: nesse ponto da
+// execução, TODAS as declarações `let`/`const` que initGlobalRealtime()
+// usa (globalFeed, ledgerCache, marketAssets, SEED_FEED, _globalRealtimeStarted)
+// já rodaram. Chamar isto mais acima no arquivo (antes dessas declarações)
+// lança ReferenceError por TDZ e trava o resto do script — é exatamente
+// isso que causava "nada clica / drop não gira" depois desse patch.
+// Roda incondicionalmente, sem esperar login — é o que faz uma aba
+// anônima (ou qualquer conta) ver a MESMA atividade da rede ao vivo.
+// =========================================================
+initGlobalRealtime();
