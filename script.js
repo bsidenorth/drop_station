@@ -439,7 +439,10 @@ async function handleAuthSubmit(event) {
 
     } catch (e) {
         console.error(e);
-        errorEl.innerText = "Falha de comunicação com a rede. Tenta novamente.";
+        // DEBUG TEMPORÁRIO: mostra o erro real na tela em vez de uma mensagem
+        // genérica, pra conseguir diagnosticar sem precisar abrir o console.
+        const detail = (e && (e.message || e.error_description || e.toString())) || 'erro desconhecido';
+        errorEl.innerText = "Falha de comunicação com a rede: " + detail;
         errorEl.style.display = 'block';
     } finally {
         submitBtn.disabled = false;
