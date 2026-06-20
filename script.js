@@ -1036,6 +1036,56 @@
         }
     }
 
+    // =========================================================
+    // PROVENIÊNCIA — ID Único, Hash Criptográfico e Timestamp
+    // Sistema interno de prova de origem: todo card gerado no
+    // Drop Station carrega uma assinatura imutável. Mesmo sem
+    // blockchain, o registro no localStorage funciona como
+    // "ata de nascimento" do ativo. Útil para detectar cópias
+    // e como base para tokenização futura (Web3).
+    // =========================================================
+
+    /**
+     * Hash leve e determinístico (DJB2) a partir dos dados do card.
+     * Roda de forma síncrona e offline, sem depender de SubtleCrypto.
+     * O resultado muda se qualquer campo-semente do card mudar.
+     */
+    function _djb2Hash(str) {
+        let h = 5381;
+        for (let i = 0; i < str.length; i++) {
+            h = ((h << 5) + h) ^ str.charCodeAt(i);
+            h |= 0; // força inteiro 32 bits
+        }
+        return (h >>> 0).toString(16).padStart(8, '0').toUpperCase();
+    }
+
+    /**
+     * Gera o objeto de proveniência para um card.
+     * @param {object} cardData  Objeto parcial ou completo do card (precisa de id, rarityType, styleName, creator)
+     * @returns {{ hash: string, timestamp: number, origin: string }}
+     */
+    function generateProvenance(cardData) {
+        const ts   = Date.now();
+        const seed = [cardData.id, cardData.rarityType, cardData.styleName, cardData.creator, ts].join('|');
+        return {
+            hash:      `DS-${_djb2Hash(seed)}`,   // ex: DS-4A2F9C1B
+            timestamp: ts,
+            origin:    'DROP_STATION_INTERNAL'
+        };
+    }
+
+    /**
+     * Injeta proveniência + flag Web3 no objeto do card SE ainda não tiver.
+     * Cards do feed global legado ou demo ficam sem — comportamento esperado.
+     * @param {object} cardObj  Objeto do card (mutado in-place e retornado)
+     */
+    function attachProvenance(cardObj) {
+        if (cardObj.provenance) return cardObj; // já tem — nunca sobrescrever
+        cardObj.provenance  = generateProvenance(cardObj);
+        cardObj.isTokenized = false; // preparação para fluxo Web3
+        return cardObj;
+    }
+
     // DAILY DROPS — Recompensa diária (cooldown de 24h)
     const DAILY_DROP_REWARD_BUMPS = 15;
 
@@ -1247,7 +1297,106 @@
         setTimeout(pulse, 20);
     }
 
-    function triggerLogoGlitch() {
+    // =========================================================
+    // WEB3 — Modal Simulado de Tokenização (Pré-Mint)
+    // Nenhuma transação real acontece aqui. O objetivo é mostrar
+    // ao usuário o fluxo e educá-lo sobre custos de gas, mantendo
+    // controle e custo do lado dele. O card já tem isTokenized:false
+    // como placeholder para integração futura com MetaMask/ERC-721.
+    // =========================================================
+    function showTokenizeModal(cardId) {
+        closeInspectModal();
+        const card = savedAssets.find(a => a.id === cardId);
+        if (!card) return;
+
+        const prov = card.provenance;
+        const rarityColor = card.rarityType === 'ancestral' ? '#ff007f'
+            : card.rarityType === 'legendary' ? '#00ffff'
+            : card.rarityType === 'epic'      ? '#ffaa00'
+            : '#aaaaaa';
+
+        // Injeta modal de tokenização como overlay temporário
+        const overlay = document.createElement('div');
+        overlay.id = 'tokenizeOverlay';
+        overlay.style.cssText = `
+            position:fixed; inset:0; z-index:10000;
+            background:rgba(2,2,8,0.97);
+            display:flex; align-items:center; justify-content:center;
+            padding:20px;
+        `;
+        overlay.innerHTML = `
+            <div style="max-width:480px; width:100%; background:#070712; border:1px solid #9933ff;
+                        padding:28px; font-family:'Space Mono',monospace; position:relative;">
+                <!-- Header -->
+                <div style="color:#9933ff; font-size:0.65rem; letter-spacing:3px; margin-bottom:4px;">⬡ TOKENIZAÇÃO WEB3 // SIMULAÇÃO</div>
+                <div style="color:#fff; font-family:'Archivo Black',sans-serif; font-size:1rem; margin-bottom:16px;">
+                    Transformar em NFT
+                </div>
+
+                <!-- Info do card -->
+                <div style="background:#0d0020; border:1px solid #9933ff33; padding:12px; margin-bottom:16px; font-size:0.52rem; line-height:2; color:#aaaacc;">
+                    <div>CARD &nbsp;&nbsp;&nbsp;: <span style="color:${rarityColor};">${card.id}</span></div>
+                    <div>RARIDADE: <span style="color:${rarityColor};">${card.rarityNameEN}</span></div>
+                    ${prov ? `<div>HASH &nbsp;&nbsp;&nbsp;: <span style="color:#fff;">${prov.hash}</span></div>
+                    <div>EMITIDO : <span style="color:#fff;">${new Date(prov.timestamp).toLocaleString('pt-BR')}</span></div>` : ''}
+                </div>
+
+                <!-- Explicação do fluxo -->
+                <div style="font-size:0.53rem; color:#888899; line-height:1.8; margin-bottom:18px;">
+                    <p style="margin:0 0 8px;">Para transformar este card num <b style="color:#9933ff;">NFT ERC-721</b> na blockchain, você precisará:</p>
+                    <div style="padding-left:8px; border-left:2px solid #9933ff44;">
+                        <div>① Conectar sua carteira (ex: <b style="color:#fff;">MetaMask</b>)</div>
+                        <div>② Aprovar o contrato do Drop Station</div>
+                        <div>③ Pagar o <b style="color:#ffaa00;">gas fee</b> em ETH (custo variável da rede)</div>
+                        <div>④ Aguardar a confirmação on-chain (~30s)</div>
+                    </div>
+                    <p style="margin:10px 0 0; color:#555566; font-size:0.48rem;">O controle e o custo são <b style="color:#fff;">inteiramente seus</b>. O Drop Station nunca cobra taxas de mint — apenas o gás da rede Ethereum.</p>
+                </div>
+
+                <!-- Aviso de simulação -->
+                <div style="background:#1a0033; border:1px dashed #9933ff55; padding:8px 12px; margin-bottom:18px; font-size:0.48rem; color:#9933ff88; text-align:center;">
+                    ⚠ MODO SIMULAÇÃO — Nenhuma transação real será executada.
+                    <br>A integração com MetaMask será ativada em breve.
+                </div>
+
+                <!-- Botões -->
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="btn-action" style="border-color:#9933ff; color:#9933ff; flex:1;"
+                        onclick="simulateMintAttempt('${cardId}')">
+                        🦊 SIMULAR MINT COM METAMASK
+                    </button>
+                    <button class="btn-action" style="border-color:#333344; color:#555566;"
+                        onclick="document.getElementById('tokenizeOverlay').remove()">
+                        CANCELAR
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+
+    /** Simula o fluxo de mint — não faz nenhuma transação real. */
+    function simulateMintAttempt(cardId) {
+        const overlay = document.getElementById('tokenizeOverlay');
+        if (overlay) overlay.remove();
+
+        // Abre o modal de inspect novamente com confirmação simulada
+        showCyberAlert(
+            '⬡ METAMASK // SIMULAÇÃO',
+            `<div style="font-family:'Space Mono',monospace; font-size:0.55rem; line-height:2; text-align:left;">
+                <div style="color:#9933ff; margin-bottom:8px;">> CONECTANDO CARTEIRA...</div>
+                <div>> CARTEIRA: 0x71C7...4F3a <span style="color:#00ff66;">✓ CONECTADA</span></div>
+                <div>> REDE: Ethereum Mainnet</div>
+                <div>> GAS ESTIMADO: ~0.0018 ETH (~$4.20)</div>
+                <div style="color:#ffaa00; margin-top:8px;">> AGUARDANDO ASSINATURA...</div>
+                <div style="color:#555566; font-size:0.45rem; margin-top:10px;">
+                    [ Integração real será ativada na próxima fase do projeto. ]<br>
+                    Teu card <b>${cardId}</b> já tem hash e timestamp registrados e estará pronto para mint quando o contrato for implantado.
+                </div>
+            </div>`,
+            'success'
+        );
+    }
         const logo = document.getElementById('appLogo');
         if (!logo) return;
         logo.classList.add('logo-shortcircuit');
@@ -1488,6 +1637,9 @@
         // Clona dados antes de qualquer limpeza de estado
         const assetSnapshot = { ...activeAssetData, creator: currentUser.username, registered: true };
 
+        // ── PROVENIÊNCIA: injeta hash + timestamp de nascimento ──
+        attachProvenance(assetSnapshot);
+
         // Salvaguarda extra: impede duplicado se ID já existir no cofre
         const alreadyOwned = savedAssets.some(a => a.id === assetSnapshot.id);
         if (!alreadyOwned) {
@@ -1563,6 +1715,20 @@
             card.className = `album-card rare-${a.rarityType}`;
             card.dataset.vaultIndex = index;
             const custodyBadge = a.isListed ? `<div style="position:absolute;top:-5px;left:-5px;background:#ff0044;color:#fff;font-size:0.5rem;padding:2px 6px;font-weight:bold;z-index:5;box-shadow:0 0 8px #ff0044;">🔒 EM CUSTÓDIA</div>` : '';
+
+            // Badge Web3: indicador discreto se card tem proveniência
+            const prov = a.provenance;
+            const web3Badge = prov && !a.isTokenized
+                ? `<div class="card-provenance-strip" title="Hash: ${prov.hash} | ${new Date(prov.timestamp).toLocaleString('pt-BR')}">
+                       <span class="provenance-hash">${prov.hash}</span>
+                       <span class="provenance-dot">⬡</span>
+                   </div>`
+                : prov && a.isTokenized
+                ? `<div class="card-provenance-strip tokenized-strip" title="NFT Tokenizado">
+                       <span class="provenance-hash">${prov.hash}</span>
+                       <span class="provenance-dot" style="color:#00ff66;">✓ NFT</span>
+                   </div>`
+                : '';
             card.innerHTML = `
                 ${custodyBadge}
                 <div class="album-preview-wrapper"><img src="${a.imgSrc}" draggable="false"></div>
@@ -1571,6 +1737,7 @@
                     <div class="album-id">${a.id}</div>
                     <div class="album-rarity" style="color:${a.rarityType==='ancestral'?'#ff007f':a.rarityType==='legendary'?'#00ffff':a.rarityType==='epic'?'#ffaa00':'#aaaaaa'}">${currentLang === 'PT' ? a.rarityName : a.rarityNameEN}</div>
                 </div>
+                ${web3Badge}
                 <div class="card-actions">
                     <button class="btn-action btn-expose" data-action="expose" data-idx="${index}">${a.exposed ? '⭐ Sair da Vitrine' : '📁 Expor na Vitrine'}</button>
                     <button class="btn-action btn-sell"   data-action="sell"   data-idx="${index}" style="border-color:#ffaa00;">${a.forSale ? '⚡ Alterar Preço P2P' : '💵 Vender / Anunciar'}</button>
@@ -1916,6 +2083,35 @@
             btn.onclick = () => { closeInspectModal(); initiateTradeContact(ownerName, cardAsset.id); };
             zone.appendChild(btn);
         }
+
+        // ── PROVENIÊNCIA: exibe hash, timestamp e botão Web3 ──────────
+        const prov = cardAsset.provenance;
+        const provHtml = prov
+            ? `<div class="inspect-provenance-box" style="
+                    margin-top:12px; padding:8px 10px; border:1px solid ${rarityColor}33;
+                    background:rgba(0,0,0,0.5); font-family:'Space Mono',monospace;
+                    font-size:0.48rem; letter-spacing:1px; line-height:1.9; color:#666688;">
+                    <div style="color:${rarityColor}; margin-bottom:4px; font-size:0.5rem; font-weight:bold;">// PROVENIÊNCIA INTERNA</div>
+                    <div>HASH &nbsp;&nbsp;: <span style="color:#fff;">${prov.hash}</span></div>
+                    <div>EMITIDO: <span style="color:#fff;">${new Date(prov.timestamp).toLocaleString('pt-BR')}</span></div>
+                    <div>ORIGEM &nbsp;: <span style="color:#fff;">${prov.origin}</span></div>
+                    ${prov.parentIds ? `<div>LINHAGEM: <span style="color:#ffaa00;">${prov.parentIds.join(' + ')}</span></div>` : ''}
+                    ${cardAsset.isTokenized
+                        ? `<div style="color:#00ff66; margin-top:4px;">✓ TOKENIZADO EM NFT</div>`
+                        : `<button class="btn-action inspect-web3-btn" style="margin-top:8px; border-color:#9933ff; color:#9933ff; font-size:0.5rem; padding:5px 12px; width:auto;"
+                            onclick="showTokenizeModal(${JSON.stringify(cardAsset.id).replace(/"/g,'&quot;')})">
+                            ⬡ TOKENIZAR CARD (Web3)
+                           </button>`
+                    }
+               </div>`
+            : `<div style="font-size:0.45rem; color:#333344; margin-top:10px; font-family:'Space Mono',monospace;">
+                    // sem proveniência registrada (card legado)
+               </div>`;
+
+        // Appenda a caixa de proveniência ao metaBox
+        const provDiv = document.createElement('div');
+        provDiv.innerHTML = provHtml;
+        metaBox.appendChild(provDiv);
 
         document.getElementById('inspectModal').style.display = 'flex';
     }
@@ -2843,6 +3039,8 @@
                         forSale: false, isListed: false, price: 0,
                         imgSrc: fusedVisual, isFused: true, tags: ['fused']
                     };
+                    // ── PROVENIÊNCIA: novo hash exclusivo do card fundido ──
+                    attachProvenance(fusedCard);
                     savedAssets.push(fusedCard);
                     alertTitle = currentLang === 'PT' ? '◆ FUSÃO PARCIAL' : '◆ PARTIAL FUSION';
                     alertMsg   = currentLang === 'PT'
@@ -2889,6 +3087,9 @@
                         imgSrc: fusedVisual,
                         isFused: true, tags: ['fused', 'evento']
                     };
+                    // ── PROVENIÊNCIA: hash exclusivo + herança de linhagem ──
+                    attachProvenance(fusedCard);
+                    fusedCard.provenance.parentIds = [id1, id2]; // rastreabilidade de linhagem
                     savedAssets.push(fusedCard);
                     alertTitle = currentLang === 'PT' ? '⚗️ FUSÃO CONCLUÍDA' : '⚗️ FUSION COMPLETE';
                     alertMsg   = currentLang === 'PT'
