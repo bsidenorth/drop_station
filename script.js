@@ -89,6 +89,12 @@ async function fetchProfile(userId) {
 }
 
 async function createProfile(userId, username, email) {
+    // Trava por id: se já existe um profile pra esse usuário do Auth
+    // (re-tentativa de registro, F5 no meio do fluxo, double-click no botão,
+    // etc.), retorna o que já existe em vez de inserir uma linha nova.
+    const existing = await fetchProfile(userId);
+    if (existing) return existing;
+
     const payload = {
         id: userId,
         username,
@@ -99,10 +105,16 @@ async function createProfile(userId, username, email) {
         avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg",
         banner: ""
     };
-    // select() pós-insert também precisa ficar restrito às colunas públicas,
-    // senão a API recusa a query inteira por falta de SELECT em `email`.
-    const { data, error } = await sb.from('profiles').insert(payload).select(PUBLIC_PROFILE_COLUMNS).single();
+    // upsert travado pelo id do Auth: se por alguma corrida (ex: 2 abas
+    // registrando ao mesmo tempo) a linha já tiver sido criada entre o
+    // fetchProfile acima e este insert, não duplica — atualiza a mesma linha.
+    const { data, error } = await sb.from('profiles')
+        .upsert(payload, { onConflict: 'id', ignoreDuplicates: false })
+        .select(PUBLIC_PROFILE_COLUMNS)
+        .single();
     if (error) { console.error('createProfile:', error.message); return null; }
+
+    await seedStarterInventory(userId);
     return data;
 }
 
@@ -202,19 +214,42 @@ function resetCurrentUserToAnon() {
 // =========================================================
 async function restoreCurrentSession() {
     const { data: { session } } = await sb.auth.getSession();
-    if (!session) return false;
+    if (!session) { renderBootScreen(); return false; }
 
     const profile = await fetchProfile(session.user.id);
-    if (!profile) return false;
+    if (!profile) { renderBootScreen(); return false; }
 
     applyProfileToCurrentUser(profile);
-    // savedAssets (cofre) é carregado na Parte 2 (cards) via loadCardsFromSupabase()
+    savedAssets = await loadCardsFromSupabase(currentUser.id);
+    currentUser.inventory = await loadInventoryFromSupabase(currentUser.id);
+
+    renderBootScreen();
     return true;
 }
 
-// Mantém currentUser sincronizado caso o usuário faça login/logout em outra aba
+// Renderiza a tela inicial depois que sabemos, com certeza, se há sessão ativa
+// ou não — evita o "precisa de F5" causado por renderizar antes da sessão
+// do Supabase ser confirmada.
+function renderBootScreen() {
+    if (currentUser.loggedIn) {
+        showContractsBtnAndResume();
+    }
+    navigateTo('engine');
+}
+
+// Única fonte de verdade pro boot e pra troca de sessão entre abas.
+// INITIAL_SESSION dispara uma vez, já com a sessão (ou null) resolvida pelo
+// Supabase — é o gatilho certo pra só então carregar UI/missões/cofre,
+// em vez de tentar ler dados antes da sessão estar confirmada.
+let _bootResolved = false;
 sb.auth.onAuthStateChange((event) => {
-    if (event === 'SIGNED_OUT') resetCurrentUserToAnon();
+    if (event === 'INITIAL_SESSION' && !_bootResolved) {
+        _bootResolved = true;
+        restoreCurrentSession();
+    } else if (event === 'SIGNED_OUT') {
+        resetCurrentUserToAnon();
+        navigateTo('engine');
+    }
 });
 
 // =========================================================
@@ -344,8 +379,9 @@ async function handleAuthSubmit(event) {
         const prevAssets = [...(savedAssets || [])];
         applyProfileToCurrentUser(profile);
 
-        // savedAssets (cofre) será carregado de fato na Parte 2 (cards)
-        savedAssets = [];
+        // Carrega cofre e inventário reais do Supabase (antes ficava vazio)
+        savedAssets = await loadCardsFromSupabase(currentUser.id);
+        currentUser.inventory = await loadInventoryFromSupabase(currentUser.id);
         checkIncomingGifts(prevAssets, savedAssets);
 
         playTerminalSound('login');
@@ -371,9 +407,9 @@ async function logoutSession() {
 }
 
 // =========================================================
-// BOOT: tenta restaurar sessão ao carregar a página
+// BOOT: ver onAuthStateChange (INITIAL_SESSION) acima — restoreCurrentSession()
+// já é disparado de lá, só depois que a sessão do Supabase é confirmada.
 // =========================================================
-restoreCurrentSession();
 
     // =========================================================
     // PERSISTÊNCIA DO MERCADO (dr0p_market) — Ponto 1
@@ -425,6 +461,9 @@ restoreCurrentSession();
     }
 
     let currentLang = (localStorage.getItem('dr0p_lang') || 'PT');
+    let audioCtx = null;
+    let isBgmPlaying = false;
+    let bgmInterval = null;
 
     let marketQuotes = loadMarketQuotes();
 
@@ -785,6 +824,46 @@ restoreCurrentSession();
     // =========================================================
     // SISTEMA CENTRAL DE ÁUDIO E VOZ SINTETIZADA (Ponto 3)
     // =========================================================
+    // =========================================================
+    // SFX — CHOQUE / CURTO-CIRCUITO ELÉTRICO (dispara junto do glitch
+    // visual da Alquimia/Fusão — ver FASE 2 de fuseCards)
+    // =========================================================
+    function playFusionShockSound() {
+        try {
+            initAudio();
+            const now = audioCtx.currentTime;
+
+            // Buzz principal: dente-de-serra grave com frequência instável
+            // (efeito de "curto" elétrico, tremendo)
+            const buzz = audioCtx.createOscillator();
+            const buzzGain = audioCtx.createGain();
+            buzz.type = 'sawtooth';
+            buzz.frequency.setValueAtTime(90, now);
+            buzzGain.gain.setValueAtTime(0.001, now);
+            buzzGain.gain.linearRampToValueAtTime(0.18, now + 0.02);
+            for (let i = 0; i < 14; i++) {
+                const t = now + i * 0.045;
+                buzz.frequency.setValueAtTime(60 + Math.random() * 420, t);
+            }
+            buzzGain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+            buzz.connect(buzzGain); buzzGain.connect(audioCtx.destination);
+            buzz.start(now); buzz.stop(now + 0.65);
+
+            // Crackle de alta frequência por cima, tipo faísca/arco voltaico
+            for (let i = 0; i < 8; i++) {
+                const t = now + Math.random() * 0.6;
+                const spark = audioCtx.createOscillator();
+                const sparkGain = audioCtx.createGain();
+                spark.type = 'square';
+                spark.frequency.setValueAtTime(1800 + Math.random() * 3200, t);
+                sparkGain.gain.setValueAtTime(0.05, t);
+                sparkGain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+                spark.connect(sparkGain); sparkGain.connect(audioCtx.destination);
+                spark.start(t); spark.stop(t + 0.04);
+            }
+        } catch (e) {}
+    }
+
     function playTerminalSound(type) {
         // type: 'login' | 'error' | 'claim' | 'alchemy'
         try { initAudio(); } catch(e) {}
@@ -3268,6 +3347,7 @@ restoreCurrentSession();
     
             // Som de "máquina" em loop curto enquanto o overlay está ativo
             playTerminalSound('alchemy');
+            playFusionShockSound();
             const glitchSoundTimer = setInterval(() => playSynthSound('click'), 350);
             // Flashes de luz em instantes aleatórios dentro da janela de 1500ms
             const flashTimers = [300, 650, 1000, 1250].map(delay =>
@@ -4038,8 +4118,8 @@ restoreCurrentSession();
         resumePendingContracts();
     }
 
-    // Retoma contratos se sessão já estava restaurada
-    if (currentUser.loggedIn) showContractsBtnAndResume();
+    // Retoma contratos: ver renderBootScreen() / restoreCurrentSession(),
+    // chamado lá no momento certo (depois da sessão confirmada), não aqui.
 // =========================================================
 // DROP STATION — PARTE 2/4: CARDS / COFRE (SUPABASE)
 // SUBSTITUI no script.js original:
