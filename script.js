@@ -105,11 +105,18 @@ async function createProfile(userId, username, email) {
         avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg",
         banner: ""
     };
-    // upsert travado pelo id do Auth: se por alguma corrida (ex: 2 abas
-    // registrando ao mesmo tempo) a linha já tiver sido criada entre o
-    // fetchProfile acima e este insert, não duplica — atualiza a mesma linha.
+    // BUGFIX: trocado de .upsert(...) para .insert(...) puro.
+    // upsert(payload, { onConflict: 'id' }) gera um INSERT ... ON CONFLICT
+    // DO UPDATE no Postgres — e o caminho de UPDATE tenta reavaliar TODAS
+    // as colunas do payload, incluindo `email`. Só que o GRANT UPDATE em
+    // profiles (ver schema.sql) não inclui a coluna email (só leitura/escrita
+    // restrita por design). Resultado: o upsert falhava com "permission
+    // denied for column email" sempre que caía no ramo de conflito — e como
+    // o fetchProfile() logo acima já garante que não existe linha duplicada,
+    // esse ramo de conflito nunca deveria ser necessário mesmo. Um insert
+    // puro evita o problema by design.
     const { data, error } = await sb.from('profiles')
-        .upsert(payload, { onConflict: 'id', ignoreDuplicates: false })
+        .insert(payload)
         .select(PUBLIC_PROFILE_COLUMNS)
         .single();
     if (error) { console.error('createProfile:', error.message); return null; }
@@ -329,9 +336,20 @@ async function handleAuthSubmit(event) {
             if (data.user) {
                 const profile = await createProfile(data.user.id, formattedUser, rawEmail);
                 if (!profile) {
-                    // Rollback: evita usuário "fantasma" no Auth sem profile correspondente
+                    // ⚠️ signOut() encerra só a sessão local — NÃO apaga o usuário
+                    // do auth.users (isso exigiria a service_role key, que nunca
+                    // deve rodar no client). Ou seja: a conta de auth JÁ EXISTE
+                    // com esse e-mail, mesmo a criação do profile tendo falhado.
+                    // Por isso a mensagem não pode sugerir "tenta de novo do zero" —
+                    // se a pessoa tentar sb.auth.signUp() de novo com o MESMO e-mail,
+                    // vai cair em "already registered". O caminho certo daqui é
+                    // LOGIN (a senha que ela acabou de definir já é válida) — o login
+                    // vai falhar com "perfil não encontrado" (ver fetchProfile em
+                    // handleAuthSubmit), e nesse ponto criamos o profile que faltou.
                     await sb.auth.signOut();
-                    errorEl.innerText = "Falha ao criar perfil (alias pode já estar em uso). Tenta outro username.";
+                    errorEl.innerHTML = "Falha ao salvar seu perfil (username pode já estar em uso). " +
+                        "Sua conta de acesso já foi criada — tenta ENTRAR (não registrar de novo) " +
+                        "com o mesmo e-mail e senha que você acabou de definir.";
                     errorEl.style.display = 'block';
                     return;
                 }
@@ -369,8 +387,26 @@ async function handleAuthSubmit(event) {
 
         const profile = await fetchProfile(data.user.id);
         if (!profile) {
-            errorEl.innerText = "Perfil não encontrado. Contate o suporte da rede.";
-            errorEl.style.display = 'block';
+            // AUTO-CURA: a conta de Auth é válida (login passou), mas não tem
+            // profile — provavelmente uma sessão anterior falhou no meio do
+            // cadastro (ver nota em handleAuthSubmit/registro). Em vez de travar
+            // a pessoa pra sempre atrás de "contate o suporte", tenta criar o
+            // profile que faltou agora, usando o username que ela acabou de digitar.
+            const healedProfile = await createProfile(data.user.id, formattedUser, data.user.email);
+            if (!healedProfile) {
+                // Só falha aqui se esse username específico já estiver em uso
+                // por OUTRA conta — nesse caso realmente precisa de um alias novo.
+                errorEl.innerText = "Sua conta existe, mas o username '" + formattedUser + "' já está em uso por outro perfil. Contate o suporte pra recuperar o acesso.";
+                errorEl.style.display = 'block';
+                return;
+            }
+            messageThreads = {};
+            activeThreadUser = null;
+            applyProfileToCurrentUser(healedProfile);
+            savedAssets = [];
+            currentUser.inventory = await loadInventoryFromSupabase(currentUser.id);
+            playTerminalSound('login');
+            navigateTo('engine');
             return;
         }
 
