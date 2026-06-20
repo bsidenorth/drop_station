@@ -20,12 +20,6 @@ let currentUser = {
     inventory: [] // populado na Parte 3 (inventário)
 };
 
-// ── Username "@alias" <-> email sintético exigido pelo Supabase Auth ──
-function usernameToEmail(username) {
-    const clean = username.replace(/^@/, '').toLowerCase();
-    return `${clean}@dropstation.app`;
-}
-
 // =========================================================
 // SEGURANÇA: REGRAS DE FORÇA DA SENHA
 // (substitui o validatePassword original, que só exigia 6 chars)
@@ -79,54 +73,50 @@ function secondsLoginLocked() {
 }
 
 // =========================================================
-// SEGURANÇA: ANTI-SPAM NO REGISTRO (client-side)
-// Limita quantas contas podem ser criadas a partir do mesmo
-// navegador/sessão num intervalo curto — dificulta criação em massa.
-// =========================================================
-const SIGNUP_LOCK_KEY = 'dr0p_signup_attempts';
-const MAX_SIGNUPS_PER_WINDOW = 3;
-const SIGNUP_WINDOW_MS = 10 * 60 * 1000; // 10 minutos
-
-function getSignupState() {
-    try { return JSON.parse(sessionStorage.getItem(SIGNUP_LOCK_KEY)) || { timestamps: [] }; }
-    catch (e) { return { timestamps: [] }; }
-}
-function registerSignupAttempt() {
-    const state = getSignupState();
-    state.timestamps = state.timestamps.filter(ts => Date.now() - ts < SIGNUP_WINDOW_MS);
-    state.timestamps.push(Date.now());
-    try { sessionStorage.setItem(SIGNUP_LOCK_KEY, JSON.stringify(state)); } catch (e) {}
-}
-function secondsSignupLocked() {
-    const state = getSignupState();
-    const recent = state.timestamps.filter(ts => Date.now() - ts < SIGNUP_WINDOW_MS);
-    if (recent.length < MAX_SIGNUPS_PER_WINDOW) return 0;
-    const oldest = Math.min(...recent);
-    return Math.ceil((SIGNUP_WINDOW_MS - (Date.now() - oldest)) / 1000);
-}
-
-// =========================================================
 // PERFIL (tabela public.profiles)
+// ⚠️ A coluna `email` tem o SELECT revogado para anon/authenticated
+// no schema.sql (privacidade). Por isso TODAS as leituras abaixo usam
+// uma lista explícita de colunas públicas — nunca select('*') nem
+// select('email'). A resolução de e-mail para login passa pela
+// function security definer `email_by_username` (ver fetchEmailByUsername).
 // =========================================================
+const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, banner, status, following, fusion_count, created_at, updated_at';
+
 async function fetchProfile(userId) {
-    const { data, error } = await sb.from('profiles').select('*').eq('id', userId).single();
+    const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('id', userId).single();
     if (error) { console.error('fetchProfile:', error.message); return null; }
     return data;
 }
 
-async function createProfile(userId, username) {
+async function createProfile(userId, username, email) {
     const payload = {
         id: userId,
         username,
+        email,
         bumps: 100,
         code: "#" + Math.floor(1000 + Math.random() * 9000),
         bio: "Membro verificado.",
         avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg",
         banner: ""
     };
-    const { data, error } = await sb.from('profiles').insert(payload).select().single();
+    // select() pós-insert também precisa ficar restrito às colunas públicas,
+    // senão a API recusa a query inteira por falta de SELECT em `email`.
+    const { data, error } = await sb.from('profiles').insert(payload).select(PUBLIC_PROFILE_COLUMNS).single();
     if (error) { console.error('createProfile:', error.message); return null; }
     return data;
+}
+
+// =========================================================
+// LOGIN: resolve o e-mail real a partir do @username/alias
+// (necessário pois o Supabase Auth autentica por e-mail, não por alias)
+// Usa a function `email_by_username` (security definer) em vez de
+// select direto, já que a coluna email não é legível pela API normal.
+// =========================================================
+async function fetchEmailByUsername(username) {
+    const clean = username.replace(/^@/, '');
+    const { data, error } = await sb.rpc('email_by_username', { p_username: clean });
+    if (error) { console.error('fetchEmailByUsername:', error.message); return null; }
+    return data || null;
 }
 
 // =========================================================
@@ -136,7 +126,7 @@ async function createProfile(userId, username) {
 // uma query direta à tabela `profiles` no Supabase)
 // =========================================================
 async function fetchProfileByUsername(username) {
-    const { data, error } = await sb.from('profiles').select('*').eq('username', username).maybeSingle();
+    const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('username', username).maybeSingle();
     if (error) { console.error('fetchProfileByUsername:', error.message); return null; }
     return data;
 }
@@ -244,13 +234,6 @@ async function handleAuthSubmit(event) {
             errorEl.style.display = 'block';
             return;
         }
-    } else {
-        const signupLockedSecs = secondsSignupLocked();
-        if (signupLockedSecs > 0) {
-            errorEl.innerText = `Limite de registros atingido. Aguarda ${signupLockedSecs}s para tentar de novo.`;
-            errorEl.style.display = 'block';
-            return;
-        }
     }
 
     const userCheck = validateUsername(rawUser);
@@ -260,24 +243,56 @@ async function handleAuthSubmit(event) {
     const passCheck = validatePassword(rawPass);
     if (!passCheck.ok) { errorEl.innerText = passCheck.msg; errorEl.style.display = 'block'; return; }
 
-    const email = usernameToEmail(formattedUser);
     const submitBtn = document.getElementById('authSubmitBtn');
-    submitBtn.disabled = true;
 
     try {
         if (authMode === 'register') {
-            registerSignupAttempt();
-            const { data, error } = await sb.auth.signUp({ email, password: rawPass });
+            const rawEmail = (document.getElementById('authEmail').value || '').trim();
+            const confirmPass = document.getElementById('authConfirmPassword').value;
+            const day = document.getElementById('authBirthDay').value;
+            const month = document.getElementById('authBirthMonth').value;
+            const year = document.getElementById('authBirthYear').value;
+            const termsOk = document.getElementById('authTerms').checked;
+
+            const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!rawEmail || !EMAIL_RE.test(rawEmail)) {
+                errorEl.innerText = 'Informa um e-mail válido para vincular ao terminal.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            if (rawPass !== confirmPass) {
+                errorEl.innerText = 'As chaves (senha e confirmação) não coincidem.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            if (!day || !month || !year) {
+                errorEl.innerText = 'Selecione sua data de nascimento completa.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            const age = calculateAge(parseInt(day, 10), parseInt(month, 10), parseInt(year, 10));
+            if (age < 18) {
+                showCyberAlert('// ACESSO_BLOQUEADO //', 'Drop Station é uma rede exclusiva para operadores +18. Este terminal não pode ser consolidado por menores de idade.', 'error');
+                return;
+            }
+            if (!termsOk) {
+                errorEl.innerText = 'Você precisa aceitar os Termos de Uso e a Política de Privacidade para continuar.';
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            submitBtn.disabled = true;
+            const { data, error } = await sb.auth.signUp({ email: rawEmail, password: rawPass });
             if (error) {
-                errorEl.innerText = error.message.includes('already registered')
-                    ? "Este terminal alias já está registrado na rede."
+                errorEl.innerText = (error.message.includes('already registered') || error.message.includes('already been registered'))
+                    ? "Esse e-mail já está registrado na rede."
                     : error.message;
                 errorEl.style.display = 'block';
                 return;
             }
             // Se confirmação de e-mail estiver desativada no painel, data.user já vem ativo
             if (data.user) {
-                const profile = await createProfile(data.user.id, formattedUser);
+                const profile = await createProfile(data.user.id, formattedUser, rawEmail);
                 if (!profile) {
                     // Rollback: evita usuário "fantasma" no Auth sem profile correspondente
                     await sb.auth.signOut();
@@ -292,8 +307,20 @@ async function handleAuthSubmit(event) {
             return;
         }
 
-        // LOGIN
-        const { data, error } = await sb.auth.signInWithPassword({ email, password: rawPass });
+        // LOGIN — resolve o e-mail real a partir do @username/alias
+        submitBtn.disabled = true;
+        const loginEmail = await fetchEmailByUsername(formattedUser);
+        if (!loginEmail) {
+            registerFailedLogin();
+            const remaining = MAX_LOGIN_ATTEMPTS - getLoginAttemptState().count;
+            errorEl.innerText = remaining > 0
+                ? `Nó de rede inexistente ou assinatura incorreta. (${remaining} tentativa(s) restante(s))`
+                : `Muitas tentativas falhas. Aguarda ${secondsLoginLocked()}s.`;
+            errorEl.style.display = 'block';
+            return;
+        }
+
+        const { data, error } = await sb.auth.signInWithPassword({ email: loginEmail, password: rawPass });
         if (error) {
             registerFailedLogin();
             const remaining = MAX_LOGIN_ATTEMPTS - getLoginAttemptState().count;
@@ -958,15 +985,57 @@ restoreCurrentSession();
         navigateTo('profile');
     }
 
+    function populateAgeSelectors() {
+        const dayEl = document.getElementById('authBirthDay');
+        const monthEl = document.getElementById('authBirthMonth');
+        const yearEl = document.getElementById('authBirthYear');
+        if (!dayEl || dayEl.options.length > 1) return; // já populado, evita duplicar
+
+        for (let d = 1; d <= 31; d++) {
+            const opt = document.createElement('option'); opt.value = d; opt.textContent = d; dayEl.appendChild(opt);
+        }
+        const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+        MESES.forEach((m, i) => {
+            const opt = document.createElement('option'); opt.value = i + 1; opt.textContent = m; monthEl.appendChild(opt);
+        });
+        const currentYear = new Date().getFullYear();
+        for (let y = currentYear - 13; y >= currentYear - 100; y--) {
+            const opt = document.createElement('option'); opt.value = y; opt.textContent = y; yearEl.appendChild(opt);
+        }
+    }
+
+    function calculateAge(day, month, year) {
+        const today = new Date();
+        const birth = new Date(year, month - 1, day);
+        let age = today.getFullYear() - birth.getFullYear();
+        const beforeBirthdayThisYear = (today.getMonth() < birth.getMonth()) ||
+            (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate());
+        if (beforeBirthdayThisYear) age--;
+        return age;
+    }
+
     function switchAuthMode(mode) {
         authMode = mode;
         document.getElementById('authErrorMsg').style.display = 'none';
+        const registerOnlyEls = document.querySelectorAll('.register-only');
+        const emailInput = document.getElementById('authEmail');
+        const confirmInput = document.getElementById('authConfirmPassword');
+        const termsInput = document.getElementById('authTerms');
         if(mode === 'login') {
             document.getElementById('tab-login').classList.add('active'); document.getElementById('tab-register').classList.remove('active');
             document.getElementById('authTitle').innerText = "SINCRO_CONTA"; document.getElementById('authSubmitBtn').innerText = "Acessar Sistema";
+            registerOnlyEls.forEach(el => el.style.display = 'none');
+            if (emailInput) emailInput.required = false;
+            if (confirmInput) confirmInput.required = false;
+            if (termsInput) termsInput.required = false;
         } else {
             document.getElementById('tab-login').classList.remove('active'); document.getElementById('tab-register').classList.add('active');
             document.getElementById('authTitle').innerText = "REGISTRAR_NÓ"; document.getElementById('authSubmitBtn').innerText = "Consolidar Identidade";
+            registerOnlyEls.forEach(el => el.style.display = '');
+            populateAgeSelectors();
+            if (emailInput) emailInput.required = true;
+            if (confirmInput) confirmInput.required = true;
+            if (termsInput) termsInput.required = true;
         }
     }
 
