@@ -143,8 +143,24 @@ async function createProfile(userId, username, email) {
 // select direto, já que a coluna email não é legível pela API normal.
 // =========================================================
 async function fetchEmailByUsername(username) {
-    const clean = username.replace(/^@/, '');
-    const { data, error } = await sb.rpc('email_by_username', { p_username: clean });
+    // BUGFIX CRÍTICO (login travado / "Nó de rede inexistente ou assinatura
+    // incorreta" em TODA conta existente): validateUsername() SEMPRE devolve
+    // o alias com "@" na frente (ver `value: clean.startsWith('@') ? clean : '@' + clean`),
+    // e createProfile() grava esse mesmo valor (com "@") na coluna profiles.username.
+    // Ou seja, no banco o username é literalmente "@fulano".
+    // Esta function ANTES removia o "@" antes de consultar
+    // (`username.replace(/^@/, '')`), então a query rodava como
+    // `lower(username) = lower('fulano')` contra uma coluna que guarda
+    // "@fulano" — NUNCA dava match. Resultado: email_by_username sempre
+    // retornava null, fetchEmailByUsername sempre retornava null, e o login
+    // caía direto no ramo de "username não encontrado" — para QUALQUER
+    // conta, mesmo com a senha certa, porque o e-mail nunca chegava a ser
+    // resolvido e signInWithPassword nunca era chamado. Não existe (nem
+    // nunca existiu) nenhuma checagem de "assinatura de nó" — é só o texto
+    // do alerta. O fix correto é não normalizar o "@" aqui, já que o valor
+    // já chega exatamente no mesmo formato gravado no banco (validateUsername
+    // já fez essa normalização lá atrás, em handleAuthSubmit).
+    const { data, error } = await sb.rpc('email_by_username', { p_username: username });
     if (error) { console.error('fetchEmailByUsername:', error.message); return null; }
     return data || null;
 }
@@ -270,6 +286,12 @@ sb.auth.onAuthStateChange((event) => {
         navigateTo('engine');
     }
 });
+
+// REALTIME GLOBAL: assina os canais públicos (eventos_globais + cards)
+// imediatamente, sem esperar login/sessão. Isto é o que garante que uma
+// aba anônima (ou qualquer conta) veja a MESMA atividade da rede ao vivo,
+// em vez de uma tela "zerada" — ver definição em initGlobalRealtime().
+initGlobalRealtime();
 
 // =========================================================
 // LOGIN / REGISTRO
@@ -476,7 +498,9 @@ async function logoutSession() {
     // buyCardFromMarket (ver Parte 5/4, mais abaixo no arquivo).
     // =========================================================
     const NOTIF_KEY   = 'dr0p_notifications';
-    const LEDGER_KEY  = 'dr0p_ledger';
+    // LEDGER_KEY removido: o ledger global agora vive na tabela pública
+    // `eventos_globais` (ver ledgerCache / pushLedger / fetchAndSeedGlobalEvents),
+    // não mais em localStorage.
 
     // =========================================================
     // SISTEMA DE COTAÇÃO EM TEMPO REAL (MARKET QUOTES ENGINE)
@@ -597,18 +621,37 @@ async function logoutSession() {
 
     // =========================================================
     // LEDGER DE TRANSAÇÕES GLOBAIS (Ponto 4)
+    // BUGFIX (site "zerado" em aba anônima/outra conta): isto ANTES lia/
+    // escrevia em localStorage (LEDGER_KEY), que é local a cada navegador —
+    // nenhuma outra aba/sessão via essas entradas. Agora `ledgerCache` é só
+    // um espelho em memória da tabela pública `eventos_globais`, populado
+    // no boot por fetchAndSeedGlobalEvents() e mantido vivo por Realtime
+    // (ver initGlobalRealtime(), mais abaixo) — qualquer aba, logada ou
+    // anônima, vê a MESMA lista, atualizada instantaneamente.
     // =========================================================
+    let ledgerCache = [];
     function loadLedger() {
-        try { return JSON.parse(localStorage.getItem(LEDGER_KEY)) || []; } catch(e) { return []; }
+        return ledgerCache;
     }
-    function pushLedger(entry) {
+    async function pushLedger(entry) {
+        // Só usuários autenticados geram atividade real e atribuível —
+        // mesmo padrão de RLS usado em cards/inventario (auth.uid() = id_usuario).
+        if (!currentUser.loggedIn) return;
         try {
-            const ledger = loadLedger();
-            ledger.unshift({ text: entry, ts: new Date().toLocaleTimeString('pt-PT') });
-            if (ledger.length > 50) ledger.length = 50;
-            localStorage.setItem(LEDGER_KEY, JSON.stringify(ledger));
-        } catch(e) {}
+            const { error } = await sb.from('eventos_globais').insert({
+                id_usuario: currentUser.id,
+                username: currentUser.username,
+                tipo: 'ledger',
+                mensagem: entry
+            });
+            if (error) console.error('pushLedger:', error.message);
+        } catch (e) { console.error('pushLedger:', e); }
+        // Não precisa atualizar ledgerCache/renderMarketLedger aqui na mão —
+        // o INSERT acima dispara o evento Realtime em initGlobalRealtime(),
+        // que já cuida de inserir no cache e re-renderizar pra TODO mundo
+        // (inclusive esta própria aba), de forma consistente.
     }
+
     function renderMarketLedger() {
         const box  = document.getElementById('marketLedgerBox');
         const list = document.getElementById('marketLedgerList');
@@ -732,39 +775,129 @@ async function logoutSession() {
     ];
 
     // =========================================================
-    // PERSISTÊNCIA DO FEED GLOBAL DE MUTAÇÕES/FUSÕES — Ponto 1
-    // Sem isso, novos drops/fusões desapareciam da Home a cada F5.
+    // FEED GLOBAL DE MUTAÇÕES/FUSÕES (Ponto 1) — AGORA REAL E PÚBLICO
+    // BUGFIX (site "zerado" em aba anônima/outra conta): isto ANTES persistia
+    // em localStorage (GLOBAL_FEED_KEY) — cada navegador/aba só via os
+    // próprios drops/fusões, nunca os de mais ninguém. `globalFeed` segue
+    // existindo como array em memória (buildStoriesMarquee() e o resto do
+    // app continuam lendo daqui sem mudança), mas quem alimenta esse array
+    // agora é a tabela pública `eventos_globais` (tipo='feed'), carregada no
+    // boot por fetchAndSeedGlobalEvents() e atualizada ao vivo por
+    // initGlobalRealtime() — qualquer aba, logada ou anônima, vê os MESMOS
+    // drops/fusões em tempo real. SEED_FEED acima só entra como fallback
+    // cosmético caso a rede ainda não tenha nenhum evento real registrado.
     // =========================================================
-    const GLOBAL_FEED_KEY = 'cyber_global_feed';
-
-    function loadGlobalFeed() {
-        try {
-            const saved = JSON.parse(localStorage.getItem(GLOBAL_FEED_KEY));
-            return Array.isArray(saved) ? saved : null;
-        } catch(e) { return null; }
-    }
-    function saveGlobalFeed(arr) {
-        try { localStorage.setItem(GLOBAL_FEED_KEY, JSON.stringify(arr)); } catch(e) {}
-    }
-
-    // Carrega o feed persistido; só usa o SEED_FEED na primeira vez (storage vazio)
-    let globalFeed = loadGlobalFeed();
-    if (globalFeed === null) {
-        globalFeed = [...SEED_FEED];
-        saveGlobalFeed(globalFeed);
-    }
+    let globalFeed = [...SEED_FEED];
 
     // Mercado: array em memória que renderMarketGrid() lê/filtra/pagina.
     // Fonte de verdade real é a tabela `cards` no Supabase — este array é
     // só um CACHE preenchido por loadMarketFromSupabase() sempre que a
     // tela de mercado é aberta ou uma ação (listar/comprar/remover) muda
-    // o estado. Começa vazio; renderMarketGrid() popula no primeiro render.
+    // o estado, OU quando o Realtime de `cards` detecta uma mudança feita
+    // por QUALQUER usuário (ver initGlobalRealtime()) — assim o mercado se
+    // atualiza ao vivo pra todo mundo, sem precisar de F5.
     let marketAssets = [];
 
-    // Garante que o item de exemplo do SEED_FEED também aparece no globalFeed
-    // (sem duplicar por ID). Isso é só o feed social/cosmético da Home —
-    // não tem relação com o mercado real de venda (ver nota acima).
-    if (!globalFeed.find(f => f.id === SEED_FEED[0].id)) globalFeed.unshift(SEED_FEED[0]);
+    // =========================================================
+    // REALTIME GLOBAL (Supabase) — fonte real e pública de:
+    //   • eventos_globais → ledger de mercado + feed de drops/fusões
+    //   • cards            → listagens/vendas/vitrine, refletidas ao vivo
+    // Substitui de raiz qualquer dependência de dados mockados/locais
+    // (localStorage) pra esses dois feeds. Roda incondicionalmente no boot
+    // do script (ver chamada de initGlobalRealtime() perto do
+    // onAuthStateChange, Parte 1), ANTES de qualquer login — inclusive em
+    // aba anônima, já que a leitura de ambas as tabelas é pública via RLS.
+    // =========================================================
+    function rowToLedgerEntry(row) {
+        return { text: row.mensagem, ts: new Date(row.created_at).toLocaleTimeString('pt-PT') };
+    }
+    function rowToFeedCard(row) {
+        return row.card_payload ? { ...row.card_payload, _eventId: row.id } : null;
+    }
+
+    // Publica um card consolidado (drop resgatado ou fusão bem-sucedida) no
+    // feed público. Substitui os antigos `globalFeed.unshift(...) +
+    // saveGlobalFeed(...)` — a re-renderização do marquee acontece via
+    // Realtime (initGlobalRealtime), de forma consistente pra TODO mundo,
+    // inclusive quem disparou a ação.
+    async function pushFeedCard(cardLike) {
+        if (!currentUser.loggedIn) return;
+        try {
+            const { error } = await sb.from('eventos_globais').insert({
+                id_usuario: currentUser.id,
+                username: currentUser.username,
+                tipo: 'feed',
+                mensagem: `${currentUser.username} consolidou ${cardLike.id} [${cardLike.rarityNameEN}]`,
+                card_payload: cardLike
+            });
+            if (error) console.error('pushFeedCard:', error.message);
+        } catch (e) { console.error('pushFeedCard:', e); }
+    }
+
+    // Busca os últimos eventos reais da rede e usa pra popular ledgerCache
+    // (ledger do mercado) e globalFeed (marquee de stories) — chamado uma
+    // única vez no boot, antes de qualquer subscrição Realtime.
+    async function fetchAndSeedGlobalEvents() {
+        const { data, error } = await sb.from('eventos_globais')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+        if (error) { console.error('fetchAndSeedGlobalEvents:', error.message); return; }
+
+        ledgerCache = data.map(rowToLedgerEntry);
+
+        const feedCards = data.map(rowToFeedCard).filter(Boolean);
+        // Se a rede já tem drops/fusões reais, eles substituem o SEED_FEED
+        // cosmético. Se ainda não há nenhum (deploy novo / pouca atividade),
+        // mantém o SEED_FEED como vitrine de exemplo na Home.
+        if (feedCards.length > 0) globalFeed = feedCards;
+
+        renderMarketLedger();
+        buildStoriesMarquee();
+    }
+
+    // Assina os canais Realtime públicos. Roda incondicionalmente (logado
+    // ou não) — é o que faz o ecossistema parecer "vivo" em QUALQUER aba,
+    // inclusive anônima, sem precisar dar F5.
+    let _globalRealtimeStarted = false;
+    function initGlobalRealtime() {
+        if (_globalRealtimeStarted) return; // evita assinar 2x (ex: hot reload / re-chamada acidental)
+        _globalRealtimeStarted = true;
+
+        fetchAndSeedGlobalEvents();
+
+        // Ledger + marquee: qualquer INSERT em eventos_globais (de QUALQUER
+        // usuário, em QUALQUER aba) chega aqui instantaneamente.
+        sb.channel('eventos_globais_live')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'eventos_globais' }, (payload) => {
+                const row = payload.new;
+                ledgerCache.unshift(rowToLedgerEntry(row));
+                if (ledgerCache.length > 50) ledgerCache.length = 50;
+
+                const card = rowToFeedCard(row);
+                if (card) {
+                    globalFeed.unshift(card);
+                    if (globalFeed.length > 50) globalFeed.length = 50;
+                    buildStoriesMarquee();
+                }
+                // Só repinta o ledger se a tela de mercado estiver mesmo
+                // aberta — evita trabalho de DOM desnecessário em outras telas.
+                const marketScreen = document.getElementById('screen-market');
+                if (marketScreen && marketScreen.classList.contains('active')) renderMarketLedger();
+            })
+            .subscribe();
+
+        // Mercado/vitrine: qualquer INSERT/UPDATE/DELETE em `cards` (nova
+        // listagem, venda, remoção, exposição na vitrine) de QUALQUER
+        // usuário atualiza a tela de mercado de todo mundo ao vivo.
+        sb.channel('cards_live')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'cards' }, () => {
+                const marketScreen = document.getElementById('screen-market');
+                if (marketScreen && marketScreen.classList.contains('active')) renderMarketGrid();
+            })
+            .subscribe();
+    }
+
 
     const canvas = document.getElementById('pfp-canvas'); 
     const ctx = canvas ? canvas.getContext('2d') : null;
@@ -1982,9 +2115,17 @@ async function logoutSession() {
                 registered: currentUser.loggedIn, exposed: false, forSale: false, price: 0, imgSrc: bakedBuffer.toDataURL(), costToClaim: claimCost 
             };
 
-            globalFeed.unshift({...activeAssetData});
-            saveGlobalFeed(globalFeed);
-            buildStoriesMarquee();
+            // BUGFIX (feed global com lixo/efêmero): este card ainda NÃO foi
+            // resgatado (pode shatterar em 10s se não for reivindicado — ver
+            // shatterAsset()). Publicar isso no feed PÚBLICO/real
+            // (eventos_globais) faria a rede inteira ver mutações que nunca
+            // chegaram a existir de fato, e exigiria desfazer via DELETE em
+            // tempo real se a pessoa não resgatasse a tempo. Agora só entram
+            // no feed global cards REAIS e definitivos: resgatados
+            // (claimAssetLogic → pushFeedCard) ou fundidos com sucesso
+            // (pushFeedCard no resultado da fusão). A pré-visualização local
+            // do drop continua funcionando normalmente — só não é mais
+            // transmitida pra rede antes de ser consolidada.
 
             downloadBtn.style.display = "block";
             downloadBtn.innerText = claimCost > 0 ? 
@@ -2019,8 +2160,11 @@ async function logoutSession() {
     function shatterAsset() {
         playSynthSound('shatter');
         speakPhrase("Mutação destruída.", "Mutation destroyed.");
-        if(activeAssetData) { globalFeed = globalFeed.filter(a => a.id !== activeAssetData.id); saveGlobalFeed(globalFeed); buildStoriesMarquee(); }
-        
+        // Não precisa mais limpar `globalFeed` aqui — o drop nunca chegou a
+        // ser publicado nele (ver nota no fim de claimAssetLogic's preview,
+        // acima), já que só cards efetivamente resgatados/fundidos entram
+        // no feed público agora.
+
         downloadBtn.style.display = "none";
         targetContainer.className = "target-box shattering";
         
@@ -3600,12 +3744,13 @@ async function logoutSession() {
                 // apagados/criados, itens de inventário consumidos) já foi
                 // gravada direto no Supabase nos pontos acima.
                 if (result === 'success' || result === 'common') registerFusionForBadges();
-                // Fusões bem-sucedidas (comum ou épico/lendário) entram no feed global,
-                // para que apareçam na Home e sobrevivam ao F5 — não só no cofre do usuário.
+                // Fusões bem-sucedidas (comum ou épico/lendário) entram no feed
+                // global REAL e público (eventos_globais), pra aparecerem na Home
+                // de TODO mundo (não só desta aba) e sobreviverem ao F5 — ver
+                // pushFeedCard()/initGlobalRealtime(). A re-renderização do
+                // marquee acontece via Realtime, não na mão aqui.
                 if (result === 'success' || result === 'common') {
-                    globalFeed.unshift({...fusedCard});
-                    saveGlobalFeed(globalFeed);
-                    buildStoriesMarquee();
+                    pushFeedCard({...fusedCard});
                 }
                 if (result === 'success' || result === 'common') pushLedger(`${currentUser.username} fundiu ${id1}+${id2} → ${fusedCard.id} [${fusedCard.rarityNameEN}]`);
                 else if (result === 'seguro_ativado') pushLedger(`${currentUser.username} ativou Núcleo de Backup em ${id1}+${id2} — ${id1} preservado`);
@@ -4536,8 +4681,11 @@ async function claimAssetLogic() {
         playTerminalSound('claim');
         speakPhrase("Ativo integrado ao seu cofre.", "Asset integrated into your vault.");
 
-        // Ledger entry
+        // Ledger entry + feed global: o card só entra na rede pública AGORA,
+        // porque só agora ele é real e definitivo (gravado em `cards` via
+        // insertCardToSupabase acima). Drops não-resgatados nunca chegam aqui.
         pushLedger(`${currentUser.username} resgatou o card ${assetSnapshot.id} [${assetSnapshot.rarityNameEN}]`);
+        pushFeedCard(assetSnapshot);
 
         showCyberAlert('PROCESSO_CONCLUÍDO:', currentLang === 'PT' ? 'Consolidado no seu cofre seguro!' : 'Consolidated into your secure vault!', 'success');
 
