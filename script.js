@@ -3095,16 +3095,41 @@ async function logoutSession() {
 
     // Estado de seleção da galeria de alquimia
     let _alchSelected = { alpha: null, beta: null }; // { id, asset }
+    // Estado de seleção da Fornalha (até 3 cards)
+    let _furnSelected = []; // array de cards
+    // Estado de navegação interna da Central de Alquimia: 'menu' | 'fusao' | 'fornalha'
+    let _alchMode = 'menu';
 
     function toggleAlchemyPanel() {
         const panel = document.getElementById('alchemyPanel'); if (!panel) return;
         if (panel.style.display === 'none' || !panel.style.display) {
             if (!currentUser.loggedIn) { showCyberAlert('ACESSO NEGADO', currentLang === 'PT' ? 'Precisas de estar logado para aceder ao laboratório de Alquimia.' : 'Login required to access the Alchemy Lab.', 'error'); return; }
-            _alchSelected = { alpha: null, beta: null };
             panel.style.display = 'block';
-            openAlchemyPanel();
+            setAlchemyMode('menu');
         } else {
             panel.style.display = 'none';
+        }
+    }
+
+    /**
+     * Gerencia a navegação entre as telas da Central de Alquimia:
+     * 'menu' (escolha de protocolo), 'fusao' (modo padrão) e 'fornalha' (alto risco).
+     */
+    function setAlchemyMode(mode) {
+        _alchMode = mode;
+        const menuView = document.getElementById('alchMenuView');
+        const fusaoView = document.getElementById('alchFusaoView');
+        const fornalhaView = document.getElementById('alchFornalhaView');
+        if (menuView) menuView.style.display = mode === 'menu' ? 'block' : 'none';
+        if (fusaoView) fusaoView.style.display = mode === 'fusao' ? 'block' : 'none';
+        if (fornalhaView) fornalhaView.style.display = mode === 'fornalha' ? 'block' : 'none';
+
+        if (mode === 'fusao') {
+            _alchSelected = { alpha: null, beta: null };
+            openAlchemyPanel();
+        } else if (mode === 'fornalha') {
+            _furnSelected = [];
+            openFurnacePanel();
         }
     }
 
@@ -3257,6 +3282,252 @@ async function logoutSession() {
         document.getElementById('probSuccess').innerText = `${ps}%`;
         document.getElementById('probBreak').innerText   = `${pb}%`;
         document.getElementById('probCommon').innerText  = `${pc}%`;
+    }
+
+    // =========================================================
+    // FORNALHA DE SOBRECARGA — MODO DE ALTO RISCO (até 3 cards)
+    // 80% DESTRUIÇÃO TOTAL (delete no Supabase) / 20% MUTAÇÃO MÁXIMA
+    // (queima os originais e gera 1 card novo de alta raridade)
+    // =========================================================
+
+    function openFurnacePanel() {
+        _renderFurnGallery();
+        _updateFurnPreview();
+    }
+
+    /** Renderiza a galeria de miniaturas no painel da Fornalha (seleção múltipla, máx 3) */
+    function _renderFurnGallery() {
+        const grid = document.getElementById('furnGalleryGrid');
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        const eligible = savedAssets.filter(a => !a.isListed);
+        if (eligible.length === 0) {
+            grid.innerHTML = '<div style="color:#ff550044; font-size:0.55rem; padding:8px; grid-column:1/-1;">Nenhum ativo disponível para a Fornalha.</div>';
+            return;
+        }
+
+        eligible.forEach(card => {
+            const thumb = document.createElement('div');
+            thumb.className = 'furn-thumb';
+            thumb.dataset.id = card.id;
+            if (card.isLocked) thumb.classList.add('locked-in-contract');
+            if (_furnSelected.some(c => c.id === card.id)) thumb.classList.add('selected');
+
+            const rarColor = _rarityColor(card.rarityType);
+            thumb.innerHTML = `
+                <img src="${card.imgSrc}" alt="${card.id}">
+                <div class="alch-thumb-rarity" style="color:${rarColor};">${(card.rarityNameEN || 'CMN').slice(0,3)}</div>
+            `;
+
+            thumb.addEventListener('click', () => _furnThumbClick(card));
+            grid.appendChild(thumb);
+        });
+    }
+
+    /**
+     * Lógica de seleção na Fornalha: clique alterna o card dentro/fora de
+     * _furnSelected, com limite de 3 cards simultâneos.
+     */
+    function _furnThumbClick(card) {
+        const idx = _furnSelected.findIndex(c => c.id === card.id);
+        if (idx >= 0) {
+            _furnSelected.splice(idx, 1);
+        } else {
+            if (_furnSelected.length >= 3) {
+                showCyberAlert('LIMITE DO REATOR', currentLang === 'PT' ? 'Máximo de 3 ativos por sobrecarga.' : 'Maximum of 3 assets per overload.', 'warn');
+                return;
+            }
+            _furnSelected.push(card);
+        }
+        _renderFurnGallery();
+        _updateFurnPreview();
+    }
+
+    /** Atualiza os 3 slots de preview e o estado do botão de sobrecarga */
+    function _updateFurnPreview() {
+        for (let i = 0; i < 3; i++) {
+            const slot = document.getElementById(`furnPreviewSlot${i + 1}`);
+            if (!slot) continue;
+            const card = _furnSelected[i];
+            if (card) {
+                const rc = _rarityColor(card.rarityType);
+                slot.innerHTML = `<img src="${card.imgSrc}" style="border:2px solid ${rc};">`;
+            } else {
+                slot.innerHTML = '<div class="furn-empty-slot">☢<span>VAZIO</span></div>';
+            }
+        }
+        const btn = document.getElementById('furnOverloadBtn');
+        if (btn) btn.disabled = _furnSelected.length === 0;
+    }
+
+    /**
+     * Executa a Sobrecarga: anima o reator, sorteia o resultado (80/20) e
+     * reflete a queima ou a mutação máxima diretamente no Supabase.
+     */
+    async function startOverload() {
+        if (!currentUser.loggedIn) { showCyberAlert('ACESSO NEGADO', currentLang === 'PT' ? 'Precisas de estar logado para aceder à Fornalha.' : 'Login required to access the Furnace.', 'error'); return; }
+        if (_furnSelected.length === 0) return;
+        if (_furnSelected.some(c => c.isListed)) { showCyberAlert('🔒 CUSTÓDIA ATIVA', currentLang === 'PT' ? 'Ativos em custódia no mercado não podem ser sobrecarregados.' : 'Assets listed on market cannot be overloaded.', 'error'); return; }
+
+        const overloadBtn = document.getElementById('furnOverloadBtn');
+        overloadBtn.disabled = true;
+
+        // Snapshot dos cards selecionados ANTES de qualquer alteração
+        const snaps = _furnSelected.map(c => ({...c}));
+        const idsConsumidos = snaps.map(c => c.id);
+
+        const furnacePanel = document.getElementById('alchFornalhaView');
+        furnacePanel.classList.add('furnace-charging');
+        playSynthSound('click');
+        speakPhrase("Iniciando sobrecarga do reator. Núcleo instável.", "Initiating reactor overload. Core unstable.");
+
+        setTimeout(() => {
+            furnacePanel.classList.remove('furnace-charging');
+
+            // ── Overlay de glitch/reator por 1500ms ───────────────────────
+            const glitchOverlay = document.createElement('div');
+            glitchOverlay.id = 'furnaceGlitchOverlay';
+            Object.assign(glitchOverlay.style, {
+                position: 'fixed', inset: '0', zIndex: '9999',
+                background: 'rgba(10, 3, 0, 0.94)', display: 'flex',
+                flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                gap: '18px', pointerEvents: 'all',
+            });
+
+            const flashLayer = document.createElement('div');
+            flashLayer.className = 'furnace-flash-layer';
+            glitchOverlay.appendChild(flashLayer);
+
+            document.body.classList.add('furnace-screen-shake');
+
+            playTerminalSound('alchemy');
+            playFusionShockSound();
+            const glitchSoundTimer = setInterval(() => playSynthSound('click'), 280);
+            const flashTimers = [250, 550, 850, 1100, 1350].map(delay =>
+                setTimeout(() => {
+                    flashLayer.classList.add('flash-pulse');
+                    setTimeout(() => flashLayer.classList.remove('flash-pulse'), 90);
+                    playSynthSound('click');
+                }, delay)
+            );
+
+            const glitchLabel = document.createElement('div');
+            glitchLabel.className = 'loading-glitch loading-glitch-cursor furnace-glitch-label';
+            glitchLabel.setAttribute('data-text', '[ REACTOR CORE INSTABLE ]');
+            glitchLabel.textContent = '[ REACTOR CORE INSTABLE ]';
+            Object.assign(glitchLabel.style, { fontSize: '1.3rem', letterSpacing: '4px' });
+
+            const glitchSub = document.createElement('div');
+            glitchSub.style.cssText = 'font-family:"Space Mono",monospace; font-size:0.6rem; color:#ff550099; letter-spacing:2px;';
+            const subMessages = [
+                'CONTENÇÃO DE NÚCLEO FALHANDO...',
+                'TEMPERATURA CRÍTICA ATINGIDA...',
+                'CALCULANDO PROBABILIDADE DE DERRETIMENTO...',
+                'SOBRECARGA EM ANDAMENTO...',
+            ];
+            glitchSub.textContent = subMessages[Math.floor(Math.random() * subMessages.length)];
+
+            const glitchBar = document.createElement('span');
+            glitchBar.className = 'loading-glitch-bar furnace-glitch-bar';
+            Object.assign(glitchBar.style, { width: '260px', display: 'block' });
+
+            const scanline = document.createElement('div');
+            scanline.className = 'loading-glitch-scanline furnace-glitch-scanline';
+
+            glitchOverlay.appendChild(scanline);
+            glitchOverlay.appendChild(glitchLabel);
+            glitchOverlay.appendChild(glitchSub);
+            glitchOverlay.appendChild(glitchBar);
+            document.body.appendChild(glitchOverlay);
+
+            setTimeout(async () => {
+                clearInterval(glitchSoundTimer);
+                document.body.classList.remove('furnace-screen-shake');
+                glitchOverlay.remove();
+
+                // Remove os cards da memória local ANTES de decidir o resultado
+                savedAssets = savedAssets.filter(a => !idsConsumidos.includes(a.id));
+
+                const roll = Math.random();
+                let alertTitle, alertMsg, alertType;
+
+                if (roll < 0.80) {
+                    // ── FALHA (80%): DELETA todos os cards selecionados do Supabase ──
+                    for (const snap of snaps) {
+                        if (snap._dbId) await deleteCardFromSupabase(snap._dbId);
+                    }
+                    alertTitle = '[ERRO] FALHA DE CONTENÇÃO';
+                    alertMsg = currentLang === 'PT'
+                        ? `[ERRO] COMPONENTES DERRETIDOS NA FORNALHA. ATIVOS DESTRUÍDOS.<br><small style="color:#ff550099">${idsConsumidos.join(', ')}</small>`
+                        : `[ERROR] COMPONENTS MELTED IN THE FURNACE. ASSETS DESTROYED.<br><small style="color:#ff550099">${idsConsumidos.join(', ')}</small>`;
+                    alertType = 'error';
+                    triggerAncestralFlash('#ff5500');
+                    playSynthSound('shatter');
+                    speakPhrase("Fornalha falhou. Ativos derretidos.", "Furnace failed. Assets melted down.");
+                    pushLedger(`${currentUser.username} sobrecarregou a Fornalha com ${idsConsumidos.join('+')} — DERRETIMENTO TOTAL`);
+
+                } else {
+                    // ── SUCESSO (20%): apaga originais + gera 1 card novo de alta raridade ──
+                    for (const snap of snaps) {
+                        if (snap._dbId) await deleteCardFromSupabase(snap._dbId);
+                    }
+
+                    const rarityRoll = Math.random();
+                    const newRarity = rarityRoll < 0.55 ? 'ancestral' : 'legendary';
+                    const rN   = newRarity === 'ancestral' ? 'ANCESTRAL' : 'LENDÁRIO';
+                    const rNEN = newRarity === 'ancestral' ? 'ANCESTRAL' : 'LEGENDARY';
+                    const wc   = newRarity === 'ancestral' ? '#ff007f' : '#00ffff';
+
+                    const baseSnap = snaps[Math.floor(Math.random() * snaps.length)];
+                    const fusedVisual = await renderFusedCardVisual(baseSnap.imgSrc, 'gold');
+                    if (newRarity === 'ancestral') triggerAncestralFlash('#ff007f');
+
+                    const newId = "#" + Math.floor(100000 + Math.random() * 900000);
+                    const inheritedFusionCount = Math.max(...snaps.map(s => s.fusion_count || 0)) + 1;
+
+                    const newCard = {
+                        id: newId, rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
+                        styleName: 'OVERLOAD MUTATION', styleNameEN: 'OVERLOAD MUTATION',
+                        creator: currentUser.username, registered: true, exposed: false,
+                        forSale: false, isListed: false, price: 0,
+                        imgSrc: fusedVisual, isFused: true, tags: ['fused', 'fornalha', 'evento'],
+                        fusion_count: inheritedFusionCount,
+                        genetic_history: snaps.flatMap(s => s.genetic_history || []).concat([{
+                            fusionId: `FRN-${inheritedFusionCount.toString().padStart(4, '0')}`,
+                            ts: Date.now(),
+                            sacrificedCardId: idsConsumidos.join('+'),
+                            survivalRollResult: roll,
+                            mutation: { huePalette: 'gold', source: 'fornalha' }
+                        }]),
+                        eliteEligible: inheritedFusionCount >= 3
+                    };
+                    attachProvenance(newCard);
+                    newCard.provenance.parentIds = idsConsumidos;
+                    savedAssets.push(newCard);
+
+                    const inserted = await insertCardToSupabase(newCard, currentUser.id);
+                    if (!inserted) console.error('startOverload: falha ao gravar card mutado no Supabase.');
+
+                    alertTitle = '[SOBRECARGA BEM SUCEDIDA]';
+                    alertMsg = currentLang === 'PT'
+                        ? `[SOBRECARGA BEM SUCEDIDA] NOVO ATIVO GERADO NA REDE.<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span>`
+                        : `[OVERLOAD SUCCESSFUL] NEW ASSET GENERATED ON THE NETWORK.<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span>`;
+                    alertType = 'success';
+                    playTerminalSound('alchemy');
+                    registerFusionForBadges();
+                    pushFeedCard({...newCard});
+                    pushLedger(`${currentUser.username} sobrecarregou a Fornalha com ${idsConsumidos.join('+')} → ${newCard.id} [${newCard.rarityNameEN}]`);
+                }
+
+                _furnSelected = [];
+                _renderFurnGallery();
+                _updateFurnPreview();
+                renderVaultGrid();
+                showCyberAlert(alertTitle, alertMsg, alertType);
+
+            }, 1500);
+        }, 1200);
     }
 
     // =========================================================
