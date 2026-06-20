@@ -13,6 +13,16 @@
 
 const sb = window.supabaseClient;
 
+// BUGFIX CRÍTICO: authMode nunca era declarada (só recebia valor dentro de
+// switchAuthMode, sem let/var/const). handleAuthSubmit LÊ authMode logo no
+// início — se a pessoa clicasse em "Acessar Sistema" antes de switchAuthMode
+// ter rodado pelo menos uma vez (ex: token de e-mail confirmado, refresh,
+// alguma ordem de carregamento específica do navegador), authMode ainda não
+// existia e o acesso lançava "ReferenceError: authMode is not defined" —
+// fora do try/catch original, então o clique não fazia NADA visível. Valor
+// inicial 'login' porque a aba "Conectar" já vem ativa por padrão no HTML.
+let authMode = 'login';
+
 let currentUser = {
     loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
     bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
@@ -265,13 +275,6 @@ sb.auth.onAuthStateChange((event) => {
 async function handleAuthSubmit(event) {
     event.preventDefault();
     const errorEl = document.getElementById('authErrorMsg');
-    if (!errorEl) {
-        // Se isso disparar, o próprio elemento #authErrorMsg não existe no DOM
-        // no momento do clique — usa alert() porque não dá pra escrever em
-        // um elemento que não existe. Isso por si só já seria a causa raiz.
-        alert('DEBUG: #authErrorMsg não encontrado no DOM.');
-        return;
-    }
     errorEl.style.display = 'none';
     const submitBtn = document.getElementById('authSubmitBtn');
 
