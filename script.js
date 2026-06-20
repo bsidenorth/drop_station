@@ -1,75 +1,318 @@
-    let audioCtx = null;
-    const fixedSessionCode = "#" + Math.floor(1000 + Math.random() * 9000);
-    
-    let currentLang = 'PT';
-    let authMode = 'login';
-    let isBgmPlaying = false;
-    let bgmInterval = null;
+// =========================================================
+// DROP STATION — PARTE 1/4: AUTH (SUPABASE)
+// SUBSTITUI no script.js original:
+//   - bloco "PERSISTÊNCIA DA SESSÃO ATIVA" (saveCurrentSession / restoreCurrentSession)
+//   - bloco "REGISTRY CENTRALIZADO DE UTILIZADORES" (REGISTRY_KEY, SEED_USERS,
+//     loadRegistry, saveRegistry, registryGet, registrySet, initRegistry IIFE)
+//   - função handleAuthSubmit
+//   - função logoutSession
+// MANTÉM como está: switchAuthMode, sanitizeInput, validateUsername,
+//   RESERVED_USERNAMES, navigateTo, handleProfileNavClick
+// SUBSTITUI TAMBÉM: validatePassword (regras de força mais rígidas)
+// =========================================================
 
-    let currentUser = { 
-        loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: fixedSessionCode,
-        bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
-        followers: 12, following: 4, followedByMe: false,
-        inventory: [] // itens modificadores de alquimia (Protetores/Catalisadores/Moedas de Entrada)
+const sb = window.supabaseClient;
+
+let currentUser = {
+    loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
+    bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
+    followers: 12, following: 4, followedByMe: false,
+    inventory: [] // populado na Parte 3 (inventário)
+};
+
+// ── Username "@alias" <-> email sintético exigido pelo Supabase Auth ──
+function usernameToEmail(username) {
+    const clean = username.replace(/^@/, '').toLowerCase();
+    return `${clean}@dropstation.app`;
+}
+
+// =========================================================
+// SEGURANÇA: REGRAS DE FORÇA DA SENHA
+// (substitui o validatePassword original, que só exigia 6 chars)
+// =========================================================
+function validatePassword(raw) {
+    if (!raw || raw.length < 8) return { ok: false, msg: 'Chave deve ter no mínimo 8 caracteres.' };
+    if (raw.length > 128) return { ok: false, msg: 'Chave demasiado longa (máx. 128 chars).' };
+    if (!/[a-z]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 letra minúscula.' };
+    if (!/[A-Z]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 letra maiúscula.' };
+    if (!/[0-9]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 número.' };
+    const COMMON_WEAK = ['12345678', 'password', 'senha123', 'qwerty123', '11111111', 'abc12345', 'Password1'];
+    if (COMMON_WEAK.some(w => w.toLowerCase() === raw.toLowerCase())) {
+        return { ok: false, msg: 'Chave demasiado comum/fraca. Escolhe outra.' };
+    }
+    return { ok: true };
+}
+
+// =========================================================
+// SEGURANÇA: ANTI-BRUTEFORCE NO LOGIN (client-side)
+// Trava tentativas após N falhas seguidas. Isso é só uma camada
+// de UX/atrito — a proteção real fica no painel Supabase:
+// Authentication → Settings → habilite "Leaked password protection",
+// reduza o rate limit de signInWithPassword e ative captcha (hCaptcha/Turnstile).
+// =========================================================
+const LOGIN_LOCK_KEY = 'dr0p_login_attempts';
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_MS = 30000; // 30s
+
+function getLoginAttemptState() {
+    try { return JSON.parse(sessionStorage.getItem(LOGIN_LOCK_KEY)) || { count: 0, lockedUntil: 0 }; }
+    catch (e) { return { count: 0, lockedUntil: 0 }; }
+}
+function setLoginAttemptState(state) {
+    try { sessionStorage.setItem(LOGIN_LOCK_KEY, JSON.stringify(state)); } catch (e) {}
+}
+function registerFailedLogin() {
+    const state = getLoginAttemptState();
+    state.count += 1;
+    if (state.count >= MAX_LOGIN_ATTEMPTS) state.lockedUntil = Date.now() + LOCKOUT_MS;
+    setLoginAttemptState(state);
+}
+function clearLoginAttempts() {
+    setLoginAttemptState({ count: 0, lockedUntil: 0 });
+}
+function secondsLoginLocked() {
+    const state = getLoginAttemptState();
+    if (state.lockedUntil && Date.now() < state.lockedUntil) {
+        return Math.ceil((state.lockedUntil - Date.now()) / 1000);
+    }
+    return 0;
+}
+
+// =========================================================
+// SEGURANÇA: ANTI-SPAM NO REGISTRO (client-side)
+// Limita quantas contas podem ser criadas a partir do mesmo
+// navegador/sessão num intervalo curto — dificulta criação em massa.
+// =========================================================
+const SIGNUP_LOCK_KEY = 'dr0p_signup_attempts';
+const MAX_SIGNUPS_PER_WINDOW = 3;
+const SIGNUP_WINDOW_MS = 10 * 60 * 1000; // 10 minutos
+
+function getSignupState() {
+    try { return JSON.parse(sessionStorage.getItem(SIGNUP_LOCK_KEY)) || { timestamps: [] }; }
+    catch (e) { return { timestamps: [] }; }
+}
+function registerSignupAttempt() {
+    const state = getSignupState();
+    state.timestamps = state.timestamps.filter(ts => Date.now() - ts < SIGNUP_WINDOW_MS);
+    state.timestamps.push(Date.now());
+    try { sessionStorage.setItem(SIGNUP_LOCK_KEY, JSON.stringify(state)); } catch (e) {}
+}
+function secondsSignupLocked() {
+    const state = getSignupState();
+    const recent = state.timestamps.filter(ts => Date.now() - ts < SIGNUP_WINDOW_MS);
+    if (recent.length < MAX_SIGNUPS_PER_WINDOW) return 0;
+    const oldest = Math.min(...recent);
+    return Math.ceil((SIGNUP_WINDOW_MS - (Date.now() - oldest)) / 1000);
+}
+
+// =========================================================
+// PERFIL (tabela public.profiles)
+// =========================================================
+async function fetchProfile(userId) {
+    const { data, error } = await sb.from('profiles').select('*').eq('id', userId).single();
+    if (error) { console.error('fetchProfile:', error.message); return null; }
+    return data;
+}
+
+async function createProfile(userId, username) {
+    const payload = {
+        id: userId,
+        username,
+        bumps: 100,
+        code: "#" + Math.floor(1000 + Math.random() * 9000),
+        bio: "Membro verificado.",
+        avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg",
+        banner: ""
+    };
+    const { data, error } = await sb.from('profiles').insert(payload).select().single();
+    if (error) { console.error('createProfile:', error.message); return null; }
+    return data;
+}
+
+function applyProfileToCurrentUser(profile) {
+    currentUser = {
+        loggedIn: true,
+        id: profile.id,
+        username: profile.username,
+        bumps: profile.bumps,
+        code: profile.code,
+        bio: profile.bio,
+        avatar: profile.avatar,
+        banner: profile.banner,
+        status: profile.status || 'online',
+        followingList: profile.following || [],
+        following: (profile.following || []).length,
+        followers: 0, // calculado em tempo real onde for exibido (Parte futura)
+        followedByMe: false,
+        inventory: [] // populado na Parte 3
     };
 
-    // =========================================================
-    // PERSISTÊNCIA DA SESSÃO ATIVA (corrige logout no F5)
-    // =========================================================
-    const CURRENT_USER_KEY = 'cyber_current_user';
+    const navText = document.getElementById('nav-btn-text');
+    if (navText) navText.innerText = currentUser.username.toUpperCase();
+    const vaultBtn = document.getElementById('navVaultBtn'); if (vaultBtn) vaultBtn.style.display = 'flex';
+    const marketBtn = document.getElementById('navMarketBtn'); if (marketBtn) marketBtn.style.display = 'flex';
+    const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'flex';
+    const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'flex';
+    const contractsBtn = document.getElementById('navContractsBtn'); if (contractsBtn) contractsBtn.style.display = 'flex';
+}
 
-    function saveCurrentSession() {
-        try {
-            if (currentUser.loggedIn) {
-                localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
+function resetCurrentUserToAnon() {
+    currentUser = {
+        loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
+        bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
+        followers: 12, following: 4, followedByMe: false, inventory: []
+    };
+    messageThreads = {};
+    activeThreadUser = null;
+    savedAssets = [];
+
+    const navText = document.getElementById('nav-btn-text'); if (navText) navText.innerText = "ACESSAR TERMINAL";
+    const vaultBtn = document.getElementById('navVaultBtn'); if (vaultBtn) vaultBtn.style.display = 'none';
+    const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'none';
+    const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'none';
+    const cBtn = document.getElementById('navContractsBtn'); if (cBtn) cBtn.style.display = 'none';
+}
+
+// =========================================================
+// SESSÃO: restaura login ao recarregar a página (F5)
+// =========================================================
+async function restoreCurrentSession() {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) return false;
+
+    const profile = await fetchProfile(session.user.id);
+    if (!profile) return false;
+
+    applyProfileToCurrentUser(profile);
+    // savedAssets (cofre) é carregado na Parte 2 (cards) via loadCardsFromSupabase()
+    return true;
+}
+
+// Mantém currentUser sincronizado caso o usuário faça login/logout em outra aba
+sb.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT') resetCurrentUserToAnon();
+});
+
+// =========================================================
+// LOGIN / REGISTRO
+// =========================================================
+async function handleAuthSubmit(event) {
+    event.preventDefault();
+    const rawUser = document.getElementById('authUsername').value;
+    const rawPass = document.getElementById('authPassword').value;
+    const errorEl = document.getElementById('authErrorMsg');
+    errorEl.style.display = 'none';
+
+    if (authMode === 'login') {
+        const lockedSecs = secondsLoginLocked();
+        if (lockedSecs > 0) {
+            errorEl.innerText = `Muitas tentativas falhas. Aguarda ${lockedSecs}s antes de tentar novamente.`;
+            errorEl.style.display = 'block';
+            return;
+        }
+    } else {
+        const signupLockedSecs = secondsSignupLocked();
+        if (signupLockedSecs > 0) {
+            errorEl.innerText = `Limite de registros atingido. Aguarda ${signupLockedSecs}s para tentar de novo.`;
+            errorEl.style.display = 'block';
+            return;
+        }
+    }
+
+    const userCheck = validateUsername(rawUser);
+    if (!userCheck.ok) { errorEl.innerText = userCheck.msg; errorEl.style.display = 'block'; return; }
+    const formattedUser = userCheck.value;
+
+    const passCheck = validatePassword(rawPass);
+    if (!passCheck.ok) { errorEl.innerText = passCheck.msg; errorEl.style.display = 'block'; return; }
+
+    const email = usernameToEmail(formattedUser);
+    const submitBtn = document.getElementById('authSubmitBtn');
+    submitBtn.disabled = true;
+
+    try {
+        if (authMode === 'register') {
+            registerSignupAttempt();
+            const { data, error } = await sb.auth.signUp({ email, password: rawPass });
+            if (error) {
+                errorEl.innerText = error.message.includes('already registered')
+                    ? "Este terminal alias já está registrado na rede."
+                    : error.message;
+                errorEl.style.display = 'block';
+                return;
             }
-        } catch(e) {}
+            // Se confirmação de e-mail estiver desativada no painel, data.user já vem ativo
+            if (data.user) {
+                const profile = await createProfile(data.user.id, formattedUser);
+                if (!profile) {
+                    // Rollback: evita usuário "fantasma" no Auth sem profile correspondente
+                    await sb.auth.signOut();
+                    errorEl.innerText = "Falha ao criar perfil (alias pode já estar em uso). Tenta outro username.";
+                    errorEl.style.display = 'block';
+                    return;
+                }
+            }
+
+            showCyberAlert('// NÓ CONSOLIDADO //', 'Registo concluído. Realiza a conexão agora.', 'success');
+            switchAuthMode('login');
+            return;
+        }
+
+        // LOGIN
+        const { data, error } = await sb.auth.signInWithPassword({ email, password: rawPass });
+        if (error) {
+            registerFailedLogin();
+            const remaining = MAX_LOGIN_ATTEMPTS - getLoginAttemptState().count;
+            errorEl.innerText = remaining > 0
+                ? `Nó de rede inexistente ou assinatura incorreta. (${remaining} tentativa(s) restante(s))`
+                : `Muitas tentativas falhas. Aguarda ${secondsLoginLocked()}s.`;
+            errorEl.style.display = 'block';
+            return;
+        }
+        clearLoginAttempts();
+
+        const profile = await fetchProfile(data.user.id);
+        if (!profile) {
+            errorEl.innerText = "Perfil não encontrado. Contate o suporte da rede.";
+            errorEl.style.display = 'block';
+            return;
+        }
+
+        messageThreads = {};
+        activeThreadUser = null;
+        const prevAssets = [...(savedAssets || [])];
+        applyProfileToCurrentUser(profile);
+
+        // savedAssets (cofre) será carregado de fato na Parte 2 (cards)
+        savedAssets = [];
+        checkIncomingGifts(prevAssets, savedAssets);
+
+        playTerminalSound('login');
+        resumePendingContracts();
+        navigateTo('engine');
+
+    } catch (e) {
+        console.error(e);
+        errorEl.innerText = "Falha de comunicação com a rede. Tenta novamente.";
+        errorEl.style.display = 'block';
+    } finally {
+        submitBtn.disabled = false;
     }
+}
 
-    function restoreCurrentSession() {
-        try {
-            const raw = localStorage.getItem(CURRENT_USER_KEY);
-            if (!raw) return false;
-            const stored = JSON.parse(raw);
-            if (!stored || !stored.username) return false;
+// =========================================================
+// LOGOUT
+// =========================================================
+async function logoutSession() {
+    await sb.auth.signOut();
+    resetCurrentUserToAnon();
+    navigateTo('engine');
+}
 
-            // Revalida contra o registry para não restaurar dados desatualizados
-            const fresh = registryGet(stored.username) || stored;
-            currentUser = { ...fresh, ...stored, loggedIn: true };
-
-            savedAssets = currentUser.savedAssets || [];
-
-            const navText = document.getElementById('nav-btn-text');
-            if (navText) navText.innerText = currentUser.username.toUpperCase();
-            const vaultBtn = document.getElementById('navVaultBtn'); if (vaultBtn) vaultBtn.style.display = 'flex';
-            const marketBtn = document.getElementById('navMarketBtn'); if (marketBtn) marketBtn.style.display = 'flex';
-            const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'flex';
-            const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'flex';
-            const contractsBtn = document.getElementById('navContractsBtn'); if (contractsBtn) contractsBtn.style.display = 'flex';
-            return true;
-        } catch(e) { return false; }
-    }
-
-    // =========================================================
-    // REGISTRY CENTRALIZADO DE UTILIZADORES (persistência GitHub)
-    // =========================================================
-    const REGISTRY_KEY = 'drop_station_users';
-    const SEED_USERS = [
-        { username:"@cyber_k1ng",    password:"123", bumps:150, code:"#9901", bio:"Lenda antiga da rede.",  avatar:"https://i.ibb.co/m56c5F2Z/ced5acf2-417d-4669-b964-96437ab91fda.jpg", banner:"", savedAssets:[],
-          inventory:[
-            { itemId:"item_poeira_silicio_seed", templateId:"poeira_silicio", category:"MOEDA_ENTRADA", qty:5 },
-            { itemId:"item_catalisador_estab_seed", templateId:"catalisador_estabilidade", category:"PROTETOR", qty:1 }
-          ] },
-        { username:"@neon_samurai",  password:"123", bumps:300, code:"#4421", bio:"Luzes e glitch.",        avatar:"https://i.ibb.co/S7JbrXX2/fa809178-22dc-4ec1-8d84-2dcea9ab44b7.jpg", banner:"", savedAssets:[],
-          inventory:[
-            { itemId:"item_sucata_circuitos_seed", templateId:"sucata_circuitos", category:"MOEDA_ENTRADA", qty:5 },
-            { itemId:"item_nucleo_backup_seed", templateId:"nucleo_backup", category:"PROTETOR", qty:1 }
-          ] }
-    ];
-
-    function loadRegistry() {
-        try { return JSON.parse(localStorage.getItem(REGISTRY_KEY)) || {}; } catch(e) { return {}; }
-    }
+// =========================================================
+// BOOT: tenta restaurar sessão ao carregar a página
+// =========================================================
+restoreCurrentSession();
     function saveRegistry(reg) {
         try { localStorage.setItem(REGISTRY_KEY, JSON.stringify(reg)); } catch(e) {}
     }
