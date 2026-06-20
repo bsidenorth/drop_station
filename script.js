@@ -2413,10 +2413,15 @@
     // =========================================================
     // ALQUIMIA — FUSÃO DE 2 CARDS COM PROBABILIDADE (VAULT ONLY)
     // =========================================================
+
+    // Estado de seleção da galeria de alquimia
+    let _alchSelected = { alpha: null, beta: null }; // { id, asset }
+
     function toggleAlchemyPanel() {
         const panel = document.getElementById('alchemyPanel'); if (!panel) return;
         if (panel.style.display === 'none' || !panel.style.display) {
             if (!currentUser.loggedIn) { showCyberAlert('ACESSO NEGADO', currentLang === 'PT' ? 'Precisas de estar logado para aceder ao laboratório de Alquimia.' : 'Login required to access the Alchemy Lab.', 'error'); return; }
+            _alchSelected = { alpha: null, beta: null };
             panel.style.display = 'block';
             openAlchemyPanel();
         } else {
@@ -2425,47 +2430,151 @@
     }
 
     function openAlchemyPanel() {
+        // Sincroniza os <select> ocultos (mantidos para compatibilidade com fuseCards())
         ['fuseCard1','fuseCard2'].forEach((sid, si) => {
             const sel = document.getElementById(sid); if (!sel) return;
-            const prev = sel.value;
             sel.innerHTML = `<option value="">-- CARD ${si+1} --</option>`;
             savedAssets.forEach(a => {
                 if (a.isListed) return;
                 const opt = document.createElement('option');
                 opt.value = a.id;
                 opt.innerText = `${a.id} [${a.rarityNameEN}] ${a.styleName}`;
-                if (a.id === prev) opt.selected = true;
                 sel.appendChild(opt);
             });
         });
+
+        _renderAlchGallery();
+        _updateAlchPreviews();
         previewAlchemy();
     }
 
-    function previewAlchemy() {
-        const id1 = document.getElementById('fuseCard1').value;
-        const id2 = document.getElementById('fuseCard2').value;
-        const probBox = document.getElementById('alchProbBox');
+    /** Cor neon por raridade */
+    function _rarityColor(rt) {
+        return rt === 'ancestral' ? '#ff007f' : rt === 'legendary' ? '#00ffff' : rt === 'epic' ? '#ffaa00' : '#aaaaaa';
+    }
 
+    /** Renderiza a galeria de miniaturas no painel de alquimia */
+    function _renderAlchGallery() {
+        const grid = document.getElementById('alchGalleryGrid');
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        const eligible = savedAssets.filter(a => !a.isListed);
+        if (eligible.length === 0) {
+            grid.innerHTML = '<div style="color:#ff00ff44; font-size:0.55rem; padding:8px; grid-column:1/-1;">Nenhum card disponível para fusão.</div>';
+            return;
+        }
+
+        eligible.forEach(card => {
+            const thumb = document.createElement('div');
+            thumb.className = 'alch-thumb';
+            thumb.dataset.id = card.id;
+            if (card.isLocked) thumb.classList.add('locked-in-contract');
+
+            // Bordas de seleção ativas
+            if (_alchSelected.alpha && _alchSelected.alpha.id === card.id) thumb.classList.add('selected-alpha');
+            if (_alchSelected.beta  && _alchSelected.beta.id  === card.id) thumb.classList.add('selected-beta');
+
+            const rarColor = _rarityColor(card.rarityType);
+            thumb.innerHTML = `
+                <img src="${card.imgSrc}" alt="${card.id}">
+                <div class="alch-thumb-rarity" style="color:${rarColor};">${(card.rarityNameEN || 'CMN').slice(0,3)}</div>
+            `;
+
+            thumb.addEventListener('click', () => _alchThumbClick(card));
+            grid.appendChild(thumb);
+        });
+    }
+
+    /**
+     * Lógica de seleção ao clicar num thumb:
+     * - Primeiro clique livre → ALPHA (rosa)
+     * - Segundo clique (card diferente) → BETA (ciano)
+     * - Clicar no mesmo card que já está selecionado → deseleciona esse slot
+     * - Se ambos estão cheios e clica num novo → substitui ALPHA e move ALPHA atual para BETA
+     */
+    function _alchThumbClick(card) {
+        if (_alchSelected.alpha && _alchSelected.alpha.id === card.id) {
+            // Deseleciona alpha
+            _alchSelected.alpha = null;
+        } else if (_alchSelected.beta && _alchSelected.beta.id === card.id) {
+            // Deseleciona beta
+            _alchSelected.beta = null;
+        } else if (!_alchSelected.alpha) {
+            _alchSelected.alpha = card;
+        } else if (!_alchSelected.beta) {
+            if (_alchSelected.alpha.id === card.id) return; // mesmo card, ignora
+            _alchSelected.beta = card;
+        } else {
+            // Ambos cheios: substitui alpha, mantém beta
+            _alchSelected.alpha = card;
+            if (_alchSelected.beta && _alchSelected.beta.id === card.id) _alchSelected.beta = null;
+        }
+
+        // Sincroniza <select> ocultos
+        const s1 = document.getElementById('fuseCard1');
+        const s2 = document.getElementById('fuseCard2');
+        if (s1) s1.value = _alchSelected.alpha ? _alchSelected.alpha.id : '';
+        if (s2) s2.value = _alchSelected.beta  ? _alchSelected.beta.id  : '';
+
+        _renderAlchGallery();
+        _updateAlchPreviews();
+        previewAlchemy();
+    }
+
+    /** Atualiza os slots de preview (imagem + nome) */
+    function _updateAlchPreviews() {
         const p1 = document.getElementById('previewSlot1');
         const p2 = document.getElementById('previewSlot2');
+        const n1 = document.getElementById('alchSlotName1');
+        const n2 = document.getElementById('alchSlotName2');
 
-        const c1 = savedAssets.find(a => a.id === id1);
-        const c2 = savedAssets.find(a => a.id === id2);
+        if (p1) {
+            if (_alchSelected.alpha) {
+                const c = _alchSelected.alpha;
+                const rc = _rarityColor(c.rarityType);
+                p1.innerHTML = `<img src="${c.imgSrc}" style="border:2px solid ${rc};">`;
+                if (n1) n1.innerText = `${c.id} [${c.rarityNameEN}]`;
+                if (n1) n1.style.color = rc;
+            } else {
+                p1.innerHTML = '<div class="alch-empty-slot">⚗<span>ALPHA VAZIO</span></div>';
+                if (n1) { n1.innerText = '—'; n1.style.color = '#ff00ff44'; }
+            }
+        }
+        if (p2) {
+            if (_alchSelected.beta) {
+                const c = _alchSelected.beta;
+                const rc = _rarityColor(c.rarityType);
+                p2.innerHTML = `<img src="${c.imgSrc}" style="border:2px solid ${rc};">`;
+                if (n2) n2.innerText = `${c.id} [${c.rarityNameEN}]`;
+                if (n2) n2.style.color = rc;
+            } else {
+                p2.innerHTML = '<div class="alch-empty-slot">⚗<span>BETA VAZIO</span></div>';
+                if (n2) { n2.innerText = '—'; n2.style.color = '#ff00ff44'; }
+            }
+        }
+    }
 
-        p1.innerHTML = c1 ? `<img src="${c1.imgSrc}">` : '<span style="color:#ff00ff44;font-size:2rem;">⚗</span>';
-        p2.innerHTML = c2 ? `<img src="${c2.imgSrc}">` : '<span style="color:#ff00ff44;font-size:2rem;">⚗</span>';
+    function previewAlchemy() {
+        const id1 = _alchSelected.alpha ? _alchSelected.alpha.id : '';
+        const id2 = _alchSelected.beta  ? _alchSelected.beta.id  : '';
+        const probBox = document.getElementById('alchProbBox');
 
-        if (!c1 || !c2 || id1 === id2) { probBox.style.display = 'none'; return; }
+        const c1 = _alchSelected.alpha;
+        const c2 = _alchSelected.beta;
 
-        const score = (c) => c.rarityType === 'legendary' ? 3 : c.rarityType === 'epic' ? 2 : 1;
+        if (!c1 || !c2 || id1 === id2) { if (probBox) probBox.style.display = 'none'; return; }
+
+        const score = (c) => c.rarityType === 'ancestral' ? 4 : c.rarityType === 'legendary' ? 3 : c.rarityType === 'epic' ? 2 : 1;
         const total = score(c1) + score(c2);
-        let ps, pb, pc; // successEpicPlus, break, common
-        if (total >= 6)      { ps = 70; pb = 10; pc = 20; }
+        let ps, pb, pc;
+        if (total >= 7)      { ps = 80; pb = 8;  pc = 12; }
+        else if (total >= 6) { ps = 70; pb = 10; pc = 20; }
         else if (total >= 4) { ps = 45; pb = 15; pc = 40; }
         else if (total >= 3) { ps = 25; pb = 20; pc = 55; }
         else                 { ps = 10; pb = 25; pc = 65; }
 
-        probBox.style.display = 'block';
+        if (probBox) probBox.style.display = 'block';
         document.getElementById('probSuccess').innerText = `${ps}%`;
         document.getElementById('probBreak').innerText   = `${pb}%`;
         document.getElementById('probCommon').innerText  = `${pc}%`;
@@ -2804,6 +2913,7 @@
                 else pushLedger(`${currentUser.username} tentou fundir ${id1}+${id2} — FALHA TOTAL`);
 
                 document.getElementById('alchemyPanel').style.display = 'none';
+                _alchSelected = { alpha: null, beta: null };
                 renderVaultGrid();
                 showCyberAlert(alertTitle, alertMsg, alertType);
 
