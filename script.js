@@ -225,6 +225,7 @@ function applyProfileToCurrentUser(profile) {
     const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'flex';
     const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'flex';
     const contractsBtn = document.getElementById('navContractsBtn'); if (contractsBtn) contractsBtn.style.display = 'flex';
+    const lojaBtn = document.getElementById('navLojaBtn'); if (lojaBtn) lojaBtn.style.display = 'flex';
 }
 
 function resetCurrentUserToAnon() {
@@ -242,6 +243,7 @@ function resetCurrentUserToAnon() {
     const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'none';
     const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'none';
     const cBtn = document.getElementById('navContractsBtn'); if (cBtn) cBtn.style.display = 'none';
+    const lojaBtn = document.getElementById('navLojaBtn'); if (lojaBtn) lojaBtn.style.display = 'none';
 }
 
 // =========================================================
@@ -1251,6 +1253,7 @@ async function logoutSession() {
             viewTargetUserCollection(currentUser.username, currentUser.code, currentUser.bio, currentUser.avatar, currentUser.banner, true);
         }
         if (screenId === 'contracts') renderContractsScreen();
+        if (screenId === 'loja') renderLoja();
     }
 
     function handleProfileNavClick() {
@@ -5394,3 +5397,321 @@ async function toggleFollowTarget(targetUserId, btnEl) {
 // anônima (ou qualquer conta) ver a MESMA atividade da rede ao vivo.
 // =========================================================
 initGlobalRealtime();
+
+
+/* ════════ MÓDULO MERCADO_NEGRO_DO_SPIKE — anexado automaticamente ════════ */
+
+/* ════════════════════════════════════════════════════════════════════
+   MÓDULO: MERCADO NEGRO DO SPIKE — renderLoja()
+   ────────────────────────────────────────────────────────────────────
+   Cole este bloco no final do seu script.js (ou em outro arquivo
+   carregado depois do script.js, já que ele usa currentUser).
+
+   USO:
+     1. Garanta que existe uma <div id="lojaScreen"></div> ou similar
+        na sua div principal de conteúdo (ou troque LOJA_TARGET_ID
+        abaixo pelo id da sua div de tela atual).
+     2. Chame renderLoja() quando o usuário navegar pra essa tela,
+        do mesmo jeito que você já chama renderVaultGrid(), etc.
+        Ex: if (screenId === 'loja') renderLoja();
+
+   INTEGRAÇÃO SUPABASE: handlePurchase() e handleAcceptContract() só
+   logam no console e atualizam currentUser.bumps em memória. Os
+   pontos marcados com "// TODO SUPABASE" são onde entram as chamadas
+   reais (updateProfileInSupabase, grant de cosmético, etc.) — seguem
+   o mesmo padrão usado em renderDailyMissions() / claimDailyDrop().
+   ════════════════════════════════════════════════════════════════════ */
+
+// ID da div onde a Loja será injetada. Troque para o id real da sua
+// div de conteúdo principal se ela já existir (ex: 'screen-loja').
+const LOJA_TARGET_ID = 'lojaScreen';
+
+// Estado local de cosméticos comprados nesta sessão (mock).
+// TODO SUPABASE: substituir por currentUser.ownedCosmetics carregado do perfil.
+let lojaOwnedItems = [];
+
+const SPIKE_LINES_LOJA = [
+    "Hardware velho, lucro novo. Compra rápido antes que eu mude de preço.",
+    "Cuidado com o disjuntor #3. Já fritou duas mãos hoje.",
+    "Eu vendia reatores de nave. Agora vendo moldura pra avatar. A queda é real.",
+    "Garantia? Aqui não. Garantia é palavra de planeta rico.",
+    "Esse glitch na moldura não é defeito, é estilo. Cobra mais caro por isso.",
+    "Sucateiro raiz desde antes do colapso da Rede Outer. Respeita.",
+    "Bumps não enferrujam, mas minha paciência sim. Decide rápido.",
+    "Se a luz neon queimar seu olho, já era — não devolvo B$.",
+    "Tenho contratos novos chegando. Ou não. Depende do humor do servidor.",
+    "Spike não pede desconto. Spike DÁ desconto, quando quer."
+];
+
+const LOJA_FRAME_ITEMS = [
+    { id: 'frame-style-2', category: 'moldura', name: 'Neon Pulse',           price: 1000, accent: '#00ffff', tagline: 'Pulso cíclico de luz fria ao redor do avatar.' },
+    { id: 'frame-style-3', category: 'moldura', name: 'Glitch Core',          price: 2200, accent: '#ff00ff', tagline: 'Distorção de sinal instável. Estética de corrompido.' },
+    { id: 'frame-style-4', category: 'moldura', name: 'Apocalypse Override',  price: 3500, accent: '#ff0044', tagline: 'Moldura de emergência de núcleo. Só pra raridade alta.' }
+];
+
+const LOJA_BACKGROUND_ITEMS = [
+    { id: 'bg-neon-glow', category: 'fundo', name: 'Luz Neon de Fundo', price: 850, accent: '#ffaa00', tagline: 'Glow ambiente atrás do perfil. Liga sozinho à noite.' }
+];
+
+const LOJA_EMOTICON_ITEMS = [
+    { id: 'emo-pack-circuito',  category: 'emoticon', name: 'Pack Circuito',  price: 300, accent: '#00ff66', tagline: '12 emoticons de chat com tema de placa-mãe.', glyphs: ['⚡','🛰️','☢','⬡'] },
+    { id: 'emo-pack-ancestral', category: 'emoticon', name: 'Pack Ancestral', price: 600, accent: '#ff007f', tagline: '12 emoticons raros, tema runas digitais.', glyphs: ['✦','◈','✧','⟁'] }
+];
+
+const LOJA_ALL_ITEMS = [...LOJA_FRAME_ITEMS, ...LOJA_BACKGROUND_ITEMS, ...LOJA_EMOTICON_ITEMS];
+
+const LOJA_MOCK_CONTRACTS = [
+    { id: 'ctr-001', title: 'EMPRÉSTIMO_DE_CARD // RAID NOTURNA',        status: 'EM_BREVE',  reward: 140, minRarity: 'epic',      description: 'Cede um card épico+ por 6h para operação coletiva. Recompensa em B$ ao final.' },
+    { id: 'ctr-002', title: 'EMPRÉSTIMO_DE_CARD // VITRINE_PATROCINADA', status: 'EM_BREVE',  reward: 300, minRarity: 'legendary', description: 'Card lendário exposto na vitrine parceira por 24h. Risco zero de destruição.' },
+    { id: 'ctr-003', title: 'EMPRÉSTIMO_DE_CARD // FORNALHA_DE_TERCEIROS', status: 'BLOQUEADO', reward: 620, minRarity: 'ancestral', description: 'Card ancestral usado como garantia em fornalha alheia. Alto risco, alta paga.' }
+];
+
+// ── garante o CDN do Tailwind, já que o resto do site não carrega ──
+function ensureTailwindLoaded(callback) {
+    if (window.tailwind || document.getElementById('loja-tailwind-cdn')) {
+        callback();
+        return;
+    }
+    const script = document.createElement('script');
+    script.id = 'loja-tailwind-cdn';
+    script.src = 'https://cdn.tailwindcss.com';
+    script.onload = callback;
+    document.head.appendChild(script);
+}
+
+function lojaPreviewMarkup(item) {
+    if (item.category === 'moldura') {
+        return `<div class="w-full h-full flex items-center justify-center bg-black">
+                    <div class="w-16 h-16 rounded-full border-2 animate-pulse" style="border-color:${item.accent}; box-shadow:0 0 18px ${item.accent};"></div>
+                </div>`;
+    }
+    if (item.category === 'fundo') {
+        return `<div class="w-full h-full flex items-center justify-center bg-black">
+                    <div class="w-20 h-20 rounded-full blur-sm" style="background:radial-gradient(circle, ${item.accent}55 0%, transparent 70%);"></div>
+                </div>`;
+    }
+    if (item.category === 'emoticon') {
+        return `<div class="w-full h-full flex items-center justify-center gap-2 bg-black text-2xl">
+                    ${(item.glyphs || []).slice(0, 4).map(g => `<span style="color:${item.accent}; text-shadow:0 0 8px ${item.accent};">${g}</span>`).join('')}
+                </div>`;
+    }
+    return '';
+}
+
+function lojaItemCardMarkup(item) {
+    const owned = lojaOwnedItems.includes(item.id);
+    const balance = (currentUser && currentUser.bumps) || 0;
+    const affordable = balance >= item.price;
+
+    const btnClasses = owned
+        ? 'border border-zinc-700 text-zinc-600 cursor-not-allowed'
+        : affordable
+            ? 'bg-amber-500 text-black border border-amber-500 hover:bg-amber-400 cursor-pointer'
+            : 'border border-zinc-800 text-zinc-600 cursor-not-allowed';
+    const btnLabel = owned ? 'ATIVO' : affordable ? 'COMPRAR' : 'SEM B$';
+
+    return `
+        <div class="relative bg-[#0a0703] border ${owned ? '' : 'border-amber-900/40'} p-3 flex flex-col gap-2.5 transition-all hover:border-amber-500 hover:-translate-y-0.5"
+             style="${owned ? `border-color:${item.accent}; box-shadow:0 0 14px ${item.accent}33;` : ''}">
+            ${owned ? `<div class="absolute -top-2 -left-2 text-[0.55rem] font-bold px-1.5 py-0.5 text-black" style="background:${item.accent}; box-shadow:0 0 10px ${item.accent};">INSTALADO</div>` : ''}
+            <div class="w-full aspect-square border border-zinc-900">
+                ${lojaPreviewMarkup(item)}
+            </div>
+            <div class="flex flex-col gap-0.5">
+                <span class="text-[0.5rem] uppercase tracking-wider font-bold text-amber-800">${item.category}</span>
+                <span class="text-sm font-extrabold text-amber-200">${item.name}</span>
+                <span class="text-[0.62rem] text-amber-700/80 leading-snug">${item.tagline}</span>
+            </div>
+            <div class="flex items-center justify-between mt-1">
+                <span class="text-sm font-extrabold text-amber-500">${item.price} B$</span>
+                <button
+                    class="text-[0.6rem] font-extrabold uppercase tracking-wide px-3 py-1.5 ${btnClasses}"
+                    ${owned || !affordable ? 'disabled' : ''}
+                    onclick="lojaHandlePurchase('${item.id}')">
+                    ${btnLabel}
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function lojaContractCardMarkup(contract) {
+    const locked = true; // mock — contratos reais ainda não habilitados
+    const statusColor = contract.status === 'EM_BREVE' ? 'text-amber-500 border-amber-500'
+        : contract.status === 'BLOQUEADO' ? 'text-red-500 border-red-500'
+        : 'text-emerald-500 border-emerald-500';
+
+    return `
+        <div class="bg-[#0a0703] border border-amber-900/40 p-4 flex flex-col gap-2.5">
+            <div class="flex justify-between items-start gap-2.5">
+                <span class="text-[0.75rem] font-extrabold text-amber-200">${contract.title}</span>
+                <span class="text-[0.5rem] font-extrabold ${statusColor} border px-1.5 py-0.5 whitespace-nowrap">${contract.status}</span>
+            </div>
+            <p class="text-[0.65rem] text-amber-700/80 leading-relaxed m-0">${contract.description}</p>
+            <div class="flex justify-between items-center mt-1">
+                <span class="text-[0.6rem] text-amber-800">RARIDADE MÍN: <b class="text-amber-500">${contract.minRarity.toUpperCase()}</b></span>
+                <span class="text-sm font-extrabold text-amber-500">+${contract.reward} B$</span>
+            </div>
+            <button
+                class="mt-1 text-[0.6rem] font-extrabold uppercase tracking-wide py-2 border border-zinc-800 text-zinc-600 cursor-not-allowed"
+                disabled
+                onclick="lojaHandleAcceptContract('${contract.id}')">
+                AGUARDANDO_ABERTURA
+            </button>
+        </div>
+    `;
+}
+
+function lojaCategorySection(label, items) {
+    if (items.length === 0) return '';
+    return `
+        <div class="mb-7">
+            <h2 class="text-[0.7rem] font-extrabold text-amber-500 tracking-widest mb-3 border-l-2 border-amber-500 pl-2 uppercase">${label}</h2>
+            <div class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));">
+                ${items.map(lojaItemCardMarkup).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function lojaBuildMarkup() {
+    const balance = (currentUser && currentUser.bumps) || 0;
+    const line = SPIKE_LINES_LOJA[Math.floor(Math.random() * SPIKE_LINES_LOJA.length)];
+
+    return `
+    <div class="min-h-screen bg-black text-amber-200 font-mono p-5 pb-16 relative overflow-hidden" style="font-family:'Space Mono', monospace;">
+
+        <div class="flex justify-between items-center flex-wrap gap-3.5 mb-6 relative z-10">
+            <div>
+                <h1 class="text-base font-extrabold tracking-widest text-amber-500 uppercase m-0" style="text-shadow:0 0 14px rgba(255,170,0,0.5);">
+                    MERCADO_NEGRO // TERMINAL_DE_SUCATA
+                </h1>
+                <p class="text-[0.6rem] text-amber-800 mt-1 tracking-wide">ACESSO NÃO REGISTRADO. NEGOCIE POR SUA CONTA E RISCO.</p>
+            </div>
+            <div class="flex items-center gap-2.5 bg-[#0a0703] border border-amber-500 px-4 py-2.5" style="box-shadow:0 0 14px rgba(255,170,0,0.18);">
+                <div class="w-6 h-6 rounded-full border-2 border-amber-500 flex items-center justify-center text-xs font-extrabold text-amber-500" style="box-shadow:0 0 10px #ffaa00;">B</div>
+                <div class="flex flex-col leading-tight">
+                    <span class="text-[0.5rem] text-amber-800 tracking-wide">SALDO_ATUAL</span>
+                    <span id="lojaBalanceDisplay" class="text-sm font-extrabold text-amber-200">${balance.toLocaleString('pt-BR')} B$</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex gap-4 items-start bg-[#0a0703] border border-amber-900/40 p-4 mb-6 relative z-10 flex-wrap">
+            <div class="w-16 h-16 flex-shrink-0 border-2 border-amber-500 flex items-center justify-center text-2xl relative" style="background:repeating-linear-gradient(45deg, #100b03 0px, #100b03 4px, #1a1206 4px, #1a1206 8px); box-shadow:0 0 16px rgba(255,170,0,0.35);">
+                🤖
+                <span class="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" style="box-shadow:0 0 8px #00ff66;"></span>
+            </div>
+            <div class="flex-1" style="min-width:220px;">
+                <div class="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <span class="text-[0.7rem] font-extrabold text-amber-500 tracking-wide">SPIKE</span>
+                    <span class="text-[0.5rem] text-emerald-500 border border-emerald-500 px-1.5 tracking-wide">[SPIKE_v0.49_ONLINE]</span>
+                </div>
+                <div id="lojaSpikeLine" class="bg-black border border-zinc-900 px-3 py-2.5 text-[0.7rem] text-amber-300 leading-relaxed" style="min-height:36px;">
+                    ▸ ${line}
+                </div>
+            </div>
+        </div>
+
+        <div class="flex gap-2 mb-5 relative z-10 border-b border-amber-900/40">
+            <button id="lojaTabBtnContratos" onclick="lojaSwitchTab('contratos')"
+                class="bg-transparent text-amber-800 border-b-2 border-transparent text-[0.65rem] font-extrabold tracking-wide px-4.5 py-2.5 uppercase cursor-pointer transition-all">
+                [ CONTRATOS ]
+            </button>
+            <button id="lojaTabBtnCosmeticos" onclick="lojaSwitchTab('cosmeticos')"
+                class="bg-amber-500 text-black border-b-2 border-amber-500 text-[0.65rem] font-extrabold tracking-wide px-4.5 py-2.5 uppercase cursor-pointer transition-all">
+                [ COSMÉTICOS ]
+            </button>
+        </div>
+
+        <div id="lojaTabContratos" class="hidden relative z-10">
+            <p class="text-[0.65rem] text-amber-800 mb-4">
+                Espaço reservado para missões futuras de empréstimo de cards. Spike libera contratos por conta própria — sem aviso, sem garantia.
+            </p>
+            <div class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));">
+                ${LOJA_MOCK_CONTRACTS.map(lojaContractCardMarkup).join('')}
+            </div>
+        </div>
+
+        <div id="lojaTabCosmeticos" class="relative z-10">
+            ${lojaCategorySection('MOLDURAS', LOJA_FRAME_ITEMS)}
+            ${lojaCategorySection('LUZ DE FUNDO', LOJA_BACKGROUND_ITEMS)}
+            ${lojaCategorySection('EMOTICONS', LOJA_EMOTICON_ITEMS)}
+        </div>
+
+        <div class="pointer-events-none absolute inset-0 z-20" style="background-image:repeating-linear-gradient(to bottom, transparent 0px, transparent 2px, rgba(255,170,0,0.035) 2px, rgba(255,170,0,0.035) 3px); mix-blend-mode:overlay;"></div>
+    </div>
+    `;
+}
+
+// ── ALTERNÂNCIA DE ABAS (classList hidden, nativo) ──
+function lojaSwitchTab(tab) {
+    const contratosPanel = document.getElementById('lojaTabContratos');
+    const cosmeticosPanel = document.getElementById('lojaTabCosmeticos');
+    const btnContratos = document.getElementById('lojaTabBtnContratos');
+    const btnCosmeticos = document.getElementById('lojaTabBtnCosmeticos');
+    if (!contratosPanel || !cosmeticosPanel) return;
+
+    const activeBtnClasses = ['bg-amber-500', 'text-black', 'border-amber-500'];
+    const inactiveBtnClasses = ['bg-transparent', 'text-amber-800', 'border-transparent'];
+
+    if (tab === 'contratos') {
+        contratosPanel.classList.remove('hidden');
+        cosmeticosPanel.classList.add('hidden');
+        btnContratos.classList.remove(...inactiveBtnClasses);
+        btnContratos.classList.add(...activeBtnClasses);
+        btnCosmeticos.classList.remove(...activeBtnClasses);
+        btnCosmeticos.classList.add(...inactiveBtnClasses);
+    } else {
+        cosmeticosPanel.classList.remove('hidden');
+        contratosPanel.classList.add('hidden');
+        btnCosmeticos.classList.remove(...inactiveBtnClasses);
+        btnCosmeticos.classList.add(...activeBtnClasses);
+        btnContratos.classList.remove(...activeBtnClasses);
+        btnContratos.classList.add(...inactiveBtnClasses);
+    }
+}
+
+// ── HANDLERS ESTRUTURADOS — INTEGRAÇÃO SUPABASE PENDENTE ──
+function lojaHandlePurchase(itemId) {
+    const item = LOJA_ALL_ITEMS.find(i => i.id === itemId);
+    if (!item) return;
+    console.log('[LOJA] Tentativa de compra:', item.id, 'por', item.price, 'B$');
+
+    const balance = (currentUser && currentUser.bumps) || 0;
+    if (balance < item.price) {
+        console.log('[LOJA] Compra recusada: saldo insuficiente.');
+        // TODO SUPABASE: chamar openDepositModal() ou showCyberAlert('FUNDOS INSUFICIENTES', ...)
+        return;
+    }
+
+    // TODO SUPABASE: débito real + grant de cosmético, ex:
+    //   currentUser.bumps -= item.price;
+    //   await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
+    //   await grantCosmeticToProfile(currentUser.id, item.id);
+
+    currentUser.bumps -= item.price;
+    lojaOwnedItems.push(item.id);
+    console.log('[LOJA] Compra confirmada (mock):', item.id);
+    renderLoja(); // re-renderiza pra atualizar saldo e estado "INSTALADO"
+}
+
+function lojaHandleAcceptContract(contractId) {
+    console.log('[LOJA] Tentativa de aceitar contrato:', contractId);
+    // TODO SUPABASE: validar card alocado, criar registro de empréstimo, travar card no cofre, ex:
+    //   await createLoanContract({ userId: currentUser.id, contractId, cardId, expiresAt });
+    console.log('[LOJA] Contrato ainda não habilitado nesta build (mock).');
+}
+
+// ── PONTO DE ENTRADA ──
+function renderLoja() {
+    const target = document.getElementById(LOJA_TARGET_ID);
+    if (!target) {
+        console.warn(`[LOJA] Elemento #${LOJA_TARGET_ID} não encontrado no DOM. Ajuste LOJA_TARGET_ID para o id da sua div de tela.`);
+        return;
+    }
+    ensureTailwindLoaded(() => {
+        target.innerHTML = lojaBuildMarkup();
+        lojaSwitchTab('cosmeticos');
+    });
+}
