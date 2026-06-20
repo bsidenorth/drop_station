@@ -9,7 +9,8 @@
     let currentUser = { 
         loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: fixedSessionCode,
         bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", banner: "",
-        followers: 12, following: 4, followedByMe: false
+        followers: 12, following: 4, followedByMe: false,
+        inventory: [] // itens modificadores de alquimia (Protetores/Catalisadores/Moedas de Entrada)
     };
 
     // =========================================================
@@ -54,8 +55,16 @@
     // =========================================================
     const REGISTRY_KEY = 'drop_station_users';
     const SEED_USERS = [
-        { username:"@cyber_k1ng",    password:"123", bumps:150, code:"#9901", bio:"Lenda antiga da rede.",  avatar:"https://i.ibb.co/m56c5F2Z/ced5acf2-417d-4669-b964-96437ab91fda.jpg", banner:"", savedAssets:[] },
-        { username:"@neon_samurai",  password:"123", bumps:300, code:"#4421", bio:"Luzes e glitch.",        avatar:"https://i.ibb.co/S7JbrXX2/fa809178-22dc-4ec1-8d84-2dcea9ab44b7.jpg", banner:"", savedAssets:[] }
+        { username:"@cyber_k1ng",    password:"123", bumps:150, code:"#9901", bio:"Lenda antiga da rede.",  avatar:"https://i.ibb.co/m56c5F2Z/ced5acf2-417d-4669-b964-96437ab91fda.jpg", banner:"", savedAssets:[],
+          inventory:[
+            { itemId:"item_poeira_silicio_seed", templateId:"poeira_silicio", category:"MOEDA_ENTRADA", qty:5 },
+            { itemId:"item_catalisador_estab_seed", templateId:"catalisador_estabilidade", category:"PROTETOR", qty:1 }
+          ] },
+        { username:"@neon_samurai",  password:"123", bumps:300, code:"#4421", bio:"Luzes e glitch.",        avatar:"https://i.ibb.co/S7JbrXX2/fa809178-22dc-4ec1-8d84-2dcea9ab44b7.jpg", banner:"", savedAssets:[],
+          inventory:[
+            { itemId:"item_sucata_circuitos_seed", templateId:"sucata_circuitos", category:"MOEDA_ENTRADA", qty:5 },
+            { itemId:"item_nucleo_backup_seed", templateId:"nucleo_backup", category:"PROTETOR", qty:1 }
+          ] }
     ];
 
     function loadRegistry() {
@@ -1077,13 +1086,111 @@
     /**
      * Injeta proveniência + flag Web3 no objeto do card SE ainda não tiver.
      * Cards do feed global legado ou demo ficam sem — comportamento esperado.
+     * A partir desta versão, também inicializa o Survival Counter (fusion_count),
+     * o histórico genético (genetic_history) e a assinatura visual do QR Code.
      * @param {object} cardObj  Objeto do card (mutado in-place e retornado)
      */
     function attachProvenance(cardObj) {
         if (cardObj.provenance) return cardObj; // já tem — nunca sobrescrever
         cardObj.provenance  = generateProvenance(cardObj);
         cardObj.isTokenized = false; // preparação para fluxo Web3
+
+        // ── ALQUIMIA: contador de sobrevivência + linhagem genética ──
+        if (typeof cardObj.fusion_count !== 'number') cardObj.fusion_count = 0;
+        if (!Array.isArray(cardObj.genetic_history)) cardObj.genetic_history = [];
+        cardObj.eliteEligible = cardObj.fusion_count >= 3;
+
+        // ── Resoluções: UI leve (500px) sempre disponível; HD só sob demanda ──
+        if (!cardObj.resolutions) {
+            cardObj.resolutions = { ui: { w: 500, h: 500 }, hd: { w: 4000, h: 4000, src: null } };
+        }
+
+        regenerateQrSignature(cardObj);
         return cardObj;
+    }
+
+    /**
+     * Regera a assinatura visual do QR Code de um card sempre que seu estado muda:
+     * criação, transferência de propriedade ou sobrevivência a uma fusão.
+     * O hash base (provenance.hash) nunca muda — só o sufixo de estado "-Fxx".
+     */
+    function regenerateQrSignature(cardObj) {
+        const suffix = `F${cardObj.fusion_count || 0}`;
+        cardObj.qr_code_hash   = `${cardObj.provenance.hash}-${suffix}`;
+        cardObj.qr_payload_url = `https://dropstation.app/proveniencia/${cardObj.qr_code_hash}`;
+        return cardObj;
+    }
+
+    /**
+     * Desenha o QR Code dinâmico de um card num container do DOM.
+     * Usa a lib QRCode (qrcodejs) carregada no <head> do index.html.
+     * Sempre limpa o container antes de redesenhar (necessário pois o
+     * QR muta a cada novo estado do card).
+     */
+    function renderQRCode(cardObj, containerId) {
+        const el = document.getElementById(containerId);
+        if (!el || typeof QRCode === 'undefined' || !cardObj.qr_payload_url) return;
+        el.innerHTML = ''; // limpa render anterior — o QR é regenerado, não acumulado
+        new QRCode(el, {
+            text: cardObj.qr_payload_url,
+            width: 120,
+            height: 120,
+            colorDark: '#00ffff',
+            colorLight: '#020204',
+            correctLevel: QRCode.CorrectLevel.M
+        });
+    }
+
+    // =========================================================
+    // SISTEMA DE ALQUIMIA AVANÇADA — Itens Modificadores
+    // =========================================================
+    const ITEMS_DB = {
+        catalisador_estabilidade: {
+            category: 'PROTETOR', consumedOnUse: true,
+            effect: { type: 'SURVIVAL_BONUS', value: 0.15 },
+            name: 'Catalisador de Estabilidade', nameEN: 'Stability Catalyst'
+        },
+        nucleo_backup: {
+            category: 'PROTETOR', consumedOnUse: true,
+            effect: { type: 'INSURANCE_BREAK' }, // quebra no lugar do card em caso de falha total
+            name: 'Núcleo de Backup', nameEN: 'Backup Core'
+        },
+        essencia_neon_amarelo: {
+            category: 'CATALISADOR', consumedOnUse: true,
+            effect: { type: 'FORCE_PALETTE', value: 'gold' },
+            name: 'Essência de Neon Amarelo', nameEN: 'Yellow Neon Essence'
+        },
+        injetor_overclock: {
+            category: 'CATALISADOR', consumedOnUse: true,
+            effect: { type: 'OVERCLOCK', riskDelta: 0.20, fusionCountBonus: 2 },
+            name: 'Injetor de Overclock', nameEN: 'Overclock Injector'
+        },
+        poeira_silicio: {
+            category: 'MOEDA_ENTRADA', consumedOnUse: true,
+            effect: { type: 'COST' },
+            name: 'Poeira de Silício', nameEN: 'Silicon Dust'
+        },
+        sucata_circuitos: {
+            category: 'MOEDA_ENTRADA', consumedOnUse: true,
+            effect: { type: 'COST' },
+            name: 'Sucata de Circuitos', nameEN: 'Circuit Scrap'
+        }
+    };
+
+    function getUserInventory() {
+        if (!Array.isArray(currentUser.inventory)) currentUser.inventory = [];
+        return currentUser.inventory;
+    }
+
+    /** Remove (ou decrementa) um item do inventário do usuário após o uso numa fusão. */
+    function consumeInventoryItem(itemId) {
+        const inv = getUserInventory();
+        const idx = inv.findIndex(i => i.itemId === itemId);
+        if (idx === -1) return false;
+        const item = inv[idx];
+        if (item.qty && item.qty > 1) { item.qty -= 1; }
+        else { inv.splice(idx, 1); }
+        return true;
     }
 
     // DAILY DROPS — Recompensa diária (cooldown de 24h)
@@ -2115,6 +2222,12 @@
         provDiv.innerHTML = provHtml;
         metaBox.appendChild(provDiv);
 
+        // ── QR CODE DINÂMICO: regenera o canvas a cada abertura, refletindo
+        // o estado atual (fusion_count / qr_code_hash) do card ──
+        if (prov) renderQRCode(cardAsset, 'inspectQrCanvas');
+        const qrBox = document.getElementById('inspectQrBox');
+        if (qrBox) qrBox.style.display = prov ? 'flex' : 'none';
+
         document.getElementById('inspectModal').style.display = 'flex';
     }
 
@@ -2783,14 +2896,17 @@
     // Gera um filtro CSS aleatório + distorção/pixelado/ruído únicos
     // a cada fusão, sempre a partir da imagem-base do card resultante.
     // =========================================================
-    function buildRandomFusionFilter() {
-        const hue = Math.floor(Math.random() * 360);
+    function buildRandomFusionFilter(forcedPalette) {
+        // Direcionador de Mutação ativo (ex: Essência de Neon Amarelo) força a faixa de matiz
+        const PALETTE_HUE_RANGES = { gold: [40, 55], cyan: [180, 200], magenta: [300, 330] };
+        const range = forcedPalette && PALETTE_HUE_RANGES[forcedPalette];
+        const hue = range ? (range[0] + Math.floor(Math.random() * (range[1] - range[0]))) : Math.floor(Math.random() * 360);
         const sat = 120 + Math.floor(Math.random() * 220);     // 120% - 340%
         const con = 100 + Math.floor(Math.random() * 140);     // 100% - 240%
         const bri = 70 + Math.floor(Math.random() * 60);       // 70%  - 130%
-        const doInvert = Math.random() < 0.35;
+        const doInvert = !forcedPalette && Math.random() < 0.35; // catalisador desativa inversão p/ preservar a cor alvo
         const invertPct = doInvert ? Math.floor(Math.random() * 100) : 0;
-        const doGray = Math.random() < 0.2;
+        const doGray = !forcedPalette && Math.random() < 0.2;
 
         let parts = [
             `hue-rotate(${hue}deg)`,
@@ -2811,7 +2927,7 @@
      * que o resultado visual nunca se repita entre fusões.
      * Retorna uma Promise<string> com o dataURL final (PNG).
      */
-    function renderFusedCardVisual(baseImgSrc) {
+    function renderFusedCardVisual(baseImgSrc, forcedPalette) {
         return new Promise((resolve) => {
             const img = new Image();
             img.crossOrigin = "anonymous";
@@ -2822,7 +2938,7 @@
                 const ctx = canvas.getContext('2d');
 
                 // 1) Desenha a imagem-base já com o filtro CSS aleatório aplicado
-                const filterStr = buildRandomFusionFilter();
+                const filterStr = buildRandomFusionFilter(forcedPalette);
                 ctx.filter = filterStr;
                 ctx.drawImage(img, 0, 0, SIZE, SIZE);
                 ctx.filter = "none";
@@ -2902,7 +3018,77 @@
         });
     }
 
-    function fuseCards(id1, id2) {
+    /**
+     * Núcleo de regras da Alquimia Avançada: calcula probabilidades ponderadas
+     * por itens modificadores e aplica os efeitos de sobrevivência/mutação
+     * sobre o card principal (que permanece vivo, acumulando fusion_count).
+     * NÃO mexe em savedAssets/DOM — isso fica a cargo de fuseCards(), que
+     * orquestra a animação e persiste o resultado.
+     *
+     * @param {object} cardPrincipal    card que sobrevive e evolui
+     * @param {object} cardSacrificado  card consumido na fusão
+     * @param {object[]} modificadores  itens do inventário usados (templateId)
+     * @returns {{resultado:string, ...}}
+     */
+    function forjarFusao(cardPrincipal, cardSacrificado, modificadores = []) {
+        const score = c => c.rarityType === 'legendary' ? 3 : c.rarityType === 'epic' ? 2 : 1;
+        const total = score(cardPrincipal) + score(cardSacrificado);
+
+        let ps, pb;
+        if (total >= 6)      { ps = 0.70; pb = 0.10; }
+        else if (total >= 4) { ps = 0.45; pb = 0.15; }
+        else if (total >= 3) { ps = 0.25; pb = 0.20; }
+        else                  { ps = 0.10; pb = 0.25; }
+
+        let nucleoBackupAtivo = false;
+        let forcedPalette = null;
+        let fusionCountBonus = 0;
+
+        modificadores.forEach(m => {
+            const tpl = ITEMS_DB[m.templateId];
+            if (!tpl) return;
+            if (tpl.effect.type === 'SURVIVAL_BONUS')  ps = Math.min(0.95, ps + tpl.effect.value);
+            if (tpl.effect.type === 'INSURANCE_BREAK')  nucleoBackupAtivo = true;
+            if (tpl.effect.type === 'FORCE_PALETTE')    forcedPalette = tpl.effect.value;
+            if (tpl.effect.type === 'OVERCLOCK') {
+                pb = Math.min(0.95, pb + tpl.effect.riskDelta);
+                fusionCountBonus += tpl.effect.fusionCountBonus;
+            }
+        });
+        pb = Math.max(0, Math.min(1 - ps, pb)); // normaliza, nunca deixa ps+pb > 1
+
+        const roll = Math.random();
+        const fusionId = `FUS-${(cardPrincipal.fusion_count || 0).toString().padStart(4, '0')}`;
+
+        // Consome itens-moeda e modificadores usados (independente do resultado)
+        modificadores.forEach(m => consumeInventoryItem(m.itemId));
+
+        if (roll < pb) {
+            if (nucleoBackupAtivo) {
+                return { resultado: 'seguro_ativado', cardPrincipal, roll, ps, pb,
+                    mensagem: 'Núcleo de Backup absorveu a falha — card principal preservado.' };
+            }
+            return { resultado: 'destruicao_total', cardsPerdidos: [cardPrincipal.id, cardSacrificado.id], roll, ps, pb };
+        }
+
+        // SUCESSO: card principal sobrevive e evolui
+        cardPrincipal.fusion_count = (cardPrincipal.fusion_count || 0) + 1 + fusionCountBonus;
+        cardPrincipal.genetic_history = cardPrincipal.genetic_history || [];
+        cardPrincipal.genetic_history.push({
+            fusionId, ts: Date.now(),
+            sacrificedCardId: cardSacrificado.id,
+            sacrificedSnapshot: { rarityType: cardSacrificado.rarityType, styleName: cardSacrificado.styleName },
+            itemsConsumidos: modificadores.map(m => m.itemId),
+            survivalRollResult: roll,
+            mutation: forcedPalette ? { huePalette: forcedPalette } : null
+        });
+        cardPrincipal.eliteEligible = cardPrincipal.fusion_count >= 3;
+        regenerateQrSignature(cardPrincipal); // estado mudou → QR muta
+
+        return { resultado: 'sucesso', cardPrincipal, fusionId, roll, ps, pb, forcedPalette };
+    }
+
+    function fuseCards(id1, id2, modificadores = []) {
         if (!id1 || !id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Seleciona 2 cards diferentes.' : 'Select 2 different cards.', 'error'); return; }
         if (id1 === id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Os 2 cards devem ser diferentes.' : 'Both cards must be different.', 'error'); return; }
 
@@ -2922,6 +3108,24 @@
         else if (total >= 4) { ps = 0.45; pb = 0.15; }
         else if (total >= 3) { ps = 0.25; pb = 0.20; }
         else                 { ps = 0.10; pb = 0.25; }
+
+        // ── ALQUIMIA AVANÇADA: aplica efeito dos itens modificadores selecionados ──
+        let nucleoBackupAtivo = false;
+        let forcedPalette = null;
+        let fusionCountBonus = 0;
+        modificadores.forEach(m => {
+            const tpl = ITEMS_DB[m.templateId];
+            if (!tpl) return;
+            if (tpl.effect.type === 'SURVIVAL_BONUS') ps = Math.min(0.95, ps + tpl.effect.value);
+            if (tpl.effect.type === 'INSURANCE_BREAK') nucleoBackupAtivo = true;
+            if (tpl.effect.type === 'FORCE_PALETTE') forcedPalette = tpl.effect.value;
+            if (tpl.effect.type === 'OVERCLOCK') {
+                pb = Math.min(0.95, pb + tpl.effect.riskDelta);
+                fusionCountBonus += tpl.effect.fusionCountBonus;
+            }
+        });
+        pb = Math.max(0, Math.min(1 - ps, pb)); // normaliza, nunca deixa ps+pb > 1
+        modificadores.forEach(m => consumeInventoryItem(m.itemId)); // consome itens já na entrada da fusão
 
         const roll = Math.random();
 
@@ -3011,23 +3215,38 @@
                 glitchOverlay.remove();
 
                 // Remove cartas originais ANTES de qualquer resultado
+                // (Núcleo de Backup: se a fusão falhar, o card principal (c1) é preservado)
+                const insuranceWillSave = nucleoBackupAtivo && roll < pb;
                 savedAssets = savedAssets.filter(a => a.id !== id1 && a.id !== id2);
                 marketAssets = marketAssets.filter(m => m.id !== id1 && m.id !== id2);
                 saveMarket(marketAssets);
+                if (insuranceWillSave) savedAssets.push(snap1); // c2 é consumido pelo seguro; c1 retorna ao cofre
 
                 let result, fusedCard, alertTitle, alertMsg, alertType;
 
                 if (roll < pb) {
-                    // FALHA: cartas quebram — sem novo card
-                    result = 'break';
-                    alertTitle = currentLang === 'PT' ? '💀 FUSÃO DESTRUÍDA' : '💀 FUSION DESTROYED';
-                    alertMsg   = currentLang === 'PT'
-                        ? `Cards <b>${id1}</b> e <b>${id2}</b> foram destruídos na fusão instável. Nenhum ativo gerado.`
-                        : `Cards <b>${id1}</b> and <b>${id2}</b> were destroyed in the unstable fusion. No asset generated.`;
-                    alertType = 'error';
-                    triggerAncestralFlash('#ff0044'); // flash vermelho na quebra
-                    playSynthSound('shatter');
-                    speakPhrase("Fusão destruída. Perda total.", "Fusion destroyed. Total loss.");
+                    if (insuranceWillSave) {
+                        // SEGURO ATIVADO: Núcleo de Backup absorve a falha — c1 sobrevive intacto
+                        result = 'seguro_ativado';
+                        alertTitle = currentLang === 'PT' ? '🛡️ SEGURO ATIVADO' : '🛡️ INSURANCE TRIGGERED';
+                        alertMsg   = currentLang === 'PT'
+                            ? `O <b>Núcleo de Backup</b> quebrou no lugar do card principal.<br><b>${id1}</b> foi preservado intacto. <b>${id2}</b> foi perdido.`
+                            : `The <b>Backup Core</b> shattered in place of the main card.<br><b>${id1}</b> survived intact. <b>${id2}</b> was lost.`;
+                        alertType = 'warn';
+                        playSynthSound('success');
+                        speakPhrase("Seguro de alquimia ativado. Card principal preservado.", "Alchemy insurance triggered. Main card preserved.");
+                    } else {
+                        // FALHA: cartas quebram — sem novo card
+                        result = 'break';
+                        alertTitle = currentLang === 'PT' ? '💀 FUSÃO DESTRUÍDA' : '💀 FUSION DESTROYED';
+                        alertMsg   = currentLang === 'PT'
+                            ? `Cards <b>${id1}</b> e <b>${id2}</b> foram destruídos na fusão instável. Nenhum ativo gerado.`
+                            : `Cards <b>${id1}</b> and <b>${id2}</b> were destroyed in the unstable fusion. No asset generated.`;
+                        alertType = 'error';
+                        triggerAncestralFlash('#ff0044'); // flash vermelho na quebra
+                        playSynthSound('shatter');
+                        speakPhrase("Fusão destruída. Perda total.", "Fusion destroyed. Total loss.");
+                    }
 
                 } else if (roll < pb + (1 - ps - pb)) {
                     // ITEM COMUM
@@ -3039,7 +3258,8 @@
                         styleName: 'RESÍDUO [FUSED]', styleNameEN: 'RESIDUE [FUSED]',
                         creator: currentUser.username, registered: true, exposed: false,
                         forSale: false, isListed: false, price: 0,
-                        imgSrc: fusedVisual, isFused: true, tags: ['fused']
+                        imgSrc: fusedVisual, isFused: true, tags: ['fused'],
+                        fusion_count: 0, genetic_history: [] // resíduo instável — linhagem não sobrevive
                     };
                     // ── PROVENIÊNCIA: novo hash exclusivo do card fundido ──
                     attachProvenance(fusedCard);
@@ -3076,10 +3296,25 @@
                     const fusedStyle = nameParts.join('×') + ' [FUSED]';
                     const newId = "#" + Math.floor(100000 + Math.random() * 900000);
                     const baseVisualSrc = Math.random() > 0.5 ? snap1.imgSrc : snap2.imgSrc;
-                    const fusedVisual = await renderFusedCardVisual(baseVisualSrc);
+                    const fusedVisual = await renderFusedCardVisual(baseVisualSrc, forcedPalette);
 
                     // Flash ancestral (rosa) se for ancestral
                     if (newRarity === 'ancestral') triggerAncestralFlash('#ff007f');
+
+                    // ── SURVIVAL COUNTER: o card resultante herda o maior fusion_count
+                    // entre os dois cards de origem + 1 (esta fusão) + bônus de Overclock ──
+                    const inheritedFusionCount = Math.max(snap1.fusion_count || 0, snap2.fusion_count || 0) + 1 + fusionCountBonus;
+                    const inheritedHistory = [
+                        ...(snap1.genetic_history || []), ...(snap2.genetic_history || []),
+                        {
+                            fusionId: `FUS-${inheritedFusionCount.toString().padStart(4, '0')}`,
+                            ts: Date.now(),
+                            sacrificedCardId: id1 === snap1.id ? id2 : id1,
+                            itemsConsumidos: modificadores.map(m => m.itemId),
+                            survivalRollResult: roll,
+                            mutation: forcedPalette ? { huePalette: forcedPalette } : null
+                        }
+                    ];
 
                     fusedCard = {
                         id: newId, rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
@@ -3087,9 +3322,12 @@
                         creator: currentUser.username, registered: true, exposed: false,
                         forSale: false, isListed: false, price: 0,
                         imgSrc: fusedVisual,
-                        isFused: true, tags: ['fused', 'evento']
+                        isFused: true, tags: ['fused', 'evento'],
+                        fusion_count: inheritedFusionCount,
+                        genetic_history: inheritedHistory,
+                        eliteEligible: inheritedFusionCount >= 3
                     };
-                    // ── PROVENIÊNCIA: hash exclusivo + herança de linhagem ──
+                    // ── PROVENIÊNCIA: hash exclusivo + herança de linhagem (já regenera o QR) ──
                     attachProvenance(fusedCard);
                     fusedCard.provenance.parentIds = [id1, id2]; // rastreabilidade de linhagem
                     savedAssets.push(fusedCard);
@@ -3103,16 +3341,21 @@
 
                 // Persiste
                 const userData = registryGet(currentUser.username);
-                if (userData) { userData.savedAssets = savedAssets; registrySet(currentUser.username, userData); }
-                if (result !== 'break') registerFusionForBadges();
+                if (userData) {
+                    userData.savedAssets = savedAssets;
+                    userData.inventory = currentUser.inventory;
+                    registrySet(currentUser.username, userData);
+                }
+                if (result === 'success' || result === 'common') registerFusionForBadges();
                 // Fusões bem-sucedidas (comum ou épico/lendário) entram no feed global,
                 // para que apareçam na Home e sobrevivam ao F5 — não só no cofre do usuário.
-                if (result !== 'break') {
+                if (result === 'success' || result === 'common') {
                     globalFeed.unshift({...fusedCard});
                     saveGlobalFeed(globalFeed);
                     buildStoriesMarquee();
                 }
-                if (result !== 'break') pushLedger(`${currentUser.username} fundiu ${id1}+${id2} → ${fusedCard.id} [${fusedCard.rarityNameEN}]`);
+                if (result === 'success' || result === 'common') pushLedger(`${currentUser.username} fundiu ${id1}+${id2} → ${fusedCard.id} [${fusedCard.rarityNameEN}]`);
+                else if (result === 'seguro_ativado') pushLedger(`${currentUser.username} ativou Núcleo de Backup em ${id1}+${id2} — ${id1} preservado`);
                 else pushLedger(`${currentUser.username} tentou fundir ${id1}+${id2} — FALHA TOTAL`);
 
                 document.getElementById('alchemyPanel').style.display = 'none';
