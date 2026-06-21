@@ -2459,7 +2459,7 @@ async function logoutSession() {
                     <button class="btn-action btn-expose" data-action="expose" data-idx="${index}">${a.exposed ? '⭐ Sair da Vitrine' : '📁 Expor na Vitrine'}</button>
                     <button class="btn-action btn-sell"   data-action="sell"   data-idx="${index}" style="border-color:#ffaa00;">${a.forSale ? '⚡ Alterar Preço P2P' : '💵 Vender / Anunciar'}</button>
                     <button class="btn-action btn-gift"   data-action="gift"   data-idx="${index}" style="border-color:#ff00ff;">🎁 Presentear Card</button>
-                    <button class="btn-action btn-dl"     data-action="download" data-idx="${index}" style="border-color:#00ffff; color:#00ffff;">⬇ DOWNLOAD ASSET</button>
+                    <button class="btn-action btn-dl"     data-action="download" data-idx="${index}">⬇ download asset</button>
                 </div>
             `;
             card.querySelector('.album-preview-wrapper').addEventListener('click', () => {
@@ -4305,7 +4305,7 @@ async function logoutSession() {
         if (avatarImg) avatarImg.src = avatar || 'https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg';
         const avatarFrameWrap = document.getElementById('avatarFrameWrap');
         if (avatarFrameWrap) {
-            avatarFrameWrap.classList.remove('frame-style-1', 'frame-style-2', 'frame-style-3', 'frame-style-4');
+            avatarFrameWrap.classList.remove('frame-style-1', 'frame-style-2', 'frame-style-3', 'frame-style-4', 'frame-subnet-static-pulse');
             avatarFrameWrap.classList.add(displayFrame);
         }
         // Aplica os 3 efeitos visuais reais (glow de fundo, adereço de card,
@@ -4511,11 +4511,13 @@ async function logoutSession() {
     }
 
     // Lista completa das molduras selecionáveis: a padrão (grátis, sempre
-    // possuída) + as 3 vendidas na Loja (NEON_PULSE / GLITCH_CORE / APOCALYPSE_OVERRIDE).
+    // possuída) + as vendidas na Loja (NEON_PULSE / GLITCH_CORE /
+    // APOCALYPSE_OVERRIDE / STATIC_PULSE).
     function allSelectableFrames() {
         return [
             { id: FRAME_DEFAULT_ID, category: 'moldura', name: 'Neon Hexlock', accent: '#00ffff', rarity: FRAME_DEFAULT_RARITY, free: true },
-            ...LOJA_FRAME_ITEMS
+            ...LOJA_FRAME_ITEMS,
+            ...LOJA_SUBNET_FRAME_ITEMS
         ];
     }
 
@@ -4554,9 +4556,10 @@ async function logoutSession() {
             : '<p style="font-size:0.6rem; color:#666;">Nenhuma moldura nessa raridade ainda.</p>';
     }
 
-    // ── MOLDURAS CYBERPUNK: 4 modelos (frame-style-1 "NEON HEXLOCK" grátis,
+    // ── MOLDURAS CYBERPUNK: 5 modelos (frame-style-1 "NEON HEXLOCK" grátis,
     // frame-style-2 "NEON PULSE", frame-style-3 "GLITCH CORE", frame-style-4
-    // "APOCALYPSE OVERRIDE" — as 3 últimas só compráveis na Loja do Spike). ──
+    // "APOCALYPSE OVERRIDE", frame-subnet-static-pulse "STATIC PULSE" — os 4
+    // últimos só compráveis na Loja do Spike/ZRK). ──
     async function setAvatarFrame(frameId) {
         if(selectedProfileUser !== currentUser.username) return;
 
@@ -4573,7 +4576,7 @@ async function logoutSession() {
         currentUser.avatarFrame = frameId;
         const avatarFrameWrap = document.getElementById('avatarFrameWrap');
         if (avatarFrameWrap) {
-            avatarFrameWrap.classList.remove(FRAME_DEFAULT_ID, 'frame-style-2', 'frame-style-3', 'frame-style-4');
+            avatarFrameWrap.classList.remove(FRAME_DEFAULT_ID, 'frame-style-2', 'frame-style-3', 'frame-style-4', 'frame-subnet-static-pulse');
             avatarFrameWrap.classList.add(frameId);
         }
         document.querySelectorAll('#frameSelectorRow [data-frame]').forEach(b => {
@@ -5860,6 +5863,15 @@ const LOJA_FRAME_ITEMS = [
     { id: 'frame-style-4', category: 'moldura', name: 'Apocalypse Override',  price: 3500, accent: '#ff0044', tagline: 'Moldura de emergência de núcleo. Só pra raridade alta.', rarity: 'ancestral' }
 ];
 
+// ── Categoria "Molduras de Sub-Rede": linha de molduras de entrada,
+// vendida separada das molduras principais (LOJA_FRAME_ITEMS). Usa a
+// mesma category 'moldura' pra reaproveitar toda a lógica de equip já
+// existente (setAvatarFrame / cosmeticSlotForCategory ignora 'moldura'
+// de qualquer forma, pois molduras usam slot próprio).
+const LOJA_SUBNET_FRAME_ITEMS = [
+    { id: 'frame-subnet-static-pulse', category: 'moldura', name: 'Static Pulse', price: 250, accent: '#88aaff', tagline: 'Ruído de sinal fraco da sub-rede. Pulso instável, preço de entrada.', rarity: 'raro' }
+];
+
 const LOJA_BACKGROUND_ITEMS = [
     { id: 'bg-neon-glow',   category: 'fundo', name: 'Luz Neon de Fundo',  price: 850, accent: '#ffaa00', tagline: 'Glow ambiente atrás do perfil. Liga sozinho à noite.', colorKey: 'amber' },
     { id: 'bg-neon-toxic',  category: 'fundo', name: 'Luz Neon Tóxica',    price: 850, accent: '#22c55e', tagline: 'Glow verde tóxico ao redor da caixa de perfil.', colorKey: 'green' },
@@ -5898,7 +5910,7 @@ const LOJA_SHELF_ITEMS = [
     { id: 'shelf-estante-neon',      category: 'estante', name: 'Estante Neon',      price: 780, accent: '#ff00ff', tagline: 'Slots com glow neon individual atrás de cada card.' }
 ];
 
-const LOJA_ALL_ITEMS = [...LOJA_FRAME_ITEMS, ...LOJA_BACKGROUND_ITEMS, ...LOJA_PROP_ITEMS, ...LOJA_SHELF_ITEMS, ...LOJA_EMOTICON_ITEMS];
+const LOJA_ALL_ITEMS = [...LOJA_FRAME_ITEMS, ...LOJA_SUBNET_FRAME_ITEMS, ...LOJA_BACKGROUND_ITEMS, ...LOJA_PROP_ITEMS, ...LOJA_SHELF_ITEMS, ...LOJA_EMOTICON_ITEMS];
 
 // Mapeia a categoria de um item de loja pro slot correspondente dentro de
 // currentUser.equippedCosmetics. Molduras NÃO entram aqui — elas usam a
@@ -6101,6 +6113,7 @@ function lojaBuildMarkup() {
 
         <div id="lojaTabCosmeticos" class="relative z-10">
             ${lojaCategorySection('MOLDURAS', LOJA_FRAME_ITEMS)}
+            ${lojaCategorySection('MOLDURAS DE SUB-REDE', LOJA_SUBNET_FRAME_ITEMS)}
             ${lojaCategorySection('LUZ DE FUNDO', LOJA_BACKGROUND_ITEMS)}
             ${lojaCategorySection('ADEREÇOS DE CARD', LOJA_PROP_ITEMS)}
             ${lojaCategorySection('ESTANTES E EXPOSITORES', LOJA_SHELF_ITEMS)}
