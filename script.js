@@ -13,6 +13,12 @@
 
 const sb = window.supabaseClient;
 
+// ── CONSTANTES GLOBAIS: SISTEMA DE FRAGMENTOS DE SUCATA ──────────────
+const FRAGMENTS_PER_CORRUPTED_CARD = 5;
+const FRAGMENTS_PER_FURNACE_FAIL   = 8;
+const FRAGMENTS_TO_REDEEM_TICKET   = 30;
+const FRAGMENTS_TO_REDEEM_ITEM     = 15;
+
 // BUGFIX CRÍTICO: authMode nunca era declarada (só recebia valor dentro de
 // switchAuthMode, sem let/var/const). handleAuthSubmit LÊ authMode logo no
 // início — se a pessoa clicasse em "Acessar Sistema" antes de switchAuthMode
@@ -94,7 +100,7 @@ function secondsLoginLocked() {
 // select('email'). A resolução de e-mail para login passa pela
 // function security definer `email_by_username` (ver fetchEmailByUsername).
 // =========================================================
-const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, banner, status, following, fusion_count, cosmetics, equipped_cosmetics, created_at, updated_at';
+const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, banner, status, following, fusion_count, cosmetics, equipped_cosmetics, fragments, created_at, updated_at';
 
 async function fetchProfile(userId) {
     const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('id', userId).single();
@@ -187,7 +193,7 @@ async function fetchProfileByUsername(username) {
 const PROFILE_FIELD_TO_COLUMN = {
     bumps: 'bumps', bio: 'bio', avatar: 'avatar', avatarFrame: 'avatar_frame', banner: 'banner',
     status: 'status', following: 'following', code: 'code', username: 'username',
-    fusion_count: 'fusion_count', cosmetics: 'cosmetics', equippedCosmetics: 'equipped_cosmetics'
+    fusion_count: 'fusion_count', cosmetics: 'cosmetics', equippedCosmetics: 'equipped_cosmetics', fragments: 'fragments'
 };
 async function updateProfileInSupabase(userId, fieldsCamel) {
     if (!userId) { console.warn('updateProfileInSupabase: userId ausente, ignorando update remoto.'); return false; }
@@ -221,6 +227,7 @@ function applyProfileToCurrentUser(profile) {
         followedByMe: false,
         inventory: [], // populado na Parte 3
         cosmetics: Array.isArray(profile.cosmetics) ? profile.cosmetics : [],
+        fragments: typeof profile.fragments === 'number' ? profile.fragments : 0,
         equippedCosmetics: (profile.equipped_cosmetics && typeof profile.equipped_cosmetics === 'object' && !Array.isArray(profile.equipped_cosmetics))
             ? { background: null, prop: null, shelf: null, emoticon: null, ...profile.equipped_cosmetics }
             : { background: null, prop: null, shelf: null, emoticon: null }
@@ -242,7 +249,7 @@ function resetCurrentUserToAnon() {
         loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
         bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
         followers: 12, following: 4, followedByMe: false, inventory: [],
-        cosmetics: [], equippedCosmetics: { background: null, prop: null, shelf: null, emoticon: null }
+        cosmetics: [], equippedCosmetics: { background: null, prop: null, shelf: null, emoticon: null }, fragments: 0
     };
     messageThreads = {};
     activeThreadUser = null;
@@ -1115,6 +1122,19 @@ async function logoutSession() {
             setTimeout(() => beep(800, 'sine', 0.15, 0.1), 300);
             setTimeout(() => beep(1200, 'sine', 0.3, 0.12), 450);
             setTimeout(() => speakPhrase("Protocolo de fusão concluído. Nova entidade gerada.", "Fusion protocol complete. New entity generated."), 700);
+
+        } else if (type === 'overload') {
+            // Sirene ciberpunk: dois tons alternando 3x + voz específica de sobrecarga
+            beep(1800, 'sawtooth', 0.18, 0.25);
+            setTimeout(() => beep(900,  'sawtooth', 0.18, 0.22), 220);
+            setTimeout(() => beep(1800, 'sawtooth', 0.18, 0.22), 440);
+            setTimeout(() => beep(900,  'sawtooth', 0.18, 0.20), 660);
+            setTimeout(() => beep(1800, 'sawtooth', 0.18, 0.20), 880);
+            setTimeout(() => beep(600,  'square',   0.35, 0.18), 1100);
+            setTimeout(() => speakPhrase(
+                "Alerta crítico. Sobrecarga na rede detectada. Chance de drop épico aumentada por cinco minutos.",
+                "Critical alert. Network overload detected. Epic drop rate increased for five minutes."
+            ), 1500);
         }
     }
 
@@ -1669,7 +1689,7 @@ async function logoutSession() {
     // ITEMS_DB, getUserInventory e consumeInventoryItem agora vêm da Parte 3 (Supabase), no final do arquivo.
 
     // DAILY DROPS — Recompensa diária (cooldown de 24h)
-    const DAILY_DROP_REWARD_BUMPS = 15;
+    const DAILY_DROP_REWARD_BUMPS = 30; // 30 B$ garantidos — nunca trava o usuário
 
     function getDailyDropKey() {
         return `cyber_daily_drop_${currentUser.username}`;
@@ -1816,7 +1836,7 @@ async function logoutSession() {
             'Sobrecarga na rede! Chance de dropar cards ÉPICOS aumentada por 5 minutos!',
             'warn'
         );
-        playTerminalSound('alchemy');
+        playTerminalSound('overload');
 
         setTimeout(() => {
             networkOverloadActive = false;
@@ -3511,15 +3531,20 @@ async function logoutSession() {
                     for (const snap of snaps) {
                         if (snap._dbId) await deleteCardFromSupabase(snap._dbId);
                     }
+                    // Concede Fragmentos de Sucata como compensação
+                    const furnFragments = snaps.length * FRAGMENTS_PER_FURNACE_FAIL;
+                    currentUser.fragments = (currentUser.fragments || 0) + furnFragments;
+                    await updateProfileInSupabase(currentUser.id, { fragments: currentUser.fragments });
+
                     alertTitle = '[ERRO] FALHA DE CONTENÇÃO';
                     alertMsg = currentLang === 'PT'
-                        ? `[ERRO] COMPONENTES DERRETIDOS NA FORNALHA. ATIVOS DESTRUÍDOS.<br><small style="color:#ff550099">${idsConsumidos.join(', ')}</small>`
-                        : `[ERROR] COMPONENTS MELTED IN THE FURNACE. ASSETS DESTROYED.<br><small style="color:#ff550099">${idsConsumidos.join(', ')}</small>`;
+                        ? `[ERRO] COMPONENTES DERRETIDOS NA FORNALHA. ATIVOS DESTRUÍDOS.<br><small style="color:#ff550099">${idsConsumidos.join(', ')}</small><br><span style="color:#aaa;">+${furnFragments} Fragmentos de Sucata concedidos como compensação. (Total: ${currentUser.fragments})</span>`
+                        : `[ERROR] COMPONENTS MELTED IN THE FURNACE. ASSETS DESTROYED.<br><small style="color:#ff550099">${idsConsumidos.join(', ')}</small><br><span style="color:#aaa;">+${furnFragments} Scrap Fragments granted as compensation. (Total: ${currentUser.fragments})</span>`;
                     alertType = 'error';
                     triggerAncestralFlash('#ff5500');
                     playSynthSound('shatter');
-                    speakPhrase("Fornalha falhou. Ativos derretidos.", "Furnace failed. Assets melted down.");
-                    pushLedger(`${currentUser.username} sobrecarregou a Fornalha com ${idsConsumidos.join('+')} — DERRETIMENTO TOTAL`);
+                    speakPhrase("Fornalha falhou. Ativos derretidos. Fragmentos de sucata concedidos.", "Furnace failed. Assets melted. Scrap fragments granted.");
+                    pushLedger(`${currentUser.username} sobrecarregou a Fornalha com ${idsConsumidos.join('+')} — DERRETIMENTO TOTAL (+${furnFragments} FRAG)`);
 
                 } else {
                     // ── SUCESSO (20%): apaga originais + gera 1 card novo de alta raridade ──
@@ -4546,6 +4571,9 @@ async function logoutSession() {
     // SISTEMA DE CONTRATOS / MISSÕES DE INVASÃO (Idle Staking)
     // =========================================================
 
+    // Cada contrato agora tem riskChance (0–1): probabilidade de o card ser
+    // CORROMPIDO (destruído) ao final da missão. Isso cria um dreno real
+    // de cartas comuns e evita acúmulo infinito no mercado.
     const CONTRACTS_DB = [
         {
             id: 'CTR-01',
@@ -4556,7 +4584,9 @@ async function logoutSession() {
             reqCount: 1,
             reqRarity: 'common',
             reqLabel: '1 Card Comum',
-            reward: 5
+            reward: 5,
+            riskChance: 0.15, // 15% de chance de corrupção
+            riskLabel: '⚠ 15% RISCO DE CORRUPÇÃO'
         },
         {
             id: 'CTR-02',
@@ -4567,7 +4597,9 @@ async function logoutSession() {
             reqCount: 2,
             reqRarity: 'epic',
             reqLabel: '2 Cards Épicos',
-            reward: 30
+            reward: 30,
+            riskChance: 0.25, // 25% de chance de corrupção
+            riskLabel: '⚠ 25% RISCO DE CORRUPÇÃO'
         },
         {
             id: 'CTR-03',
@@ -4578,7 +4610,22 @@ async function logoutSession() {
             reqCount: 1,
             reqRarity: 'legendary',
             reqLabel: '1 Card Lendário',
-            reward: 100
+            reward: 100,
+            riskChance: 0.35, // 35% de chance de corrupção
+            riskLabel: '⚠ 35% RISCO DE CORRUPÇÃO'
+        },
+        {
+            id: 'CTR-04',
+            name: 'Purgar Protocolo Ghost',
+            desc: 'Missão suicida. Queime 3 cartas comuns como isca para atrair os scanners e abrir caminho para a rede fantasma.',
+            durationMs: 3 * 60 * 1000,
+            durationLabel: '3 MIN',
+            reqCount: 3,
+            reqRarity: 'common',
+            reqLabel: '3 Cards Comuns',
+            reward: 25,
+            riskChance: 0.50, // 50% de chance de corrupção — alto risco, maior recompensa relativa
+            riskLabel: '☠ 50% RISCO DE DESTRUIÇÃO'
         }
     ];
 
@@ -4641,13 +4688,43 @@ async function logoutSession() {
         const contract = CONTRACTS_DB.find(c => c.id === contractId);
         if (!contract) return;
 
-        // Desbloqueia cards
+        // === RISCO DE CORRUPÇÃO ===
+        const riskChance = contract.riskChance || 0;
+        const corruptedIds = [];
+        const survivedIds   = [];
+
         cardIds.forEach(cid => {
+            if (riskChance > 0 && Math.random() < riskChance) {
+                corruptedIds.push(cid);
+            } else {
+                survivedIds.push(cid);
+            }
+        });
+
+        // Remove cards corrompidos do cofre + Supabase + concede Fragmentos de Sucata
+        let fragmentsEarned = 0;
+        for (const cid of corruptedIds) {
+            const idx = savedAssets.findIndex(a => a.id === cid);
+            if (idx > -1) savedAssets.splice(idx, 1);
+            try {
+                await sb.from('cards').delete().eq('id', cid);
+            } catch(e) { console.error('concludeContract delete corrupted:', e); }
+            fragmentsEarned += FRAGMENTS_PER_CORRUPTED_CARD;
+        }
+
+        // Desbloqueia cards que sobreviveram
+        survivedIds.forEach(cid => {
             const card = savedAssets.find(a => a.id === cid);
             if (card) card.isLocked = false;
         });
 
-        // Adiciona recompensa
+        // Adiciona fragmentos ao saldo do usuário se houve corrupção
+        if (fragmentsEarned > 0) {
+            currentUser.fragments = (currentUser.fragments || 0) + fragmentsEarned;
+            await updateProfileInSupabase(currentUser.id, { fragments: currentUser.fragments });
+        }
+
+        // Adiciona recompensa em Bumps
         currentUser.bumps += contract.reward;
         await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
 
@@ -4660,16 +4737,24 @@ async function logoutSession() {
         const profBumpsEl = document.getElementById('profBumps');
         if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
 
+        // Monta mensagem de resultado
+        let resultMsg = `<b style="color:#ff6600;">${contract.name}</b><br>`;
+        resultMsg += `+<b style="color:#ffaa00;">${contract.reward} B$</b> adicionados ao terminal.<br>`;
+        if (corruptedIds.length > 0) {
+            resultMsg += `<br><span style="color:#ff0044;">☠ ${corruptedIds.length} card(s) CORROMPIDO(s) e destruído(s) na operação.</span>`;
+            resultMsg += `<br><span style="color:#aaa;">+${fragmentsEarned} Fragmento(s) de Sucata concedido(s) como compensação.</span>`;
+        } else {
+            resultMsg += `<br><span style="color:#00ff66;">✓ Todos os cards retornaram intactos.</span>`;
+        }
+
         playSynthSound('success');
-        showCyberAlert(
-            'CONTRATO_CONCLUÍDO',
-            `<b style="color:#ff6600;">${contract.name}</b><br>Dados extraídos com sucesso. Créditos transferidos.<br><br>+<b style="color:#ffaa00;">${contract.reward} B$</b> adicionados ao seu terminal.<br>Saldo atual: <b>${currentUser.bumps} B$</b>`,
-            'success'
-        );
+        showCyberAlert('CONTRATO_CONCLUÍDO', resultMsg, corruptedIds.length > 0 ? 'warn' : 'success');
 
         // Re-renderiza tela se estiver aberta
         const screen = document.getElementById('screen-contracts');
         if (screen && screen.classList.contains('active')) renderContractsScreen();
+        // Atualiza cofre se aberto
+        if (document.getElementById('screen-vault') && document.getElementById('screen-vault').classList.contains('active')) renderVault();
     }
 
     // Reativa timers de contratos que ainda estão rodando (persistência F5)
@@ -4756,6 +4841,7 @@ async function logoutSession() {
                     <span class="contract-meta-pill pill-duration">⏱ ${contract.durationLabel}</span>
                     <span class="contract-meta-pill pill-req">🃏 ${contract.reqLabel}</span>
                     <span class="contract-meta-pill pill-reward">💰 +${contract.reward} B$</span>
+                    ${contract.riskChance ? `<span class="contract-meta-pill pill-risk" style="border-color:#ff0044; color:#ff0044;">${contract.riskLabel}</span>` : ''}
                 </div>
                 ${isRunning
                     ? `<button class="btn-action" style="width:100%; border-color:#555; color:#555; cursor:not-allowed;" disabled>EM EXECUÇÃO...</button>`
@@ -5828,7 +5914,7 @@ function lojaBuildMarkup() {
             </div>
         </div>
 
-        <div class="flex gap-2 mb-5 relative z-10 border-b border-amber-900/40">
+        <div class="flex gap-2 mb-5 relative z-10 border-b border-amber-900/40 flex-wrap">
             <button id="lojaTabBtnContratos" onclick="lojaSwitchTab('contratos')"
                 class="bg-transparent text-amber-800 border-b-2 border-transparent text-[0.65rem] font-extrabold tracking-wide px-4.5 py-2.5 uppercase cursor-pointer transition-all">
                 [ CONTRATOS ]
@@ -5836,6 +5922,11 @@ function lojaBuildMarkup() {
             <button id="lojaTabBtnCosmeticos" onclick="lojaSwitchTab('cosmeticos')"
                 class="bg-amber-500 text-black border-b-2 border-amber-500 text-[0.65rem] font-extrabold tracking-wide px-4.5 py-2.5 uppercase cursor-pointer transition-all">
                 [ COSMÉTICOS ]
+            </button>
+            <button id="lojaTabBtnFragmentos" onclick="lojaSwitchTab('fragmentos')"
+                class="bg-transparent text-amber-800 border-b-2 border-transparent text-[0.65rem] font-extrabold tracking-wide px-4.5 py-2.5 uppercase cursor-pointer transition-all"
+                style="border-color:transparent; color:#aaaaaa;">
+                [ FRAGMENTOS 🧩 ]
             </button>
         </div>
 
@@ -5856,36 +5947,151 @@ function lojaBuildMarkup() {
             ${lojaCategorySection('EMOTICONS', LOJA_EMOTICON_ITEMS)}
         </div>
 
+        <div id="lojaTabFragmentos" class="hidden relative z-10">
+            ${lojaFragmentosTabMarkup()}
+        </div>
+
         <div class="pointer-events-none absolute inset-0 z-20" style="background-image:repeating-linear-gradient(to bottom, transparent 0px, transparent 2px, rgba(255,170,0,0.035) 2px, rgba(255,170,0,0.035) 3px); mix-blend-mode:overlay;"></div>
     </div>
     `;
 }
 
 // ── ALTERNÂNCIA DE ABAS (classList hidden, nativo) ──
+// ── Gera o HTML da aba de Fragmentos de Sucata ──
+function lojaFragmentosTabMarkup() {
+    const frags = (currentUser && typeof currentUser.fragments === 'number') ? currentUser.fragments : 0;
+    const ticketCost  = typeof FRAGMENTS_TO_REDEEM_TICKET !== 'undefined' ? FRAGMENTS_TO_REDEEM_TICKET : 30;
+    const itemCost    = typeof FRAGMENTS_TO_REDEEM_ITEM   !== 'undefined' ? FRAGMENTS_TO_REDEEM_ITEM   : 15;
+    const canTicket   = frags >= ticketCost;
+    const canItem     = frags >= itemCost;
+
+    return `
+    <div style="margin-bottom:18px;">
+        <div style="color:#aaa; font-size:0.6rem; letter-spacing:2px; margin-bottom:4px;">🧩 SISTEMA DE FRAGMENTOS DE SUCATA</div>
+        <p style="font-size:0.6rem; color:#666688; margin-bottom:16px; line-height:1.6;">
+            Fragmentos são gerados quando cartas são <b style="color:#ff0044;">destruídas</b> em Contratos ou na Fornalha de Sobrecarga.
+            Acumule-os e troque por recompensas aqui — nunca fique completamente bloqueado.
+        </p>
+
+        <div style="background:#0a0a14; border:1px solid #333355; padding:16px; margin-bottom:18px; display:flex; align-items:center; gap:16px;">
+            <div style="font-size:2rem;">🧩</div>
+            <div>
+                <div style="font-size:0.55rem; color:#666688; letter-spacing:2px;">SEU SALDO DE FRAGMENTOS</div>
+                <div id="lojaFragsDisplay" style="font-size:1.4rem; font-weight:bold; color:#00ffcc; font-family:'Archivo Black', monospace;">${frags}</div>
+            </div>
+        </div>
+
+        <div style="display:grid; gap:14px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));">
+
+            <div style="background:#070712; border:1px solid ${canItem ? '#00ffcc' : '#223'}; padding:16px;">
+                <div style="color:#00ffcc; font-size:0.65rem; font-weight:bold; letter-spacing:1px; margin-bottom:6px;">POEIRA DE SILÍCIO</div>
+                <p style="font-size:0.55rem; color:#888899; margin-bottom:12px;">Item básico usado como catalisador na Alquimia. Essencial para novas fusões.</p>
+                <div style="font-size:0.6rem; color:#aaa; margin-bottom:10px;">Custo: <b style="color:#00ffcc;">${itemCost} 🧩 Fragmentos</b></div>
+                <button onclick="redeemFragment('item')"
+                    style="width:100%; padding:10px; background:${canItem ? '#00ffcc22' : '#111'}; border:1px solid ${canItem ? '#00ffcc' : '#333'}; color:${canItem ? '#00ffcc' : '#555'}; font-family:'Space Mono',monospace; font-size:0.6rem; letter-spacing:1px; cursor:${canItem ? 'pointer' : 'not-allowed'}; font-weight:bold;">
+                    ${canItem ? '🔁 RESGATAR ITEM' : `⏳ FALTAM ${itemCost - frags} FRAGMENTOS`}
+                </button>
+            </div>
+
+            <div style="background:#070712; border:1px solid ${canTicket ? '#ffaa00' : '#223'}; padding:16px;">
+                <div style="color:#ffaa00; font-size:0.65rem; font-weight:bold; letter-spacing:1px; margin-bottom:6px;">FREE ROLL TICKET</div>
+                <p style="font-size:0.55rem; color:#888899; margin-bottom:12px;">Um ticket de redirecionamento de drop. Use como se fosse um DROP GRATUITO garantido.</p>
+                <div style="font-size:0.6rem; color:#aaa; margin-bottom:10px;">Custo: <b style="color:#ffaa00;">${ticketCost} 🧩 Fragmentos</b></div>
+                <button onclick="redeemFragment('ticket')"
+                    style="width:100%; padding:10px; background:${canTicket ? '#ffaa0022' : '#111'}; border:1px solid ${canTicket ? '#ffaa00' : '#333'}; color:${canTicket ? '#ffaa00' : '#555'}; font-family:'Space Mono',monospace; font-size:0.6rem; letter-spacing:1px; cursor:${canTicket ? 'pointer' : 'not-allowed'}; font-weight:bold;">
+                    ${canTicket ? '🎟 RESGATAR TICKET' : `⏳ FALTAM ${ticketCost - frags} FRAGMENTOS`}
+                </button>
+            </div>
+
+        </div>
+    </div>`;
+}
+
+// ── Resgata fragmentos por item ou ticket ──
+async function redeemFragment(type) {
+    if (!currentUser || !currentUser.loggedIn) {
+        showCyberAlert('ACESSO NEGADO', 'Faça login pra resgatar fragmentos.', 'error');
+        return;
+    }
+    const frags = currentUser.fragments || 0;
+    const TICKET_COST = typeof FRAGMENTS_TO_REDEEM_TICKET !== 'undefined' ? FRAGMENTS_TO_REDEEM_TICKET : 30;
+    const ITEM_COST   = typeof FRAGMENTS_TO_REDEEM_ITEM   !== 'undefined' ? FRAGMENTS_TO_REDEEM_ITEM   : 15;
+
+    if (type === 'ticket') {
+        if (frags < TICKET_COST) {
+            showCyberAlert('FRAGMENTOS INSUFICIENTES', `Você precisa de ${TICKET_COST} fragmentos. Atual: ${frags}.`, 'warn');
+            return;
+        }
+        currentUser.fragments -= TICKET_COST;
+        await updateProfileInSupabase(currentUser.id, { fragments: currentUser.fragments });
+        // Concede 1 ticket grátis: simula um executeHardwareRoll(false) imediato
+        showCyberAlert('🎟 TICKET RESGATADO!',
+            `Free Roll Ticket concedido!<br>Fragmentos restantes: <b>${currentUser.fragments}</b><br><br>O roll será ativado automaticamente...`,
+            'success');
+        setTimeout(() => {
+            if (typeof executeHardwareRoll === 'function') executeHardwareRoll(false);
+        }, 1800);
+    } else if (type === 'item') {
+        if (frags < ITEM_COST) {
+            showCyberAlert('FRAGMENTOS INSUFICIENTES', `Você precisa de ${ITEM_COST} fragmentos. Atual: ${frags}.`, 'warn');
+            return;
+        }
+        currentUser.fragments -= ITEM_COST;
+        await updateProfileInSupabase(currentUser.id, { fragments: currentUser.fragments });
+        // Concede Poeira de Silício
+        if (typeof grantInventoryItem === 'function') {
+            await grantInventoryItem(currentUser.id, 'poeira_silicio', 2);
+        }
+        showCyberAlert('🧩 ITEM RESGATADO!',
+            `2x Poeira de Silício adicionada ao inventário!<br>Fragmentos restantes: <b>${currentUser.fragments}</b>`,
+            'success');
+    }
+
+    // Atualiza display de fragmentos na loja se visível
+    const fragDisplay = document.getElementById('lojaFragsDisplay');
+    if (fragDisplay) fragDisplay.innerText = String(currentUser.fragments);
+    // Re-renderiza aba de fragmentos
+    const fragTab = document.getElementById('lojaTabFragmentos');
+    if (fragTab) fragTab.innerHTML = lojaFragmentosTabMarkup();
+}
+
 function lojaSwitchTab(tab) {
-    const contratosPanel = document.getElementById('lojaTabContratos');
-    const cosmeticosPanel = document.getElementById('lojaTabCosmeticos');
-    const btnContratos = document.getElementById('lojaTabBtnContratos');
-    const btnCosmeticos = document.getElementById('lojaTabBtnCosmeticos');
+    const contratosPanel   = document.getElementById('lojaTabContratos');
+    const cosmeticosPanel  = document.getElementById('lojaTabCosmeticos');
+    const fragmentosPanel  = document.getElementById('lojaTabFragmentos');
+    const btnContratos     = document.getElementById('lojaTabBtnContratos');
+    const btnCosmeticos    = document.getElementById('lojaTabBtnCosmeticos');
+    const btnFragmentos    = document.getElementById('lojaTabBtnFragmentos');
     if (!contratosPanel || !cosmeticosPanel) return;
 
-    const activeBtnClasses = ['bg-amber-500', 'text-black', 'border-amber-500'];
+    const activeBtnClasses   = ['bg-amber-500', 'text-black', 'border-amber-500'];
     const inactiveBtnClasses = ['bg-transparent', 'text-amber-800', 'border-transparent'];
+
+    // Oculta tudo
+    [contratosPanel, cosmeticosPanel, fragmentosPanel].forEach(p => p && p.classList.add('hidden'));
+    [btnContratos, btnCosmeticos, btnFragmentos].forEach(b => {
+        if (!b) return;
+        b.classList.remove(...activeBtnClasses);
+        b.classList.add(...inactiveBtnClasses);
+        b.style.color = '';
+    });
 
     if (tab === 'contratos') {
         contratosPanel.classList.remove('hidden');
-        cosmeticosPanel.classList.add('hidden');
         btnContratos.classList.remove(...inactiveBtnClasses);
         btnContratos.classList.add(...activeBtnClasses);
-        btnCosmeticos.classList.remove(...activeBtnClasses);
-        btnCosmeticos.classList.add(...inactiveBtnClasses);
+    } else if (tab === 'fragmentos') {
+        if (fragmentosPanel) fragmentosPanel.classList.remove('hidden');
+        if (btnFragmentos) {
+            btnFragmentos.classList.remove(...inactiveBtnClasses);
+            btnFragmentos.style.background = '#00ffcc22';
+            btnFragmentos.style.color = '#00ffcc';
+            btnFragmentos.style.borderColor = '#00ffcc';
+        }
     } else {
         cosmeticosPanel.classList.remove('hidden');
-        contratosPanel.classList.add('hidden');
         btnCosmeticos.classList.remove(...inactiveBtnClasses);
         btnCosmeticos.classList.add(...activeBtnClasses);
-        btnContratos.classList.remove(...activeBtnClasses);
-        btnContratos.classList.add(...inactiveBtnClasses);
     }
 }
 
@@ -6384,13 +6590,45 @@ function spawnAirBroadcast(username, mensagem) {
     const layer = document.getElementById('airBroadcastLayer');
     if (!layer) return;
 
+    // 1) Efeito sonoro de Sirene Cyberpunk ao entrar no broadcast
+    try {
+        if (typeof initAudio === 'function') initAudio();
+        if (typeof audioCtx !== 'undefined' && audioCtx) {
+            const now = audioCtx.currentTime;
+            // Sirene zig-zag: dois tons alternando 4x
+            [[0,1400],[0.18,700],[0.36,1400],[0.54,700],[0.72,1400],[0.90,700],[1.08,400]].forEach(([t, hz]) => {
+                const o = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                o.type = 'sawtooth'; o.frequency.setValueAtTime(hz, now + t);
+                g.gain.setValueAtTime(0.22, now + t);
+                g.gain.exponentialRampToValueAtTime(0.001, now + t + 0.17);
+                o.connect(g); g.connect(audioCtx.destination);
+                o.start(now + t); o.stop(now + t + 0.17);
+            });
+        }
+    } catch(e) {}
+
+    // 2) Leitura da mensagem via Web Speech API (voz sintetizada)
+    try {
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            setTimeout(() => {
+                const u = new SpeechSynthesisUtterance(`Broadcast aéreo de ${username}: ${mensagem}`);
+                u.lang = 'pt-BR'; u.rate = 0.92; u.pitch = 0.85;
+                window.speechSynthesis.speak(u);
+            }, 1200);
+        }
+    } catch(e) {}
+
     const unit = document.createElement('div');
     unit.className = 'air-broadcast-unit';
-    const topPct = 10 + Math.random() * 55; // 10%–65% da altura da tela
-    const duration = 13 + Math.random() * 4; // 13s–17s
+    const topPct = 10 + Math.random() * 50; // 10%–60% da altura da tela
+    // Duração maior: 28s–34s para usuário ler confortavelmente
+    const duration = 28 + Math.random() * 6;
     unit.style.setProperty('--ufo-top', topPct + '%');
     unit.style.setProperty('--ufo-duration', duration + 's');
 
+    // OVNI na FRENTE (esquerda), faixa atrás (direita) — puxando na direção do movimento
     unit.innerHTML = `
         <div class="ufo-craft">
             <div class="ufo-dome"></div>
@@ -6466,8 +6704,22 @@ function renderGlobalChatMessages() {
     box.innerHTML = globalChatCache.map(m => {
         const isOwn = currentUser && currentUser.loggedIn && m.username === currentUser.username;
         const time = new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+        // Renderiza cosméticos equipados do remetente (moldura, avatar, emoticon)
+        const cos = (m.cosmetics && typeof m.cosmetics === 'object') ? m.cosmetics : {};
+        const avatarSrc = cos.avatar || '';
+        const frameClass = cos.frame ? `frame-chat-${cos.frame.replace(/[^a-z0-9_-]/gi,'_')}` : '';
+        const emoticon = cos.emoticon ? `<span class="gc-emoticon" title="Emoticon equipado">${escapeHtmlForChat(cos.emoticon)}</span>` : '';
+        const avatarHtml = avatarSrc
+            ? `<span class="gc-avatar-wrap ${frameClass}"><img class="gc-avatar-img" src="${escapeHtmlForChat(avatarSrc)}" alt=""></span>`
+            : `<span class="gc-avatar-wrap gc-avatar-placeholder">${escapeHtmlForChat(m.username.charAt(0).toUpperCase())}</span>`;
+
         return `<div class="gc-msg${isOwn ? ' gc-own' : ''}">
-            <span class="gc-user">${escapeHtmlForChat(m.username)}</span>${escapeHtmlForChat(m.mensagem)}
+            ${avatarHtml}
+            <div class="gc-msg-body">
+                <span class="gc-user">${escapeHtmlForChat(m.username)}${emoticon}</span>
+                <span class="gc-text">${escapeHtmlForChat(m.mensagem)}</span>
+            </div>
             <span class="gc-time">${time}</span>
         </div>`;
     }).join('');
@@ -6502,10 +6754,17 @@ async function sendGlobalChatMessage() {
     if (newBalance === null) { if (sendBtn) sendBtn.disabled = false; return; }
 
     try {
+        // Inclui cosméticos equipados para renderização no feed de todos
+        const chatCosmetics = {
+            emoticon: currentUser.equippedCosmetics ? (currentUser.equippedCosmetics.emoticon || null) : null,
+            frame: currentUser.avatar_frame || null,
+            avatar: currentUser.avatar || null
+        };
         const { error } = await sb.from('chat_global').insert({
             id_usuario: currentUser.id,
             username: currentUser.username,
-            mensagem: text
+            mensagem: text,
+            cosmetics: chatCosmetics
         });
         if (error) {
             console.error('sendGlobalChatMessage:', error.message);
