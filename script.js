@@ -446,84 +446,59 @@ async function handleAuthSubmit(event) {
         }
         clearLoginAttempts();
 
-        const profile = await fetchProfile(data.user.id);
-        if (!profile) {
-            // AUTO-CURA: a conta de Auth é válida (login passou), mas não tem
-            // profile vinculado ao auth.uid. Isso acontece quando o cadastro
-            // foi interrompido após criar a conta mas antes de gravar o profile.
-            //
-            // ESTRATÉGIA:
-            // 1) Tenta buscar um profile que já exista com esse username —
-            //    pode ser um profile órfão criado por outra sessão para o
-            //    mesmo usuário. Se achar, vincula o auth.uid ao profile existente.
-            // 2) Se não existir nenhum profile com esse username, cria um novo.
-            // 3) Só exibe erro se não conseguir nem buscar nem criar.
+        let profile = await fetchProfile(data.user.id);
 
-            // Passo 1: tenta recuperar o profile pelo username digitado
-            let healedProfile = null;
+        if (!profile) {
+            // AUTO-CURA: auth válido mas sem profile pelo auth.uid.
+            // Causas comuns:
+            //   A) Cadastro interrompido antes de gravar o profile.
+            //   B) Conta Auth recriada — o profile antigo tem id diferente.
+            //
+            // Solução: busca o profile pelo username digitado (sem mexer no id),
+            // e usa ele diretamente sobrescrevendo o id em memória para a sessão.
+            // Não tentamos alterar a PK no banco (Supabase bloqueia via RLS).
+
+            let recovered = null;
+
             try {
-                const { data: existing } = await sb
+                const { data: byUsername } = await sb
                     .from('profiles')
                     .select(PUBLIC_PROFILE_COLUMNS)
                     .ilike('username', formattedUser)
                     .maybeSingle();
 
-                if (existing) {
-                    // Profile existe com esse username — vincula ao auth.uid atual
-                    // atualizando o id da linha para o uid que acabou de logar.
-                    // (Caso de username pertencente a esse mesmo usuário mas com
-                    // id dessincronizado, comum após re-criação de conta no Auth.)
-                    const { error: updateErr } = await sb
-                        .from('profiles')
-                        .update({ id: data.user.id })
-                        .eq('username', existing.username);
-
-                    if (!updateErr) {
-                        // Rebusca com o id correto
-                        const { data: reloaded } = await sb
-                            .from('profiles')
-                            .select(PUBLIC_PROFILE_COLUMNS)
-                            .eq('id', data.user.id)
-                            .maybeSingle();
-                        healedProfile = reloaded || existing;
-                    }
+                if (byUsername) {
+                    // Encontrou o profile pelo username — usa ele diretamente.
+                    // Sobrescreve o id em memória para que o restante do app
+                    // funcione com o auth.uid atual (gravações futuras usam o id correto).
+                    recovered = { ...byUsername, id: data.user.id };
                 }
             } catch(e) {
-                console.warn('auto-heal (busca profile):', e);
+                console.warn('auto-heal (busca por username):', e);
             }
 
-            // Passo 2: se ainda não tem profile, cria um novo
-            if (!healedProfile) {
-                healedProfile = await createProfile(data.user.id, formattedUser, data.user.email);
+            // Se não achou pelo username, tenta criar um profile novo
+            if (!recovered) {
+                recovered = await createProfile(data.user.id, formattedUser, data.user.email);
             }
 
-            // Passo 3: se tudo falhou, orienta o usuário de forma útil
-            if (!healedProfile) {
-                errorEl.innerText = 'Falha ao restaurar seu perfil. Tente novamente ou contate o suporte informando seu e-mail de cadastro.';
+            if (!recovered) {
+                errorEl.innerText = 'Não foi possível localizar seu perfil. Verifique se o username está correto ou registre uma nova conta.';
                 errorEl.style.display = 'block';
                 return;
             }
 
-            messageThreads = {};
-            activeThreadUser = null;
-            applyProfileToCurrentUser(healedProfile);
-            savedAssets = [];
-            currentUser.inventory = await loadInventoryFromSupabase(currentUser.id);
-            playTerminalSound('login');
-            navigateTo('engine');
-            return;
+            profile = recovered;
         }
 
+        // Fluxo normal de login (serve tanto para o caminho direto quanto para o auto-heal)
         messageThreads = {};
         activeThreadUser = null;
         const prevAssets = [...(savedAssets || [])];
         applyProfileToCurrentUser(profile);
-
-        // Carrega cofre e inventário reais do Supabase (antes ficava vazio)
         savedAssets = await loadCardsFromSupabase(currentUser.id);
         currentUser.inventory = await loadInventoryFromSupabase(currentUser.id);
         checkIncomingGifts(prevAssets, savedAssets);
-
         playTerminalSound('login');
         resumePendingContracts();
         navigateTo('engine');
