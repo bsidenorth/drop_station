@@ -2540,18 +2540,38 @@ async function logoutSession() {
         const metaBox = document.getElementById('inspectMetaBox');
         metaBox.innerHTML = `
             <div class="inspect-crt-lines" style="
-                font-size:0.5rem; color:${rarityColor}88; margin-bottom:10px;
+                font-size:0.5rem; color:${rarityColor}88; margin-bottom:12px;
                 border:1px solid ${rarityColor}33; padding:6px 10px;
                 background: rgba(0,0,0,0.6);
                 font-family:'Space Mono',monospace; letter-spacing:1px;
                 line-height:1.8;
             ">${crtLines.map(l => `<div>${l}</div>`).join('')}</div>
-            <b>CÓDIGO IDENTIFICADOR:</b> ${cardAsset.id}<br>
-            <b>ESTILO VISUAL:</b> ${currentLang === 'PT' ? cardAsset.styleName : (cardAsset.styleNameEN || cardAsset.styleName)}<br>
-            <b>RARIDADE DO ATIVO:</b> <span style="color:${rarityColor}">${(currentLang === 'PT' ? cardAsset.rarityName : cardAsset.rarityNameEN).toUpperCase()}</span><br>
-            <b>NÍVEL DE COLECIONADOR DO PROPRIETÁRIO:</b> LVL ${ownerScore || 1}<br>
-            <b>DONO DA ASSINATURA:</b> <span style="color:#00ff66; text-decoration:underline; cursor:pointer;" class="inspect-author">${ownerName}</span> (CLIQUE PARA VER PERFIL)<br>
-            <b>ESTADO NA REDE:</b> ${cardAsset.registered ? 'CRIPTOGRAFADO EM WALLET' : 'FLUXO VOLÁTIL'}
+            <div class="inspect-meta-grid">
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">CÓDIGO ID</span>
+                    <span class="inspect-meta-value">${cardAsset.id}</span>
+                </div>
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">ESTILO VISUAL</span>
+                    <span class="inspect-meta-value">${currentLang === 'PT' ? cardAsset.styleName : (cardAsset.styleNameEN || cardAsset.styleName)}</span>
+                </div>
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">RARIDADE</span>
+                    <span class="inspect-meta-value" style="color:${rarityColor}">${(currentLang === 'PT' ? cardAsset.rarityName : cardAsset.rarityNameEN).toUpperCase()}</span>
+                </div>
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">NÍVEL DO PROPRIETÁRIO</span>
+                    <span class="inspect-meta-value">LVL ${ownerScore || 1}</span>
+                </div>
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">DONO DA ASSINATURA</span>
+                    <span class="inspect-meta-value inspect-author" style="color:#00ff66; text-decoration:underline; cursor:pointer;">${ownerName}</span>
+                </div>
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">ESTADO NA REDE</span>
+                    <span class="inspect-meta-value">${cardAsset.registered ? 'CRIPTOGRAFADO EM WALLET' : 'FLUXO VOLÁTIL'}</span>
+                </div>
+            </div>
         `;
 
         metaBox.querySelector('.inspect-author').addEventListener('click', () => viewExternalProfile(ownerName));
