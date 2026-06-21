@@ -27,7 +27,9 @@ let currentUser = {
     loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
     bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
     followers: 12, following: 4, followedByMe: false,
-    inventory: [] // populado na Parte 3 (inventário)
+    inventory: [], // populado na Parte 3 (inventário)
+    cosmetics: [], // ids dos cosméticos da Loja (molduras/fundos/emoticons) já comprados — persistido em profiles.cosmetics
+    equippedAccessory: null // id do acessório de vitrine (fundo/emoticon) atualmente ativo — persistido em profiles.equipped_accessory
 };
 
 // =========================================================
@@ -90,7 +92,7 @@ function secondsLoginLocked() {
 // select('email'). A resolução de e-mail para login passa pela
 // function security definer `email_by_username` (ver fetchEmailByUsername).
 // =========================================================
-const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, banner, status, following, fusion_count, created_at, updated_at';
+const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, banner, status, following, fusion_count, cosmetics, equipped_accessory, created_at, updated_at';
 
 async function fetchProfile(userId) {
     const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('id', userId).single();
@@ -183,7 +185,7 @@ async function fetchProfileByUsername(username) {
 const PROFILE_FIELD_TO_COLUMN = {
     bumps: 'bumps', bio: 'bio', avatar: 'avatar', avatarFrame: 'avatar_frame', banner: 'banner',
     status: 'status', following: 'following', code: 'code', username: 'username',
-    fusion_count: 'fusion_count'
+    fusion_count: 'fusion_count', cosmetics: 'cosmetics', equippedAccessory: 'equipped_accessory'
 };
 async function updateProfileInSupabase(userId, fieldsCamel) {
     if (!userId) { console.warn('updateProfileInSupabase: userId ausente, ignorando update remoto.'); return false; }
@@ -215,7 +217,9 @@ function applyProfileToCurrentUser(profile) {
         following: (profile.following || []).length,
         followers: 0, // calculado em tempo real onde for exibido (Parte futura)
         followedByMe: false,
-        inventory: [] // populado na Parte 3
+        inventory: [], // populado na Parte 3
+        cosmetics: Array.isArray(profile.cosmetics) ? profile.cosmetics : [],
+        equippedAccessory: profile.equipped_accessory || null
     };
 
     const navText = document.getElementById('nav-btn-text');
@@ -232,7 +236,8 @@ function resetCurrentUserToAnon() {
     currentUser = {
         loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
         bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
-        followers: 12, following: 4, followedByMe: false, inventory: []
+        followers: 12, following: 4, followedByMe: false, inventory: [],
+        cosmetics: [], equippedAccessory: null
     };
     messageThreads = {};
     activeThreadUser = null;
@@ -772,11 +777,6 @@ async function logoutSession() {
     let messageThreads = {};
     let activeThreadUser = null;
 
-    const SEED_FEED = [
-        { id: "#449201", rarityType: "legendary", rarityName: "LENDÁRIO", rarityNameEN: "LEGENDARY", styleName: "MATRIX GLITCH", styleNameEN: "MATRIX GLITCH", creator: "@cyber_k1ng", registered: true, exposed: true, forSale: true, price: 150, imgSrc: "https://i.ibb.co/m56c5F2Z/ced5acf2-417d-4669-b964-96437ab91fda.jpg" },
-        { id: "#110293", rarityType: "epic",      rarityName: "ÉPICO",    rarityNameEN: "EPIC",      styleName: "ACID NEON",    styleNameEN: "ACID NEON",    creator: "@neon_samurai", registered: true, exposed: true, forSale: false, price: 0, imgSrc: "https://i.ibb.co/S7JbrXX2/fa809178-22dc-4ec1-8d84-2dcea9ab44b7.jpg" }
-    ];
-
     // =========================================================
     // FEED GLOBAL DE MUTAÇÕES/FUSÕES (Ponto 1) — AGORA REAL E PÚBLICO
     // BUGFIX (site "zerado" em aba anônima/outra conta): isto ANTES persistia
@@ -787,10 +787,20 @@ async function logoutSession() {
     // agora é a tabela pública `eventos_globais` (tipo='feed'), carregada no
     // boot por fetchAndSeedGlobalEvents() e atualizada ao vivo por
     // initGlobalRealtime() — qualquer aba, logada ou anônima, vê os MESMOS
-    // drops/fusões em tempo real. SEED_FEED acima só entra como fallback
-    // cosmético caso a rede ainda não tenha nenhum evento real registrado.
+    // drops/fusões em tempo real.
+    //
+    // BUGFIX (perfis fantasmas @cyber_k1ng / @neon_samurai): removido o
+    // antigo SEED_FEED estático que era usado como "fallback cosmético"
+    // antes do banco responder. Isso fazia QUALQUER aba mostrar dois cards
+    // falsos por uma fração de segundo (ou indefinidamente, se o fetch
+    // falhasse) — perfis que não existem no Supabase. Agora o estado
+    // inicial é sempre um array vazio, e a UI mostra um aviso de
+    // "carregando" explícito (ver globalFeedLoading + buildStoriesMarquee())
+    // em vez de inventar dados, até a primeira resposta real da rede
+    // chegar — mesmo que essa resposta seja "ainda não há nenhum evento".
     // =========================================================
-    let globalFeed = [...SEED_FEED];
+    let globalFeed = [];
+    let globalFeedLoading = true;
 
     // Mercado: array em memória que renderMarketGrid() lê/filtra/pagina.
     // Fonte de verdade real é a tabela `cards` no Supabase — este array é
@@ -845,15 +855,21 @@ async function logoutSession() {
             .select('*')
             .order('created_at', { ascending: false })
             .limit(50);
-        if (error) { console.error('fetchAndSeedGlobalEvents:', error.message); return; }
+        if (error) {
+            console.error('fetchAndSeedGlobalEvents:', error.message);
+            globalFeedLoading = false; // não deixa o aviso de "carregando" travado pra sempre em caso de falha de rede
+            buildStoriesMarquee();
+            return;
+        }
 
         ledgerCache = data.map(rowToLedgerEntry);
 
         const feedCards = data.map(rowToFeedCard).filter(Boolean);
-        // Se a rede já tem drops/fusões reais, eles substituem o SEED_FEED
-        // cosmético. Se ainda não há nenhum (deploy novo / pouca atividade),
-        // mantém o SEED_FEED como vitrine de exemplo na Home.
-        if (feedCards.length > 0) globalFeed = feedCards;
+        // Sempre usa o que veio do banco — mesmo que seja um array vazio
+        // (rede nova, sem eventos ainda). Não há mais fallback pra dados
+        // estáticos/fantasma: array vazio é um estado real e válido.
+        globalFeed = feedCards;
+        globalFeedLoading = false;
 
         renderMarketLedger();
         buildStoriesMarquee();
@@ -2183,9 +2199,18 @@ async function logoutSession() {
     // claimAssetLogic agora vem da Parte 2 (Supabase), no final do arquivo.
 
     function buildStoriesMarquee() {
-        const container = document.getElementById('storiesContainer'); 
+        const container = document.getElementById('storiesContainer');
         if(!container) return;
         container.innerHTML = '';
+
+        // BUGFIX (perfis fantasmas): enquanto o Supabase ainda não respondeu
+        // a primeira leitura de `eventos_globais`, mostramos um aviso de
+        // terminal em vez de qualquer card inventado/estático.
+        if (globalFeedLoading) {
+            container.innerHTML = '<div class="feed-loading-notice">[ CONECTANDO AO NÓ CENTRAL // CARREGANDO DADOS... ]</div>';
+            return;
+        }
+
         if(globalFeed.length === 0) return;
         
         const displayItems = globalFeed.length > 4 ? [...globalFeed, ...globalFeed] : globalFeed;
@@ -4091,6 +4116,11 @@ async function logoutSession() {
         // Zona de edição só aparece para o próprio perfil
         const editZone = document.getElementById('profileEditZone');
         if (editZone) editZone.style.display = isOwner ? 'block' : 'none';
+
+        // Inventário de equipamentos (Molduras/Acessórios da Loja do Spike) —
+        // também exclusivo do dono do perfil.
+        renderEquipmentInventory(isOwner);
+
         const inputBio = document.getElementById('inputBio');
         if (inputBio) inputBio.value = isOwner ? (bio || '') : '';
         // Sempre volta o editor de bio pro estado fechado (botão visível, textarea oculta)
@@ -5446,9 +5476,11 @@ initGlobalRealtime();
 // div de conteúdo principal se ela já existir (ex: 'screen-loja').
 const LOJA_TARGET_ID = 'lojaScreen';
 
-// Estado local de cosméticos comprados nesta sessão (mock).
-// TODO SUPABASE: substituir por currentUser.ownedCosmetics carregado do perfil.
-let lojaOwnedItems = [];
+// Estado local de cosméticos comprados. Fonte de verdade é o Supabase
+// (coluna profiles.cosmetics) — currentUser.cosmetics já vem populado dali
+// no login/refresh (ver applyProfileToCurrentUser). lojaOwnedItems deixou
+// de existir como array mock separado: tudo lê/escreve direto em
+// currentUser.cosmetics, pra nunca dessincronizar do banco.
 
 const SPIKE_LINES_LOJA = [
     "Hardware velho, lucro novo. Compra rápido antes que eu mude de preço.",
@@ -5519,7 +5551,7 @@ function lojaPreviewMarkup(item) {
 }
 
 function lojaItemCardMarkup(item) {
-    const owned = lojaOwnedItems.includes(item.id);
+    const owned = !!(currentUser && Array.isArray(currentUser.cosmetics) && currentUser.cosmetics.includes(item.id));
     const balance = (currentUser && currentUser.bumps) || 0;
     const affordable = balance >= item.price;
 
@@ -5692,28 +5724,59 @@ function lojaSwitchTab(tab) {
     }
 }
 
-// ── HANDLERS ESTRUTURADOS — INTEGRAÇÃO SUPABASE PENDENTE ──
-function lojaHandlePurchase(itemId) {
+// ── HANDLERS ESTRUTURADOS — INTEGRAÇÃO SUPABASE ──
+async function lojaHandlePurchase(itemId) {
     const item = LOJA_ALL_ITEMS.find(i => i.id === itemId);
     if (!item) return;
     console.log('[LOJA] Tentativa de compra:', item.id, 'por', item.price, 'B$');
 
-    const balance = (currentUser && currentUser.bumps) || 0;
+    if (!currentUser || !currentUser.loggedIn || !currentUser.id) {
+        console.log('[LOJA] Compra recusada: usuário não autenticado.');
+        if (typeof showCyberAlert === 'function') {
+            showCyberAlert('ACESSO NEGADO', 'Você precisa estar conectado pra negociar com o Spike.', 'error');
+        }
+        return;
+    }
+
+    if (!Array.isArray(currentUser.cosmetics)) currentUser.cosmetics = [];
+
+    if (currentUser.cosmetics.includes(item.id)) {
+        console.log('[LOJA] Compra recusada: item já está no inventário.');
+        return;
+    }
+
+    const balance = currentUser.bumps || 0;
     if (balance < item.price) {
         console.log('[LOJA] Compra recusada: saldo insuficiente.');
         // TODO SUPABASE: chamar openDepositModal() ou showCyberAlert('FUNDOS INSUFICIENTES', ...)
         return;
     }
 
-    // TODO SUPABASE: débito real + grant de cosmético, ex:
-    //   currentUser.bumps -= item.price;
-    //   await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
-    //   await grantCosmeticToProfile(currentUser.id, item.id);
+    // Débito + grant de cosmético: persistidos juntos numa única chamada,
+    // pra nunca ficar um estado "pagou mas não recebeu o item" (ou
+    // vice-versa) se a conexão cair no meio do caminho.
+    const newBumps = balance - item.price;
+    const newCosmetics = [...currentUser.cosmetics, item.id];
 
-    currentUser.bumps -= item.price;
-    lojaOwnedItems.push(item.id);
-    console.log('[LOJA] Compra confirmada (mock):', item.id);
-    renderLoja(); // re-renderiza pra atualizar saldo e estado "INSTALADO"
+    console.log(`Supabase Update -> profiles set cosmetics = ${JSON.stringify(newCosmetics)}, bumps = ${newBumps} where id = ${currentUser.id}`);
+
+    const { error } = await sb.from('profiles')
+        .update({ cosmetics: newCosmetics, bumps: newBumps })
+        .eq('id', currentUser.id);
+
+    if (error) {
+        console.error('[LOJA] Falha ao persistir compra no Supabase:', error.message);
+        if (typeof showCyberAlert === 'function') {
+            showCyberAlert('FALHA NA TRANSAÇÃO', 'O nó central recusou a gravação. Tenta novamente.', 'error');
+        }
+        return; // não atualiza estado local se o banco não confirmou
+    }
+
+    currentUser.bumps = newBumps;
+    currentUser.cosmetics = newCosmetics;
+    console.log('[LOJA] Compra confirmada:', item.id);
+    renderLoja(); // re-renderiza pra atualizar saldo e estado "ATIVO"
+    if (selectedProfileUser === currentUser.username) renderEquipmentInventory(true); // sincroniza o bloco de equipamentos no Perfil, se estiver aberto
 }
 
 function lojaHandleAcceptContract(contractId) {
@@ -5721,6 +5784,104 @@ function lojaHandleAcceptContract(contractId) {
     // TODO SUPABASE: validar card alocado, criar registro de empréstimo, travar card no cofre, ex:
     //   await createLoanContract({ userId: currentUser.id, contractId, cardId, expiresAt });
     console.log('[LOJA] Contrato ainda não habilitado nesta build (mock).');
+}
+
+// =========================================================
+// INVENTÁRIO DE EQUIPAMENTOS (Ponto 3) — bloco no Perfil que lê
+// currentUser.cosmetics e deixa equipar Molduras / ativar Acessórios
+// de Vitrine comprados na Loja do Spike.
+// =========================================================
+const EQUIPMENT_INVENTORY_TARGET_ID = 'equipmentInventoryZone';
+
+function lojaCategoryLabel(category) {
+    if (category === 'moldura') return 'MOLDURA';
+    if (category === 'fundo') return 'LUZ DE FUNDO';
+    if (category === 'emoticon') return 'EMOTICONS';
+    return category.toUpperCase();
+}
+
+function equipmentInventoryItemMarkup(item) {
+    const isFrame = item.category === 'moldura';
+    const isActiveFrame = isFrame && currentUser.avatarFrame === item.id;
+    const isActiveAccessory = !isFrame && currentUser.equippedAccessory === item.id;
+    const isActive = isActiveFrame || isActiveAccessory;
+
+    const actionLabel = isActive
+        ? (isFrame ? '✓ EQUIPADA' : '✓ ATIVO')
+        : (isFrame ? '[ EQUIPAR ]' : '[ ATIVAR ]');
+    const onClickAttr = isFrame
+        ? `lojaEquipFrame('${item.id}')`
+        : `lojaToggleAccessory('${item.id}')`;
+
+    return `
+        <div class="equip-inv-item${isActive ? ' equip-inv-active' : ''}">
+            <span class="equip-inv-name">${item.name}</span>
+            <span class="equip-inv-cat">${lojaCategoryLabel(item.category)}</span>
+            <button class="btn-action equip-inv-btn"${isActive ? ' disabled' : ''} onclick="${isActive ? '' : onClickAttr}">${actionLabel}</button>
+        </div>
+    `;
+}
+
+// Renderiza o bloco "[ INVENTÁRIO DE EQUIPAMENTOS ]" dentro da seção de Perfil.
+// Só faz sentido pro dono do próprio perfil (isOwner) — visitantes não
+// devem ver/alterar o equipamento de outra pessoa.
+function renderEquipmentInventory(isOwner) {
+    const target = document.getElementById(EQUIPMENT_INVENTORY_TARGET_ID);
+    if (!target) return;
+
+    if (!isOwner || !currentUser.loggedIn) {
+        target.innerHTML = '';
+        target.style.display = 'none';
+        return;
+    }
+    target.style.display = 'block';
+
+    const owned = Array.isArray(currentUser.cosmetics) ? currentUser.cosmetics : [];
+    const ownedItems = LOJA_ALL_ITEMS.filter(i => owned.includes(i.id));
+
+    if (ownedItems.length === 0) {
+        target.innerHTML = `
+            <h4 class="equip-inv-title">[ INVENTÁRIO DE EQUIPAMENTOS ]</h4>
+            <p class="equip-inv-empty">Nenhum cosmético comprado ainda. Visite o MERCADO_NEGRO_DO_SPIKE na Loja.</p>
+        `;
+        return;
+    }
+
+    target.innerHTML = `
+        <h4 class="equip-inv-title">[ INVENTÁRIO DE EQUIPAMENTOS ]</h4>
+        <div class="equip-inv-list">
+            ${ownedItems.map(equipmentInventoryItemMarkup).join('')}
+        </div>
+    `;
+}
+
+// Equipar uma moldura comprada na Loja (reaproveita setAvatarFrame, que já
+// atualiza a UI do avatar e persiste em profiles.avatar_frame).
+async function lojaEquipFrame(itemId) {
+    if (!currentUser || !currentUser.loggedIn) return;
+    if (!Array.isArray(currentUser.cosmetics) || !currentUser.cosmetics.includes(itemId)) return;
+    console.log('[LOJA] Equipando moldura:', itemId);
+    await setAvatarFrame(itemId);
+    renderEquipmentInventory(true);
+}
+
+// Ativa/desativa um acessório de vitrine (fundo ou pack de emoticons)
+// comprado na Loja. Apenas um acessório fica ativo por vez (clicar no que
+// já está ativo desativa). Persistido em profiles.equipped_accessory.
+async function lojaToggleAccessory(itemId) {
+    if (!currentUser || !currentUser.loggedIn) return;
+    if (!Array.isArray(currentUser.cosmetics) || !currentUser.cosmetics.includes(itemId)) return;
+
+    const newValue = currentUser.equippedAccessory === itemId ? null : itemId;
+    console.log('[LOJA] Ativando acessório de vitrine:', newValue || '(nenhum)');
+
+    const ok = await updateProfileInSupabase(currentUser.id, { equippedAccessory: newValue });
+    if (!ok) {
+        console.error('[LOJA] Falha ao persistir acessório de vitrine ativo.');
+        return;
+    }
+    currentUser.equippedAccessory = newValue;
+    renderEquipmentInventory(true);
 }
 
 // ── PONTO DE ENTRADA ──
