@@ -4099,9 +4099,12 @@ async function logoutSession() {
         const avatarFrameWrap = document.getElementById('avatarFrameWrap');
         if (avatarFrameWrap) {
             const frameClass = (isOwner ? currentUser.avatarFrame : null) || 'frame-style-1';
-            avatarFrameWrap.classList.remove('frame-style-1', 'frame-style-2');
+            avatarFrameWrap.classList.remove('frame-style-1', 'frame-style-2', 'frame-style-3', 'frame-style-4');
             avatarFrameWrap.classList.add(frameClass);
         }
+        // Aplica o glow neon de fundo (Ponto 4) ao abrir o perfil, caso o
+        // dono já tenha algum acessório de vitrine equipado.
+        applyEquippedAccessoryEffect();
 
         // Banner
         const bannerEl = document.getElementById('profBannerView');
@@ -4254,15 +4257,13 @@ async function logoutSession() {
         `;
     }
 
+    let currentFrameFilter = 'todos';
+
     function openAvatarSelector() {
         if(selectedProfileUser !== currentUser.username) return;
         document.getElementById('avatarSelectorModal').style.display = 'flex';
+        renderFrameSelectorRow(currentFrameFilter);
         const grid = document.getElementById('avatarSelectorGrid'); grid.innerHTML = '';
-
-        // Destaca a moldura atualmente ativa
-        document.querySelectorAll('#frameSelectorRow [data-frame]').forEach(b => {
-            b.style.opacity = (b.dataset.frame === (currentUser.avatarFrame || 'frame-style-1')) ? '1' : '0.45';
-        });
 
         // Apenas avatares no cofre que NÃO estão em custódia/listados no mercado
         const availableAssets = savedAssets.filter(a => a.isListed === false && a.forSale === false);
@@ -4283,14 +4284,79 @@ async function logoutSession() {
         });
     }
 
-    // ── MOLDURAS CYBERPUNK: 2 modelos pré-definidos (frame-style-1 "NEON HEXLOCK"
-    // e frame-style-2 "CIRCUIT RING"). Substitui o antigo design de TV antiga. ──
+    // ── PONTO 3: SELETOR DE MOLDURAS AMPLIADO COM FILTROS DE RARIDADE ──
+    const FRAME_RARITY_LABELS = { todos: 'TODOS', raro: 'RARO', lendario: 'LENDÁRIO', ancestral: 'ANCESTRAL' };
+    const FRAME_RARITY_ICONS  = { raro: '⬡', lendario: '◈', ancestral: '☠' };
+
+    function setFrameFilter(filter) {
+        currentFrameFilter = filter;
+        renderFrameSelectorRow(filter);
+    }
+
+    // Lista completa das molduras selecionáveis: a padrão (grátis, sempre
+    // possuída) + as 3 vendidas na Loja (NEON_PULSE / GLITCH_CORE / APOCALYPSE_OVERRIDE).
+    function allSelectableFrames() {
+        return [
+            { id: FRAME_DEFAULT_ID, category: 'moldura', name: 'Neon Hexlock', accent: '#00ffff', rarity: FRAME_DEFAULT_RARITY, free: true },
+            ...LOJA_FRAME_ITEMS
+        ];
+    }
+
+    function frameSelectorButtonMarkup(frame) {
+        const owned = frame.free || (Array.isArray(currentUser.cosmetics) && currentUser.cosmetics.includes(frame.id));
+        const isActive = (currentUser.avatarFrame || FRAME_DEFAULT_ID) === frame.id;
+        const opacity = isActive ? '1' : (owned ? '0.45' : '0.35');
+
+        if (!owned) {
+            // Trava de segurança: usuário não tem o item no array cosmetics.
+            return `
+                <button class="btn-action frame-locked-btn" style="border-color:#333; flex:1; opacity:${opacity}; cursor:not-allowed; color:#555;" disabled data-frame="${frame.id}" data-rarity="${frame.rarity}">
+                    🔒 BLOQUEADO - VISITE O SPIKE
+                </button>`;
+        }
+
+        return `
+            <button class="btn-action" style="border-color:${frame.accent}; flex:1; opacity:${opacity};" data-frame="${frame.id}" data-rarity="${frame.rarity}" onclick="lojaEquipFrame('${frame.id}')">
+                ${FRAME_RARITY_ICONS[frame.rarity] || '⬡'} ${frame.name.toUpperCase()}
+            </button>`;
+    }
+
+    function renderFrameSelectorRow(filter) {
+        const filterZone = document.getElementById('frameFilterZone');
+        if (filterZone) {
+            filterZone.innerHTML = Object.keys(FRAME_RARITY_LABELS).map(key => `
+                <button class="filter-btn${filter === key ? ' active' : ''}" onclick="setFrameFilter('${key}')">[ ${FRAME_RARITY_LABELS[key]} ]</button>
+            `).join('');
+        }
+
+        const row = document.getElementById('frameSelectorRow');
+        if (!row) return;
+        const frames = allSelectableFrames().filter(f => filter === 'todos' || f.rarity === filter);
+        row.innerHTML = frames.length
+            ? frames.map(frameSelectorButtonMarkup).join('')
+            : '<p style="font-size:0.6rem; color:#666;">Nenhuma moldura nessa raridade ainda.</p>';
+    }
+
+    // ── MOLDURAS CYBERPUNK: 4 modelos (frame-style-1 "NEON HEXLOCK" grátis,
+    // frame-style-2 "NEON PULSE", frame-style-3 "GLITCH CORE", frame-style-4
+    // "APOCALYPSE OVERRIDE" — as 3 últimas só compráveis na Loja do Spike). ──
     async function setAvatarFrame(frameId) {
         if(selectedProfileUser !== currentUser.username) return;
+
+        // Trava de segurança (camada extra, além do botão já vir desabilitado
+        // no markup): nunca persiste uma moldura que o usuário não possui.
+        if (frameId !== FRAME_DEFAULT_ID && (!Array.isArray(currentUser.cosmetics) || !currentUser.cosmetics.includes(frameId))) {
+            console.warn('[MOLDURA] Bloqueado: usuário não possui', frameId);
+            if (typeof showCyberAlert === 'function') {
+                showCyberAlert('BLOQUEADO', 'Você ainda não possui essa moldura. Visite o Spike na Loja.', 'error');
+            }
+            return;
+        }
+
         currentUser.avatarFrame = frameId;
         const avatarFrameWrap = document.getElementById('avatarFrameWrap');
         if (avatarFrameWrap) {
-            avatarFrameWrap.classList.remove('frame-style-1', 'frame-style-2');
+            avatarFrameWrap.classList.remove(FRAME_DEFAULT_ID, 'frame-style-2', 'frame-style-3', 'frame-style-4');
             avatarFrameWrap.classList.add(frameId);
         }
         document.querySelectorAll('#frameSelectorRow [data-frame]').forEach(b => {
@@ -5495,15 +5561,36 @@ const SPIKE_LINES_LOJA = [
     "Spike não pede desconto. Spike DÁ desconto, quando quer."
 ];
 
+// Moldura padrão (frame-style-1) não é vendida na Loja — todo usuário já
+// nasce com ela equipada (ver currentUser.avatarFrame inicial). Por isso não
+// entra em LOJA_FRAME_ITEMS (que só lista o que é comprável), mas precisa
+// de uma entrada de raridade própria pro seletor/filtro saber como tratá-la.
+const FRAME_DEFAULT_ID = 'frame-style-1';
+const FRAME_DEFAULT_RARITY = 'raro';
+
 const LOJA_FRAME_ITEMS = [
-    { id: 'frame-style-2', category: 'moldura', name: 'Neon Pulse',           price: 1000, accent: '#00ffff', tagline: 'Pulso cíclico de luz fria ao redor do avatar.' },
-    { id: 'frame-style-3', category: 'moldura', name: 'Glitch Core',          price: 2200, accent: '#ff00ff', tagline: 'Distorção de sinal instável. Estética de corrompido.' },
-    { id: 'frame-style-4', category: 'moldura', name: 'Apocalypse Override',  price: 3500, accent: '#ff0044', tagline: 'Moldura de emergência de núcleo. Só pra raridade alta.' }
+    { id: 'frame-style-2', category: 'moldura', name: 'Neon Pulse',           price: 1000, accent: '#00ffff', tagline: 'Pulso cíclico de luz fria ao redor do avatar.', rarity: 'raro' },
+    { id: 'frame-style-3', category: 'moldura', name: 'Glitch Core',          price: 2200, accent: '#ff00ff', tagline: 'Distorção de sinal instável. Estética de corrompido.', rarity: 'lendario' },
+    { id: 'frame-style-4', category: 'moldura', name: 'Apocalypse Override',  price: 3500, accent: '#ff0044', tagline: 'Moldura de emergência de núcleo. Só pra raridade alta.', rarity: 'ancestral' }
 ];
 
 const LOJA_BACKGROUND_ITEMS = [
-    { id: 'bg-neon-glow', category: 'fundo', name: 'Luz Neon de Fundo', price: 850, accent: '#ffaa00', tagline: 'Glow ambiente atrás do perfil. Liga sozinho à noite.' }
+    { id: 'bg-neon-glow',   category: 'fundo', name: 'Luz Neon de Fundo',  price: 850, accent: '#ffaa00', tagline: 'Glow ambiente atrás do perfil. Liga sozinho à noite.', colorKey: 'amber' },
+    { id: 'bg-neon-toxic',  category: 'fundo', name: 'Luz Neon Tóxica',    price: 850, accent: '#22c55e', tagline: 'Glow verde tóxico ao redor da caixa de perfil.', colorKey: 'green' },
+    { id: 'bg-neon-violet', category: 'fundo', name: 'Luz Neon Violeta',   price: 950, accent: '#a855f7', tagline: 'Glow roxo-elétrico, vibe synthwave.', colorKey: 'purple' }
 ];
+
+// Mapa colorKey → classes Tailwind reais aplicadas no profile-main-box quando
+// o acessório de fundo correspondente está equipado (Ponto 4 — efeito real,
+// não decorativo).
+const NEON_BG_TAILWIND_CLASSES = {
+    amber:  ['shadow-[inset_0_0_50px_rgba(255,170,0,0.35)]',  'bg-gradient-to-b', 'from-amber-950/40',  'to-transparent'],
+    green:  ['shadow-[inset_0_0_50px_rgba(34,197,94,0.3)]',   'bg-gradient-to-b', 'from-green-950/40',  'to-transparent'],
+    purple: ['shadow-[inset_0_0_50px_rgba(168,85,247,0.35)]', 'bg-gradient-to-b', 'from-purple-950/40', 'to-transparent']
+};
+// Lista achatada de TODAS as classes possíveis, usada só pra limpeza (remover
+// tudo antes de aplicar o conjunto novo, evitando acúmulo de classes mortas).
+const NEON_BG_TAILWIND_ALL_CLASSES = Object.values(NEON_BG_TAILWIND_CLASSES).flat();
 
 const LOJA_EMOTICON_ITEMS = [
     { id: 'emo-pack-circuito',  category: 'emoticon', name: 'Pack Circuito',  price: 300, accent: '#00ff66', tagline: '12 emoticons de chat com tema de placa-mãe.', glyphs: ['⚡','🛰️','☢','⬡'] },
@@ -5776,7 +5863,11 @@ async function lojaHandlePurchase(itemId) {
     currentUser.cosmetics = newCosmetics;
     console.log('[LOJA] Compra confirmada:', item.id);
     renderLoja(); // re-renderiza pra atualizar saldo e estado "ATIVO"
-    if (selectedProfileUser === currentUser.username) renderEquipmentInventory(true); // sincroniza o bloco de equipamentos no Perfil, se estiver aberto
+    if (selectedProfileUser === currentUser.username) {
+        renderEquipmentInventory(true); // sincroniza o bloco de equipamentos no Perfil, se estiver aberto
+        renderRelicInventoryModal();    // sincroniza o modal de relíquias, se estiver aberto
+        renderFrameSelectorRow(currentFrameFilter); // libera a moldura no seletor, se for o caso
+    }
 }
 
 function lojaHandleAcceptContract(contractId) {
@@ -5787,10 +5878,40 @@ function lojaHandleAcceptContract(contractId) {
 }
 
 // =========================================================
-// INVENTÁRIO DE EQUIPAMENTOS (Ponto 3) — bloco no Perfil que lê
-// currentUser.cosmetics e deixa equipar Molduras / ativar Acessórios
-// de Vitrine comprados na Loja do Spike.
+// PONTO 2 — MODAL [ INVENTÁRIO DE RELÍQUIAS ]
+// Versão em modal do bloco de equipamentos: lista Acessórios de Vitrine,
+// Cores de Fundo Neon e Cyber_Emoticons comprados, cada um com botão
+// [ EQUIPAR / ATIVAR ] que persiste no Supabase e aplica o efeito na hora.
 // =========================================================
+function openRelicInventoryModal() {
+    if (!currentUser.loggedIn || selectedProfileUser !== currentUser.username) return;
+    const modal = document.getElementById('relicInventoryModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    renderRelicInventoryModal();
+}
+
+function closeRelicInventoryModal() {
+    const modal = document.getElementById('relicInventoryModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function renderRelicInventoryModal() {
+    const grid = document.getElementById('relicInventoryGrid');
+    if (!grid) return;
+
+    const owned = Array.isArray(currentUser.cosmetics) ? currentUser.cosmetics : [];
+    const ownedItems = LOJA_ALL_ITEMS.filter(i => owned.includes(i.id));
+
+    if (ownedItems.length === 0) {
+        grid.innerHTML = `<p class="equip-inv-empty">Nenhuma relíquia no inventário ainda. Visite o MERCADO_NEGRO_DO_SPIKE na Loja.</p>`;
+        return;
+    }
+
+    grid.innerHTML = ownedItems.map(equipmentInventoryItemMarkup).join('');
+}
+
+
 const EQUIPMENT_INVENTORY_TARGET_ID = 'equipmentInventoryZone';
 
 function lojaCategoryLabel(category) {
@@ -5859,10 +5980,48 @@ function renderEquipmentInventory(isOwner) {
 // atualiza a UI do avatar e persiste em profiles.avatar_frame).
 async function lojaEquipFrame(itemId) {
     if (!currentUser || !currentUser.loggedIn) return;
-    if (!Array.isArray(currentUser.cosmetics) || !currentUser.cosmetics.includes(itemId)) return;
+    if (itemId !== FRAME_DEFAULT_ID && (!Array.isArray(currentUser.cosmetics) || !currentUser.cosmetics.includes(itemId))) {
+        console.log('[LOJA] Equipar recusado: moldura não pertence ao inventário do usuário.', itemId);
+        return;
+    }
     console.log('[LOJA] Equipando moldura:', itemId);
     await setAvatarFrame(itemId);
     renderEquipmentInventory(true);
+    renderRelicInventoryModal();
+    renderFrameSelectorRow(currentFrameFilter);
+}
+
+// =========================================================
+// PONTO 4 — ATIVAÇÃO REAL DOS EFEITOS (FRONT-END)
+// Aplica de fato as classes Tailwind de glow/gradiente no container
+// .profile-main-box (#profileMainBox) conforme o acessório de fundo
+// (LOJA_BACKGROUND_ITEMS) que estiver equipado em currentUser.equippedAccessory.
+// Limpa todas as classes neon conhecidas antes de aplicar o conjunto novo,
+// pra nunca acumular dois glows ao trocar de acessório.
+// =========================================================
+function applyEquippedAccessoryEffect() {
+    const box = document.getElementById('profileMainBox');
+    if (!box) return;
+
+    // Garante o Tailwind CDN carregado (a Loja já carrega, mas o Perfil pode
+    // ser a primeira tela visitada na sessão).
+    ensureTailwindLoaded(() => {
+        box.classList.remove(...NEON_BG_TAILWIND_ALL_CLASSES);
+
+        const accessoryId = currentUser && currentUser.equippedAccessory;
+        const item = accessoryId && LOJA_BACKGROUND_ITEMS.find(i => i.id === accessoryId);
+
+        if (!item || !item.colorKey) {
+            box.dataset.neonActive = '';
+            return; // nenhum fundo neon equipado (ou é um emoticon pack, que não mexe no fundo) — fica limpo
+        }
+
+        const classes = NEON_BG_TAILWIND_CLASSES[item.colorKey];
+        if (classes && classes.length) {
+            box.classList.add(...classes);
+            box.dataset.neonActive = item.colorKey;
+        }
+    });
 }
 
 // Ativa/desativa um acessório de vitrine (fundo ou pack de emoticons)
@@ -5878,10 +6037,15 @@ async function lojaToggleAccessory(itemId) {
     const ok = await updateProfileInSupabase(currentUser.id, { equippedAccessory: newValue });
     if (!ok) {
         console.error('[LOJA] Falha ao persistir acessório de vitrine ativo.');
+        if (typeof showCyberAlert === 'function') {
+            showCyberAlert('FALHA NA TRANSAÇÃO', 'O nó central recusou a gravação do equipamento. Tenta novamente.', 'error');
+        }
         return;
     }
     currentUser.equippedAccessory = newValue;
     renderEquipmentInventory(true);
+    renderRelicInventoryModal();
+    applyEquippedAccessoryEffect(); // aplica/retira o glow neon na hora, sem precisar de F5
 }
 
 // ── PONTO DE ENTRADA ──
