@@ -234,6 +234,7 @@ function applyProfileToCurrentUser(profile) {
     const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'flex';
     const contractsBtn = document.getElementById('navContractsBtn'); if (contractsBtn) contractsBtn.style.display = 'flex';
     const lojaBtn = document.getElementById('navLojaBtn'); if (lojaBtn) lojaBtn.style.display = 'flex';
+    const broadcastBtn = document.getElementById('navBroadcastBtn'); if (broadcastBtn) broadcastBtn.style.display = 'flex';
 }
 
 function resetCurrentUserToAnon() {
@@ -253,6 +254,7 @@ function resetCurrentUserToAnon() {
     const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'none';
     const cBtn = document.getElementById('navContractsBtn'); if (cBtn) cBtn.style.display = 'none';
     const lojaBtn = document.getElementById('navLojaBtn'); if (lojaBtn) lojaBtn.style.display = 'none';
+    const broadcastBtn = document.getElementById('navBroadcastBtn'); if (broadcastBtn) broadcastBtn.style.display = 'none';
 }
 
 // =========================================================
@@ -4378,7 +4380,7 @@ async function logoutSession() {
         if (frameId !== FRAME_DEFAULT_ID && (!Array.isArray(currentUser.cosmetics) || !currentUser.cosmetics.includes(frameId))) {
             console.warn('[MOLDURA] Bloqueado: usuário não possui', frameId);
             if (typeof showCyberAlert === 'function') {
-                showCyberAlert('BLOQUEADO', 'Você ainda não possui essa moldura. Visite o Spike na Loja.', 'error');
+                showCyberAlert('BLOQUEADO', 'Você ainda não possui essa moldura. Visite o ZRK na Loja.', 'error');
             }
             return;
         }
@@ -5578,17 +5580,25 @@ const LOJA_TARGET_ID = 'lojaScreen';
 // de existir como array mock separado: tudo lê/escreve direto em
 // currentUser.cosmetics, pra nunca dessincronizar do banco.
 
+// ── PONTO ET PUNK — comerciante da Loja trocado de robô (🤖 "Spike") pra
+// um ET com estética punk ("ZRK", abreviação de "Zarkrin", o nome real é
+// impronunciável em qualquer idioma humano). Mantido o nome da constante
+// (SPIKE_LINES_LOJA) por compatibilidade com qualquer outro ponto do
+// código que ainda referencie esse identificador — só o CONTEÚDO das
+// falas e a renderização visual (lojaBuildMarkup) mudaram.
 const SPIKE_LINES_LOJA = [
-    "Hardware velho, lucro novo. Compra rápido antes que eu mude de preço.",
-    "Cuidado com o disjuntor #3. Já fritou duas mãos hoje.",
-    "Eu vendia reatores de nave. Agora vendo moldura pra avatar. A queda é real.",
-    "Garantia? Aqui não. Garantia é palavra de planeta rico.",
-    "Esse glitch na moldura não é defeito, é estilo. Cobra mais caro por isso.",
-    "Sucateiro raiz desde antes do colapso da Rede Outer. Respeita.",
-    "Bumps não enferrujam, mas minha paciência sim. Decide rápido.",
-    "Se a luz neon queimar seu olho, já era — não devolvo B$.",
-    "Tenho contratos novos chegando. Ou não. Depende do humor do servidor.",
-    "Spike não pede desconto. Spike DÁ desconto, quando quer."
+    "Hackeei o firmware da nave só pra abrir essa loja aqui. Valeu a pena.",
+    "Root no mainframe, root no seu cartão. Mesma técnica, planetas diferentes.",
+    "Atravessei sete firewalls intergalácticos pra te vender essa moldura.",
+    "Bumps são só números num banco de dados. Eu já invadi bancos de dados melhores que esse.",
+    "Garantia? Aqui não. Mas o exploit que usei pra entrar nessa estação, esse sim era sólido.",
+    "Sucateiro raiz desde antes do colapso da Rede Outer. E sysadmin não-certificado desde sempre.",
+    "Se a luz neon queimar seu olho, já era — não devolvo B$. Reporta bug, eu rio.",
+    "Tenho exploits novos chegando. Ou não. Depende do humor do firewall da Terra.",
+    "Não pirateei sua nave-mãe. Ainda. Compra logo essa moldura.",
+    "Meu antivírus é desconfiança. O seu devia ser também.",
+    "Decodifiquei sua linguagem em 0.3 segundos. Seus preços, em menos ainda.",
+    "Punk não morre, só recompila."
 ];
 
 // Moldura padrão (frame-style-1) não é vendida na Loja — todo usuário já
@@ -5803,14 +5813,14 @@ function lojaBuildMarkup() {
         </div>
 
         <div class="flex gap-4 items-start bg-[#0a0703] border border-amber-900/40 p-4 mb-6 relative z-10 flex-wrap">
-            <div class="w-16 h-16 flex-shrink-0 border-2 border-amber-500 flex items-center justify-center text-2xl relative" style="background:repeating-linear-gradient(45deg, #100b03 0px, #100b03 4px, #1a1206 4px, #1a1206 8px); box-shadow:0 0 16px rgba(255,170,0,0.35);">
-                🤖
+            <div id="lojaEtAvatar" class="w-16 h-16 flex-shrink-0 border-2 border-amber-500 flex items-center justify-center text-3xl relative loja-et-avatar" style="background:repeating-linear-gradient(45deg, #100b03 0px, #100b03 4px, #1a1206 4px, #1a1206 8px); box-shadow:0 0 16px rgba(255,170,0,0.35); cursor:pointer;" onclick="speakZrkLine()" title="Clique pra ouvir o ZRK">
+                👽
                 <span class="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" style="box-shadow:0 0 8px #00ff66;"></span>
             </div>
             <div class="flex-1" style="min-width:220px;">
                 <div class="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span class="text-[0.7rem] font-extrabold text-amber-500 tracking-wide">SPIKE</span>
-                    <span class="text-[0.5rem] text-emerald-500 border border-emerald-500 px-1.5 tracking-wide">[SPIKE_v0.49_ONLINE]</span>
+                    <span class="text-[0.7rem] font-extrabold text-amber-500 tracking-wide">ZRK // ET_PUNK</span>
+                    <span class="text-[0.5rem] text-emerald-500 border border-emerald-500 px-1.5 tracking-wide">[ZRK_v0.49_ONLINE]</span>
                 </div>
                 <div id="lojaSpikeLine" class="bg-black border border-zinc-900 px-3 py-2.5 text-[0.7rem] text-amber-300 leading-relaxed" style="min-height:36px;">
                     ▸ ${line}
@@ -5831,7 +5841,7 @@ function lojaBuildMarkup() {
 
         <div id="lojaTabContratos" class="hidden relative z-10">
             <p class="text-[0.65rem] text-amber-800 mb-4">
-                Espaço reservado para missões futuras de empréstimo de cards. Spike libera contratos por conta própria — sem aviso, sem garantia.
+                Espaço reservado para missões futuras de empréstimo de cards. ZRK libera contratos por conta própria — sem aviso, sem garantia.
             </p>
             <div class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));">
                 ${LOJA_MOCK_CONTRACTS.map(lojaContractCardMarkup).join('')}
@@ -5888,7 +5898,7 @@ async function lojaHandlePurchase(itemId) {
     if (!currentUser || !currentUser.loggedIn || !currentUser.id) {
         console.log('[LOJA] Compra recusada: usuário não autenticado.');
         if (typeof showCyberAlert === 'function') {
-            showCyberAlert('ACESSO NEGADO', 'Você precisa estar conectado pra negociar com o Spike.', 'error');
+            showCyberAlert('ACESSO NEGADO', 'Você precisa estar conectado pra negociar com o ZRK.', 'error');
         }
         return;
     }
@@ -5976,7 +5986,7 @@ function renderRelicInventoryModal() {
     const ownedItems = LOJA_ALL_ITEMS.filter(i => owned.includes(i.id));
 
     if (ownedItems.length === 0) {
-        grid.innerHTML = `<p class="equip-inv-empty">Nenhuma relíquia no inventário ainda. Visite o MERCADO_NEGRO_DO_SPIKE na Loja.</p>`;
+        grid.innerHTML = `<p class="equip-inv-empty">Nenhuma relíquia no inventário ainda. Visite o MERCADO_NEGRO_DO_ZRK na Loja.</p>`;
         return;
     }
 
@@ -6038,7 +6048,7 @@ function renderEquipmentInventory(isOwner) {
     if (ownedItems.length === 0) {
         target.innerHTML = `
             <h4 class="equip-inv-title">[ INVENTÁRIO DE EQUIPAMENTOS ]</h4>
-            <p class="equip-inv-empty">Nenhum cosmético comprado ainda. Visite o MERCADO_NEGRO_DO_SPIKE na Loja.</p>
+            <p class="equip-inv-empty">Nenhum cosmético comprado ainda. Visite o MERCADO_NEGRO_DO_ZRK na Loja.</p>
         `;
         return;
     }
@@ -6206,10 +6216,42 @@ function playLojaChime() {
     } catch (e) { /* AudioContext bloqueado até primeira interação — silenciosamente ignora */ }
 }
 
+// ── VOZ SINTETIZADA DO ZRK (ET PUNK) ──
+// Usa a mesma API nativa já utilizada em speakPhrase/speakRandom (Web
+// Speech API — SpeechSynthesisUtterance). Pitch baixo + rate levemente
+// acelerado pra soar mais "robótico-alienígena" e destacar do narrador
+// padrão do sistema (CYBER_VOICES). Silenciosamente ignora se o
+// navegador não suportar (mesmo padrão defensivo do resto do código).
+function speakZrkLine(forcedText) {
+    if (!('speechSynthesis' in window)) return;
+    const text = forcedText || SPIKE_LINES_LOJA[Math.floor(Math.random() * SPIKE_LINES_LOJA.length)];
+
+    // Sincroniza a fala com a frase já exibida na caixa de texto do ZRK,
+    // pra não mostrar uma frase na tela e falar outra diferente.
+    const lineBox = document.getElementById('lojaSpikeLine');
+    if (lineBox && !forcedText) lineBox.innerHTML = `▸ ${text}`;
+
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = (typeof currentLang !== 'undefined' && currentLang === 'EN') ? 'en-US' : 'pt-BR';
+    u.rate = 1.15;   // levemente acelerado — cadência "nervosa" de hacker
+    u.pitch = 0.35;  // bem grave — timbre alienígena/distorcido
+    u.volume = 0.85;
+    window.speechSynthesis.speak(u);
+
+    // Pequeno feedback visual: avatar do ZRK "pulsa" enquanto fala.
+    const avatar = document.getElementById('lojaEtAvatar');
+    if (avatar) {
+        avatar.classList.add('zrk-speaking');
+        u.onend = () => avatar.classList.remove('zrk-speaking');
+        u.onerror = () => avatar.classList.remove('zrk-speaking');
+    }
+}
+
 // ── PONTO DE ENTRADA ──
 // playChime=true toca o ding-dong (só ao NAVEGAR pra Loja, ver navigateTo).
 // Re-renders internos pós-compra/equip chamam renderLoja() sem argumento,
-// então o som nunca repete a cada clique.
+// então o som/fala nunca repetem a cada clique — só na entrada real na tela.
 function renderLoja(playChime) {
     const target = document.getElementById(LOJA_TARGET_ID);
     if (!target) {
@@ -6219,6 +6261,299 @@ function renderLoja(playChime) {
     ensureTailwindLoaded(() => {
         target.innerHTML = lojaBuildMarkup();
         lojaSwitchTab('cosmeticos');
-        if (playChime) playLojaChime();
+        if (playChime) {
+            playLojaChime();
+            // Pequeno atraso pro "ding-dong" tocar primeiro e não se
+            // sobrepor à fala do ZRK — soa como o sininho da porta de
+            // uma loja física tocando antes do vendedor falar.
+            setTimeout(() => speakZrkLine(), 650);
+        }
     });
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   MÓDULO: BROADCAST AÉREO (OVNI) + CHAT GLOBAL FLUTUANTE
+   ────────────────────────────────────────────────────────────────────
+   Segue o MESMO padrão já usado em eventos_globais/pushLedger/
+   initGlobalRealtime: tabela pública no Supabase + canal Realtime
+   (postgres_changes) assinado incondicionalmente no boot, pra qualquer
+   aba — logada ou anônima — ver os mesmos eventos instantaneamente.
+
+   Custo em Bumps é debitado de forma ATÔMICA via RPC debit_bumps
+   (ver schema.sql), que faz "bumps = bumps - custo WHERE bumps >= custo"
+   em uma única instrução no Postgres — evita o saldo ficar negativo por
+   corrida entre abas/cliques rápidos, ao contrário do padrão antigo de
+   "currentUser.bumps -= x; updateProfileInSupabase(...)" usado em outras
+   partes do app.
+   ════════════════════════════════════════════════════════════════════ */
+
+// ── DÉBITO ATÔMICO DE BUMPS ──
+// Retorna o novo saldo em caso de sucesso, ou null se falhar (saldo
+// insuficiente, não logado, erro de rede). Em caso de sucesso, já
+// sincroniza currentUser.bumps e qualquer label de saldo visível na tela
+// (perfil, loja), pra nunca dessincronizar do banco.
+async function debitBumpsAtomic(valor) {
+    if (!currentUser || !currentUser.loggedIn || !currentUser.id) {
+        showCyberAlert('ACESSO NEGADO', 'Você precisa estar conectado pra usar esta função.', 'error');
+        return null;
+    }
+    if ((currentUser.bumps || 0) < valor) {
+        showCyberAlert('FUNDOS INSUFICIENTES', `Saldo atual: <b>${currentUser.bumps} B$</b><br>Custo: <b>${valor} B$</b><br><br>Carregue o saldo no teu perfil.`, 'warn');
+        return null;
+    }
+    try {
+        const { data, error } = await sb.rpc('debit_bumps', { p_user: currentUser.id, p_valor: valor });
+        if (error) {
+            console.error('debitBumpsAtomic:', error.message);
+            showCyberAlert('FUNDOS INSUFICIENTES', 'Saldo atual insuficiente ou recusado pela rede. Tente novamente.', 'warn');
+            return null;
+        }
+        currentUser.bumps = data;
+        const profBumpsEl = document.getElementById('profBumps'); if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
+        const lojaBalanceEl = document.getElementById('lojaBalanceDisplay'); if (lojaBalanceEl) lojaBalanceEl.innerText = `${currentUser.bumps.toLocaleString('pt-BR')} B$`;
+        return data;
+    } catch (e) {
+        console.error('debitBumpsAtomic:', e);
+        return null;
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   BROADCAST AÉREO — OVNI puxando faixa de texto pra rede inteira
+   ───────────────────────────────────────────────────────────────────── */
+const AIR_BROADCAST_COST = 500;
+
+function openAirBroadcastModal() {
+    if (!currentUser || !currentUser.loggedIn) {
+        showCyberAlert('ACESSO NEGADO', 'Você precisa estar conectado pra enviar um broadcast aéreo.', 'error');
+        return;
+    }
+    const modal = document.getElementById('airBroadcastModal');
+    const balanceEl = document.getElementById('airBroadcastBalance');
+    const input = document.getElementById('airBroadcastInput');
+    const counter = document.getElementById('airBroadcastCount');
+    if (balanceEl) balanceEl.innerText = `${currentUser.bumps.toLocaleString('pt-BR')} B$`;
+    if (input) { input.value = ''; }
+    if (counter) counter.innerText = '0';
+    if (input) {
+        input.oninput = () => { if (counter) counter.innerText = String(input.value.length); };
+    }
+    if (modal) modal.style.display = 'flex';
+}
+function closeAirBroadcastModal() {
+    const modal = document.getElementById('airBroadcastModal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function sendAirBroadcast() {
+    const input = document.getElementById('airBroadcastInput');
+    const text = input ? input.value.trim() : '';
+    if (!text) { showCyberAlert('MENSAGEM VAZIA', 'Escreva algo pra rede ver no céu.', 'warn'); return; }
+    if (text.length > 120) { showCyberAlert('MENSAGEM MUITO LONGA', 'Máximo de 120 caracteres.', 'warn'); return; }
+
+    const newBalance = await debitBumpsAtomic(AIR_BROADCAST_COST);
+    if (newBalance === null) return; // alerta já mostrado por debitBumpsAtomic
+
+    try {
+        const { error } = await sb.from('broadcasts_aereos').insert({
+            id_usuario: currentUser.id,
+            username: currentUser.username,
+            mensagem: text
+        });
+        if (error) {
+            console.error('sendAirBroadcast:', error.message);
+            showCyberAlert('FALHA NA TRANSMISSÃO', 'O OVNI não decolou. Tente novamente.', 'error');
+            return;
+        }
+    } catch (e) {
+        console.error('sendAirBroadcast:', e);
+        return;
+    }
+
+    closeAirBroadcastModal();
+    showCyberAlert('BROADCAST ENVIADO', `Sua mensagem está sobrevoando a rede inteira agora.<br>Débito: <b style="color:#00ff66;">-${AIR_BROADCAST_COST} B$</b> &nbsp;|&nbsp; Saldo atual: <b>${currentUser.bumps} B$</b>`, 'success');
+    // A própria animação (pra TODO mundo, inclusive quem enviou) acontece
+    // via Realtime em initAirBroadcastRealtime() — não precisa disparar
+    // manualmente aqui, evitando duplicar o OVNI nesta aba.
+}
+
+// Cria e anima um OVNI puxando a faixa de texto na tela. Suporta múltiplos
+// broadcasts simultâneos (cada um numa altura/duração levemente diferente,
+// pra não sobrepor perfeitamente se dois chegarem perto um do outro).
+function spawnAirBroadcast(username, mensagem) {
+    const layer = document.getElementById('airBroadcastLayer');
+    if (!layer) return;
+
+    const unit = document.createElement('div');
+    unit.className = 'air-broadcast-unit';
+    const topPct = 10 + Math.random() * 55; // 10%–65% da altura da tela
+    const duration = 13 + Math.random() * 4; // 13s–17s
+    unit.style.setProperty('--ufo-top', topPct + '%');
+    unit.style.setProperty('--ufo-duration', duration + 's');
+
+    unit.innerHTML = `
+        <div class="ufo-craft">
+            <div class="ufo-dome"></div>
+            <div class="ufo-body"></div>
+            <div class="ufo-lights"><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="ufo-beam"></div>
+        </div>
+        <div class="ufo-banner-rope"></div>
+        <div class="ufo-banner">
+            <span class="ufo-banner-text"></span>
+            <span class="ufo-banner-author"></span>
+        </div>
+    `;
+    // Texto inserido via textContent (não innerHTML) pra mensagem do
+    // usuário nunca ser interpretada como HTML/script — mesma cautela de
+    // sanitização usada no resto do app pra conteúdo gerado por usuário.
+    unit.querySelector('.ufo-banner-text').textContent = mensagem;
+    unit.querySelector('.ufo-banner-author').textContent = `// ${username}`;
+
+    layer.appendChild(unit);
+    unit.addEventListener('animationend', () => unit.remove());
+    // Failsafe: remove mesmo se o evento de animação não disparar por
+    // algum motivo (ex: aba em background pausando rAF/animations).
+    setTimeout(() => { if (unit.parentNode) unit.remove(); }, (duration + 2) * 1000);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   CHAT GLOBAL FLUTUANTE
+   ───────────────────────────────────────────────────────────────────── */
+const GLOBAL_CHAT_COST = 15;
+let globalChatCache = [];
+let globalChatOpen = false;
+let globalChatUnread = 0;
+
+function toggleGlobalChat() {
+    const panel = document.getElementById('globalChatPanel');
+    if (!panel) return;
+    globalChatOpen = !globalChatOpen;
+    panel.classList.toggle('open', globalChatOpen);
+    if (globalChatOpen) {
+        globalChatUnread = 0;
+        updateGlobalChatBadge();
+        renderGlobalChatMessages();
+        const input = document.getElementById('globalChatInput');
+        if (input) input.focus();
+    }
+}
+
+function updateGlobalChatBadge() {
+    const badge = document.getElementById('globalChatBadge');
+    if (!badge) return;
+    if (globalChatUnread > 0) {
+        badge.style.display = 'flex';
+        badge.innerText = globalChatUnread > 99 ? '99+' : String(globalChatUnread);
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+function escapeHtmlForChat(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function renderGlobalChatMessages() {
+    const box = document.getElementById('globalChatMessages');
+    if (!box) return;
+    if (globalChatCache.length === 0) {
+        box.innerHTML = '<div class="global-chat-empty">Nenhuma mensagem ainda. Seja o primeiro a falar com a rede.</div>';
+        return;
+    }
+    box.innerHTML = globalChatCache.map(m => {
+        const isOwn = currentUser && currentUser.loggedIn && m.username === currentUser.username;
+        const time = new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        return `<div class="gc-msg${isOwn ? ' gc-own' : ''}">
+            <span class="gc-user">${escapeHtmlForChat(m.username)}</span>${escapeHtmlForChat(m.mensagem)}
+            <span class="gc-time">${time}</span>
+        </div>`;
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+}
+
+async function fetchAndSeedGlobalChat() {
+    const { data, error } = await sb.from('chat_global')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+    if (error) { console.error('fetchAndSeedGlobalChat:', error.message); return; }
+    globalChatCache = data.reverse();
+    renderGlobalChatMessages();
+}
+
+async function sendGlobalChatMessage() {
+    const input = document.getElementById('globalChatInput');
+    const text = input ? input.value.trim() : '';
+    if (!text) return;
+    if (text.length > 280) { showCyberAlert('MENSAGEM MUITO LONGA', 'Máximo de 280 caracteres.', 'warn'); return; }
+
+    if (!currentUser || !currentUser.loggedIn) {
+        showCyberAlert('ACESSO NEGADO', 'Você precisa estar conectado pra usar o chat global.', 'error');
+        return;
+    }
+
+    const sendBtn = document.getElementById('globalChatSendBtn');
+    if (sendBtn) sendBtn.disabled = true;
+
+    const newBalance = await debitBumpsAtomic(GLOBAL_CHAT_COST);
+    if (newBalance === null) { if (sendBtn) sendBtn.disabled = false; return; }
+
+    try {
+        const { error } = await sb.from('chat_global').insert({
+            id_usuario: currentUser.id,
+            username: currentUser.username,
+            mensagem: text
+        });
+        if (error) {
+            console.error('sendGlobalChatMessage:', error.message);
+            showCyberAlert('FALHA NO ENVIO', 'Mensagem não chegou à rede. Tente novamente.', 'error');
+        } else {
+            input.value = '';
+        }
+    } catch (e) {
+        console.error('sendGlobalChatMessage:', e);
+    } finally {
+        if (sendBtn) sendBtn.disabled = false;
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   REALTIME — assina os dois canais incondicionalmente no boot (logado
+   ou não), igual initGlobalRealtime() já faz pra eventos_globais/cards.
+   ───────────────────────────────────────────────────────────────────── */
+let _airChatRealtimeStarted = false;
+function initAirBroadcastAndChatRealtime() {
+    if (_airChatRealtimeStarted) return;
+    _airChatRealtimeStarted = true;
+
+    fetchAndSeedGlobalChat();
+
+    sb.channel('broadcasts_aereos_live')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'broadcasts_aereos' }, (payload) => {
+            const row = payload.new;
+            spawnAirBroadcast(row.username, row.mensagem);
+        })
+        .subscribe();
+
+    sb.channel('chat_global_live')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_global' }, (payload) => {
+            const row = payload.new;
+            globalChatCache.push(row);
+            if (globalChatCache.length > 50) globalChatCache.shift();
+            if (globalChatOpen) {
+                renderGlobalChatMessages();
+            } else {
+                const isOwn = currentUser && currentUser.loggedIn && row.username === currentUser.username;
+                if (!isOwn) { globalChatUnread++; updateGlobalChatBadge(); }
+            }
+        })
+        .subscribe();
+}
+
+// Dispara junto com o resto da inicialização Realtime global. Roda
+// incondicionalmente — inclusive em aba anônima, já que a leitura de
+// ambas as tabelas é pública via RLS (escrita continua exigindo login).
+initAirBroadcastAndChatRealtime();
