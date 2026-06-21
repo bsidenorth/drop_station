@@ -449,18 +449,61 @@ async function handleAuthSubmit(event) {
         const profile = await fetchProfile(data.user.id);
         if (!profile) {
             // AUTO-CURA: a conta de Auth é válida (login passou), mas não tem
-            // profile — provavelmente uma sessão anterior falhou no meio do
-            // cadastro (ver nota em handleAuthSubmit/registro). Em vez de travar
-            // a pessoa pra sempre atrás de "contate o suporte", tenta criar o
-            // profile que faltou agora, usando o username que ela acabou de digitar.
-            const healedProfile = await createProfile(data.user.id, formattedUser, data.user.email);
+            // profile vinculado ao auth.uid. Isso acontece quando o cadastro
+            // foi interrompido após criar a conta mas antes de gravar o profile.
+            //
+            // ESTRATÉGIA:
+            // 1) Tenta buscar um profile que já exista com esse username —
+            //    pode ser um profile órfão criado por outra sessão para o
+            //    mesmo usuário. Se achar, vincula o auth.uid ao profile existente.
+            // 2) Se não existir nenhum profile com esse username, cria um novo.
+            // 3) Só exibe erro se não conseguir nem buscar nem criar.
+
+            // Passo 1: tenta recuperar o profile pelo username digitado
+            let healedProfile = null;
+            try {
+                const { data: existing } = await sb
+                    .from('profiles')
+                    .select(PUBLIC_PROFILE_COLUMNS)
+                    .ilike('username', formattedUser)
+                    .maybeSingle();
+
+                if (existing) {
+                    // Profile existe com esse username — vincula ao auth.uid atual
+                    // atualizando o id da linha para o uid que acabou de logar.
+                    // (Caso de username pertencente a esse mesmo usuário mas com
+                    // id dessincronizado, comum após re-criação de conta no Auth.)
+                    const { error: updateErr } = await sb
+                        .from('profiles')
+                        .update({ id: data.user.id })
+                        .eq('username', existing.username);
+
+                    if (!updateErr) {
+                        // Rebusca com o id correto
+                        const { data: reloaded } = await sb
+                            .from('profiles')
+                            .select(PUBLIC_PROFILE_COLUMNS)
+                            .eq('id', data.user.id)
+                            .maybeSingle();
+                        healedProfile = reloaded || existing;
+                    }
+                }
+            } catch(e) {
+                console.warn('auto-heal (busca profile):', e);
+            }
+
+            // Passo 2: se ainda não tem profile, cria um novo
             if (!healedProfile) {
-                // Só falha aqui se esse username específico já estiver em uso
-                // por OUTRA conta — nesse caso realmente precisa de um alias novo.
-                errorEl.innerText = "Sua conta existe, mas o username '" + formattedUser + "' já está em uso por outro perfil. Contate o suporte pra recuperar o acesso.";
+                healedProfile = await createProfile(data.user.id, formattedUser, data.user.email);
+            }
+
+            // Passo 3: se tudo falhou, orienta o usuário de forma útil
+            if (!healedProfile) {
+                errorEl.innerText = 'Falha ao restaurar seu perfil. Tente novamente ou contate o suporte informando seu e-mail de cadastro.';
                 errorEl.style.display = 'block';
                 return;
             }
+
             messageThreads = {};
             activeThreadUser = null;
             applyProfileToCurrentUser(healedProfile);
