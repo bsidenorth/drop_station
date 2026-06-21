@@ -696,7 +696,7 @@ async function logoutSession() {
         const list = document.getElementById('marketLedgerList');
         if (!box || !list) return;
         const ledger = loadLedger();
-        if (ledger.length === 0) { box.style.display = 'none'; return; }
+        if (ledger.length === 0) { box.style.display = 'none'; stopLedgerAutoScroll(); return; }
         box.style.display = 'block';
         const last5 = ledger.slice(0, 5);
         list.innerHTML = last5.map((e, i) =>
@@ -709,16 +709,38 @@ async function logoutSession() {
 
     // Faz o feed "respirar": rola suavemente para o próximo item a cada
     // poucos segundos, dando sensação de movimento contínuo e dinâmico.
+    //
+    // BUGFIX (scroll vazando pra página inteira): `entries[idx].scrollIntoView()`
+    // sobe por TODOS os ancestrais roláveis até a window, pra garantir a
+    // visibilidade total do elemento — então, a cada 2.6s, o "respiro" do
+    // ledger também arrastava a PÁGINA INTEIRA junto (mesmo #marketLedgerBox
+    // já tendo seu próprio overflow-y:auto). Trocado por scroll manual via
+    // scrollTop/scrollTo, isolado SÓ no container interno do ledger — nunca
+    // mais toca no scroll da janela. State também isolado: o timer agora é
+    // explicitamente encerrado (stopLedgerAutoScroll) sempre que o ledger
+    // fica vazio/escondido ou quando o usuário sai da tela de Mercado
+    // (ver navigateTo), evitando rodar em segundo plano sem necessidade.
     let ledgerAutoScrollTimer = null;
     function startLedgerAutoScroll(list) {
         if (ledgerAutoScrollTimer) clearInterval(ledgerAutoScrollTimer);
         const entries = list.querySelectorAll('.ledger-entry');
         if (entries.length <= 1) return;
+
+        const scrollBox = list.closest('#marketLedgerBox') || list.parentElement;
         let idx = 0;
         ledgerAutoScrollTimer = setInterval(() => {
             idx = (idx + 1) % entries.length;
-            entries[idx].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            if (!scrollBox) return;
+            const target = entries[idx].offsetTop - scrollBox.offsetTop;
+            if (typeof scrollBox.scrollTo === 'function') {
+                scrollBox.scrollTo({ top: target, behavior: 'smooth' });
+            } else {
+                scrollBox.scrollTop = target;
+            }
         }, 2600);
+    }
+    function stopLedgerAutoScroll() {
+        if (ledgerAutoScrollTimer) { clearInterval(ledgerAutoScrollTimer); ledgerAutoScrollTimer = null; }
     }
 
     // Notificações / histórico de transações — Ponto 2
@@ -1322,6 +1344,7 @@ async function logoutSession() {
         if (screenId === 'leaderboard') renderLeaderboard();
         if (screenId === 'vault') renderVaultGrid();
         if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); }
+        else { stopLedgerAutoScroll(); }
         if (screenId === 'messages') { renderChatThreads(); renderGlobalOffers('offersContainer'); }
         // BUGFIX (redirecionamento): navegar para 'profile' SEMPRE recarregava os dados
         // do usuário logado, mesmo quando vínhamos de viewExternalProfile() (clique em
@@ -2289,6 +2312,105 @@ async function logoutSession() {
             `;
             container.appendChild(node);
         });
+
+        // Reaplica o drag-to-scroll sempre que o feed é repintado (re-render
+        // troca o innerHTML, mas o container #storiesContainer em si nunca é
+        // recriado — o guard `dataset.dragInit` em initStoriesDragScroll
+        // evita re-ligar os listeners do zero a cada chamada).
+        initStoriesDragScroll();
+    }
+
+    // =========================================================
+    // DRAG-TO-SCROLL no feed MUTAÇÕES_REDE (clique-e-arrasta)
+    // =========================================================
+    // Permite ao usuário pausar o marquee automático e "puxar" os cards
+    // manualmente pra frente/trás (mouse + touch), igual a um carrossel
+    // nativo. Resolve junto o bug do onClick abrindo o card ERRADO: como
+    // o marquee desloca a posição dos cards continuamente, sem essa
+    // distinção um simples toque-e-arraste (comum em touch, ao tentar
+    // rolar o feed) acabava soltando o dedo sobre um card DIFERENTE
+    // daquele que estava embaixo do dedo no início do gesto — e o
+    // navegador disparava `click` nesse card errado, abrindo o modal
+    // de inspeção do item errado. A correção mede a distância arrastada
+    // e, se ultrapassar um pequeno limiar, intercepta e cancela o
+    // `click` (fase de captura, antes de chegar no listener do
+    // story-node) — só permite o `click` passar quando foi de fato um
+    // toque/clique parado, garantindo que o card aberto é sempre
+    // exatamente o que o usuário pretendia.
+    function initStoriesDragScroll() {
+        const container = document.getElementById('storiesContainer');
+        if (!container || container.dataset.dragInit) return;
+        container.dataset.dragInit = '1';
+
+        const DRAG_THRESHOLD_PX = 4;
+        let isDown = false;
+        let dragged = false;
+        let startX = 0;
+        let startOffset = 0;
+        let resumeTimer = null;
+
+        function getCurrentTranslateX(el) {
+            const t = window.getComputedStyle(el).transform;
+            if (!t || t === 'none') return 0;
+            const m = t.match(/matrix.*\((.+)\)/);
+            if (!m) return 0;
+            const parts = m[1].split(',').map(parseFloat);
+            return parts.length === 16 ? parts[12] : parts[4]; // matrix3d vs matrix
+        }
+
+        function pointerDown(clientX) {
+            clearTimeout(resumeTimer);
+            isDown = true;
+            dragged = false;
+            startX = clientX;
+            startOffset = getCurrentTranslateX(container);
+            // Pausa o marquee automático (mesma classe usada pelo hover —
+            // ver pauseMarquee) e "congela" os cards na posição atual antes
+            // de assumir o controle manual via transform inline.
+            container.classList.remove('animated');
+            container.style.transition = 'none';
+            container.style.transform = `translate3d(${startOffset}px, 0, 0)`;
+            container.style.cursor = 'grabbing';
+        }
+
+        function pointerMove(clientX) {
+            if (!isDown) return;
+            const delta = clientX - startX;
+            if (Math.abs(delta) > DRAG_THRESHOLD_PX) dragged = true;
+            container.style.transform = `translate3d(${startOffset + delta}px, 0, 0)`;
+        }
+
+        function pointerUp() {
+            if (!isDown) return;
+            isDown = false;
+            container.style.cursor = '';
+            // Não houve arraste de verdade (foi um clique parado): libera o
+            // `click` normalmente — o listener do container abaixo só
+            // intercepta quando `dragged` for true.
+            // Retoma o marquee automático sozinho após uma pausa de
+            // inatividade, pra ele não ficar travado pra sempre em telas
+            // touch (que não disparam mouseleave/resumeMarquee).
+            resumeTimer = setTimeout(() => { resumeMarquee(); }, 2500);
+        }
+
+        container.addEventListener('mousedown', (e) => { pointerDown(e.clientX); e.preventDefault(); });
+        window.addEventListener('mousemove', (e) => pointerMove(e.clientX));
+        window.addEventListener('mouseup', pointerUp);
+
+        container.addEventListener('touchstart', (e) => pointerDown(e.touches[0].clientX), { passive: true });
+        container.addEventListener('touchmove', (e) => pointerMove(e.touches[0].clientX), { passive: true });
+        container.addEventListener('touchend', pointerUp);
+
+        // Fase de CAPTURA: roda antes do listener de click de cada
+        // story-node, então consegue suprimir o clique-fantasma pós-drag
+        // sem precisar tocar/alterar o listener individual de cada card.
+        container.addEventListener('click', (e) => {
+            if (dragged) {
+                e.stopPropagation();
+                e.preventDefault();
+                dragged = false;
+            }
+        }, true);
     }
 
     function renderVaultGrid() {
@@ -6621,12 +6743,63 @@ async function sendAirBroadcast() {
     // manualmente aqui, evitando duplicar o OVNI nesta aba.
 }
 
+// Calcula, em milissegundos, quanto tempo depois do spawn a FRENTE do OVNI
+// cruza a borda direita da viewport (ou seja, o instante em que ele
+// realmente "entra na tela" pra quem está vendo).
+//
+// BUGFIX (voz dessincronizada do OVNI): a fala da Web Speech API antes
+// disparava num `setTimeout` fixo de 1200ms, sem relação nenhuma com a
+// posição real do OVNI — que varia a cada broadcast, porque a duração do
+// voo é sorteada (28s–34s) E o ponto de entrada na tela depende da largura
+// da viewport (telas largas "engolem" os 680px de offset inicial muito
+// mais rápido que telas estreitas). O resultado era a voz tocando ora
+// antes, ora bem depois do OVNI aparecer.
+//
+// Esta função espelha os MESMOS keyframes de `ufoFlyAcross` (CSS) — os
+// pontos 0%/30%/70%/100% e seus deslocamentos em X — e interpola
+// linearmente (mesmo timing-function "linear" usado na animação) pra achar
+// em que fração da duração total o deslocamento X chega a -680px, que é
+// exatamente o offset inicial de `right: -680px` em `.air-broadcast-unit`
+// (ponto em que a borda direita do OVNI cruza x = largura da viewport).
+function computeUfoEntryDelayMs(durationSeconds) {
+    const vw = window.innerWidth || document.documentElement.clientWidth || 1280;
+    const ENTRY_OFFSET_PX = 680; // mesmo valor do `right: -680px` no CSS
+
+    // Pontos de controle de translateX (eixo horizontal) usados em
+    // @keyframes ufoFlyAcross — precisam ficar em sincronia se o CSS mudar.
+    const stops = [
+        { t: 0.00, x: 0 },
+        { t: 0.30, x: -0.40 * vw },
+        { t: 0.70, x: -0.75 * vw },
+        { t: 1.00, x: -(vw + 750) }
+    ];
+
+    let entryT = stops[stops.length - 1].t; // fallback de segurança
+    for (let i = 0; i < stops.length - 1; i++) {
+        const a = stops[i], b = stops[i + 1];
+        if (a.x >= -ENTRY_OFFSET_PX && b.x <= -ENTRY_OFFSET_PX) {
+            const frac = (a.x - (-ENTRY_OFFSET_PX)) / (a.x - b.x);
+            entryT = a.t + (b.t - a.t) * frac;
+            break;
+        }
+    }
+    return Math.max(0, entryT * durationSeconds * 1000);
+}
+
 // Cria e anima um OVNI puxando a faixa de texto na tela. Suporta múltiplos
 // broadcasts simultâneos (cada um numa altura/duração levemente diferente,
 // pra não sobrepor perfeitamente se dois chegarem perto um do outro).
 function spawnAirBroadcast(username, mensagem) {
     const layer = document.getElementById('airBroadcastLayer');
     if (!layer) return;
+
+    // topPct/duration calculados ANTES dos efeitos sonoros, porque a
+    // sincronização da voz (abaixo) depende da duração real do voo deste
+    // OVNI específico.
+    const topPct = 10 + Math.random() * 50; // 10%–60% da altura da tela
+    // Duração maior: 28s–34s para usuário ler confortavelmente
+    const duration = 28 + Math.random() * 6;
+    const ufoEntryDelayMs = computeUfoEntryDelayMs(duration);
 
     // 1) Efeito sonoro de Sirene Cyberpunk ao entrar no broadcast
     try {
@@ -6646,7 +6819,10 @@ function spawnAirBroadcast(username, mensagem) {
         }
     } catch(e) {}
 
-    // 2) Leitura da mensagem via Web Speech API (voz sintetizada)
+    // 2) Leitura da mensagem via Web Speech API (voz sintetizada) — agora
+    // disparada exatamente no milissegundo (ufoEntryDelayMs) em que a
+    // FRENTE do OVNI cruza a borda direita da tela, calculado acima a
+    // partir da mesma curva de animação usada no CSS.
     try {
         if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
@@ -6654,15 +6830,12 @@ function spawnAirBroadcast(username, mensagem) {
                 const u = new SpeechSynthesisUtterance(`Broadcast aéreo de ${username}: ${mensagem}`);
                 u.lang = 'pt-BR'; u.rate = 0.92; u.pitch = 0.85;
                 window.speechSynthesis.speak(u);
-            }, 1200);
+            }, ufoEntryDelayMs);
         }
     } catch(e) {}
 
     const unit = document.createElement('div');
     unit.className = 'air-broadcast-unit';
-    const topPct = 10 + Math.random() * 50; // 10%–60% da altura da tela
-    // Duração maior: 28s–34s para usuário ler confortavelmente
-    const duration = 28 + Math.random() * 6;
     unit.style.setProperty('--ufo-top', topPct + '%');
     unit.style.setProperty('--ufo-duration', duration + 's');
 

@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DROP_STATION // MUTATION_ENGINE</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        // ── SUPABASE CONFIG ─────────────────────────────────────────
+        // ⚠️ Substitua SUPABASE_URL pela URL do seu projeto
+        // (Painel Supabase → Project Settings → API → Project URL)
+        window.SUPABASE_URL = "https://brkfajoyakaisinwzyhx.supabase.co";
+        window.SUPABASE_ANON_KEY = "sb_publishable_SXaTvDYSzJmX-Ya_peis-Q_6dUmOER-";
+        window.supabaseClient = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    </script>
+</head>
+<body>
+
+    <!-- TICKER GLOBAL FIXO NO TOPO -->
+    <div id="globalTickerFixed">
+        <div class="quotes-ticker-wrap" style="border:none;">
+            <div class="quotes-ticker-track" id="tickerGlobalTrack"></div>
+        </div>
+    </div>
+
+    <header>
+        <h5 id="appLogo" onclick="navigateTo('engine')">DROP_STATION</h5>
+        <div class="header-right">
+            <span class="overload-indicator" id="overloadIndicator" style="display:none;">⚠️ SOBRECARGA NA REDE</span>
+            <button class="audio-toggle" id="audioToggleBtn" onclick="toggleBackgroundAudio()" title="MÚSICA BGM">
+                <span id="audioLabel">MUSIC</span>
+                <div class="switch-track"><div class="switch-thumb"></div></div>
+            </button>
+            <button class="lang-toggle" id="langToggleBtn" onclick="toggleLanguage()">
+                <span class="lang-pixel"></span>
+                <span id="langLabel">PT</span>
+            </button>
+            <button class="btn-navigation" id="navLeaderboardBtn" onclick="navigateTo('leaderboard')">
+                <span>PLACAR GLOBAL</span>
+                <span class="btn-sub-nav">RANKING</span>
+            </button>
+            <button class="btn-navigation btn-market-nav" id="navMarketBtn" onclick="navigateTo('market')">
+                <span data-i18n="nav-market">MERCADO DIRETO</span>
+                <span class="btn-sub-nav" id="market-count-badge">0 CARDS</span>
+            </button>
+            <button class="btn-navigation btn-messages-nav" id="navMessagesBtn" onclick="navigateTo('messages')">
+                <span data-i18n="nav-inbox">PROPOSTAS</span>
+                <span class="btn-sub-nav" id="msg-count-badge">0 MENSAGENS</span>
+            </button>
+            <button class="btn-navigation btn-vault" id="navVaultBtn" onclick="navigateTo('vault')">
+                <span data-i18n="nav-vault">MEU COFRE</span>
+                <span class="btn-sub-nav" id="vault-count-badge">0 ATIVOS</span>
+            </button>
+            <button class="btn-navigation btn-contracts-nav" id="navContractsBtn" onclick="navigateTo('contracts')" style="display:none; border-color:#ff6600; color:#ff6600;">
+                <span>CONTRATOS</span>
+                <span class="btn-sub-nav" id="contracts-active-badge">MISSÕES</span>
+            </button>
+            <button class="btn-navigation btn-loja-nav" id="navLojaBtn" onclick="navigateTo('loja')" style="display:none; border-color:#ffaa00; color:#ffaa00;">
+                <span>LOJA</span>
+                <span class="btn-sub-nav">MERCADO_NEGRO</span>
+            </button>
+            <button class="btn-navigation" id="navBroadcastBtn" onclick="openAirBroadcastModal()" style="display:none; border-color:#00ff66; color:#00ff66;">
+                <span>BROADCAST</span>
+                <span class="btn-sub-nav">500 B$ // REDE</span>
+            </button>
+            <button class="btn-navigation" id="navAuthBtn" onclick="handleProfileNavClick()">
+                <span id="nav-btn-text" data-i18n="nav-access">ACESSAR TERMINAL</span>
+                <span class="btn-sub-nav" id="nav-btn-sub"></span>
+            </button>
+            <button class="btn-navigation btn-logout" id="navLogoutBtn" onclick="logoutSession()">
+                <span>LOGOUT</span>
+                <span class="btn-sub-nav">SAIR</span>
+            </button>
+            <div class="sys-info"><b>STATUS_ENGINE:</b> <span style="color:#00ff66;"><b><i>ONLINE</i></b></span></div>
+        </div>
+    </header>
+
+    <div id="screen-engine" class="spa-screen active">
+        <div class="stories-panel">
+            <div class="stories-title" data-i18n="feed-title">MUTAÇÕES_REDE</div>
+            <div class="stories-marquee-wrapper">
+                <div class="stories-container animated" id="storiesContainer" onmouseenter="pauseMarquee()" onmouseleave="resumeMarquee()"></div>
+            </div>
+        </div>
+
+        <div class="workspace">
+            <div class="viewer-side">
+                <div class="target-box" id="target-container">
+                    <div class="scan-line"></div>
+                    <canvas id="pfp-canvas"></canvas>
+                </div>
+                
+                <div id="stability-wrapper">
+                    <div id="stability-label" data-i18n="stability-label">TEMPO DE RESGATE: 10s</div>
+                    <div id="stability-container"><div id="stability-bar"></div></div>
+                </div>
+
+                <button class="download-trigger" id="download-btn" onclick="claimAssetLogic()" data-i18n="download-btn">RESGATAR ATIVO</button>
+            </div>
+
+            <div class="control-side">
+                <div class="live-pricing">
+                    <div class="price-card"><label data-i18n="lbl-id">CÓDIGO ID CARD</label><div class="price-value" id="meta-id">#000000</div></div>
+                    <div class="price-card"><label data-i18n="lbl-rarity">RARIDADE</label><div class="price-value" id="meta-rarity">AGUARDANDO...</div></div>
+                    <div class="price-card"><label data-i18n="lbl-style">ESTILO VISUAL</label><div class="price-value" id="meta-style">NENHUM</div></div>
+                    <div class="price-card"><label data-i18n="lbl-creator">AUTOR DA MINTAGEM</label><div class="price-value" id="meta-owner">-</div></div>
+                </div>
+
+                <div class="deck-footer">
+                    <div class="ticket-wrapper ticket-free" id="btnFree" onclick="executeHardwareRoll(false)">
+                        <div class="ticket-main">
+                            <div class="ticket-title">FREE_ROLL_TICKET</div>
+                            <div class="ticket-sub" data-i18n="free-sub">RISK OF SHATTER // FLUXO INESTÁVEL</div>
+                        </div>
+                        <div class="ticket-stub">
+                            <div class="ticket-cost">0 BUMPS</div>
+                            <div class="ticket-bar-serial">||||| | |||| #F-772</div>
+                        </div>
+                    </div>
+
+                    <div class="ticket-wrapper ticket-premium-gold" id="btnPremium" onclick="executeHardwareRoll(true)">
+                        <div class="ticket-main">
+                            <div class="ticket-title">PREMIUM_DROP_PASS</div>
+                            <div class="ticket-sub" data-i18n="premium-sub">100% SECURE // GARANTIA DE COMPILAÇÃO</div>
+                        </div>
+                        <div class="ticket-stub">
+                            <div class="ticket-cost">50 BUMPS</div>
+                            <div class="ticket-bar-serial">|| |||| ||| #G-995</div>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn-action daily-drop-btn" id="dailyDropBtn" onclick="claimDailyDrop()" style="margin-top:10px; width:100%;">
+                    🛰️ COLHER SUBSÍDIO DA REDE
+                </button>
+
+                <!-- MISSÕES DIÁRIAS -->
+                <div class="daily-missions-section" style="padding:16px 0 0 0;">
+                    <div class="daily-missions-title">⚔ MISSÕES_DIÁRIAS // OPERAÇÕES ATIVAS</div>
+                    <div id="dailyMissionsContainer">
+                        <div class="empty-vault-notice" style="font-size:0.6rem;">Faça login para ver missões.</div>
+                    </div>
+                </div>
+
+                <div class="terminal-faq-box">
+                    <div class="faq-title" data-i18n="faq-title">> TERMINAL_INFO // PERGUNTAS_FREQUENTES</div>
+                    <div class="faq-item">
+                        <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq-q1">[+] O que é o Drop Station?</div>
+                        <div class="faq-a" data-i18n="faq-a1">▸ Plataforma P2P de cards digitais gerados por IA. Cada card é único, rastreado no registry e negociável em B$ (Bumps).</div>
+                    </div>
+                    <div class="faq-item">
+                        <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq-q2">[+] O que são Bumps (B$)?</div>
+                        <div class="faq-a" data-i18n="faq-a2">▸ Moeda interna da rede. Usada para resgatar cards épicos/lendários, comprar no mercado P2P e propor trocas. Carregue via PIX ou cripto.</div>
+                    </div>
+                    <div class="faq-item">
+                        <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq-q3">[+] O que acontece se não resgatar a tempo?</div>
+                        <div class="faq-a" data-i18n="faq-a3">▸ A mutação se autodestrói em 10 segundos por instabilidade de rede. O card é removido do feed global permanentemente.</div>
+                    </div>
+                    <div class="faq-item">
+                        <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq-q4">[+] Como funciona a Alquimia?</div>
+                        <div class="faq-a" data-i18n="faq-a4">▸ Funde 2 cards do seu cofre para criar um novo. Os originais são destruídos. Raridade resultante depende dos cards usados + roll de probabilidade.</div>
+                    </div>
+                    <div class="faq-item">
+                        <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq-q5">[+] Quem pode ver meu perfil e cards?</div>
+                        <div class="faq-a" data-i18n="faq-a5">▸ Perfis públicos são visíveis a todos. Cards expostos na vitrine aparecem no feed. O mercado é público mas compras exigem login.</div>
+                    </div>
+                    <div class="faq-item">
+                        <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq-q6">[+] Existe risco de perder cards na Fornalha ou em Contratos?</div>
+                        <div class="faq-a" data-i18n="faq-a6">▸ Sim. Tanto a Fornalha de Sobrecarga quanto os Contratos envolvem <b>risco real de destruição permanente</b> da carta submetida — uma vez confirmada a operação, instabilidades de rede podem corromper o ativo sem aviso prévio, sem direito a estorno. Use com consciência: cards destruídos rendem Fragmentos de Sucata como compensação parcial, nunca o card em si.</div>
+                    </div>
+                    <div class="faq-item">
+                        <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq-q7">[+] De onde vêm as artes dos cards?</div>
+                        <div class="faq-a" data-i18n="faq-a7">▸ O terminal intercepta sinais soltos pela rede mundial — referências de cultura pop, memes e ruído visual coletivo — e os processa através de algoritmos de mutação visual próprios. O resultado é uma paródia artística reinterpretada e única, gerada pela própria rede Drop Station, nunca uma reprodução direta de uma fonte original.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="console-row"><span data-i18n="log-prefix">LOG // </span><span id="status-text">AGUARDANDO_MUTACAO...</span></div>
+    </div>
+
+    <div id="screen-auth" class="spa-screen">
+        <div class="auth-container">
+            <div class="auth-card">
+                <div class="auth-tabs">
+                    <button class="auth-tab-btn active" id="tab-login" onclick="switchAuthMode('login')">Conectar</button>
+                    <button class="auth-tab-btn" id="tab-register" onclick="switchAuthMode('register')">Registrar Nó</button>
+                </div>
+                <h2 id="authTitle">SINCRO_CONTA</h2>
+                <div class="auth-subtitle" id="authSubtitle">Acessar terminal seguro do Drop Station.</div>
+                <div class="auth-error" id="authErrorMsg">Chave inválida ou usuário não encontrado.</div>
+                <form onsubmit="handleAuthSubmit(event)">
+                    <div class="auth-form-group">
+                        <label>@USERNAME / ALIAS NETWORK</label>
+                        <input type="text" id="authUsername" class="auth-input" required placeholder="cyber_punk99" autocomplete="username">
+                    </div>
+                    <div class="auth-form-group register-only" id="authEmailGroup" style="display:none;">
+                        <label>E-MAIL DE ACESSO</label>
+                        <input type="email" id="authEmail" class="auth-input" placeholder="seu@email.com" autocomplete="email">
+                    </div>
+                    <div class="auth-form-group register-only" id="authAgeGroup" style="display:none;">
+                        <label>DATA DE NASCIMENTO <span style="color:#666688;">(rede +18)</span></label>
+                        <div class="auth-age-selector">
+                            <select id="authBirthDay" class="auth-select"><option value="">Dia</option></select>
+                            <select id="authBirthMonth" class="auth-select"><option value="">Mês</option></select>
+                            <select id="authBirthYear" class="auth-select"><option value="">Ano</option></select>
+                        </div>
+                    </div>
+                    <div class="auth-form-group">
+                        <label>CHAVE CRIPTOGRAFADA (SENHA)</label>
+                        <input type="password" id="authPassword" class="auth-input" required placeholder="••••••••" autocomplete="new-password">
+                    </div>
+                    <div class="auth-form-group register-only" id="authConfirmGroup" style="display:none;">
+                        <label>CONFIRMAR CHAVE</label>
+                        <input type="password" id="authConfirmPassword" class="auth-input" placeholder="••••••••" autocomplete="new-password">
+                    </div>
+                    <div class="auth-checkbox-row register-only" id="authTermsGroup" style="display:none;">
+                        <input type="checkbox" id="authTerms" class="auth-checkbox">
+                        <label for="authTerms">Confirmo que tenho 18 anos ou mais e aceito os <a onclick="event.preventDefault(); showCyberAlert('// TERMOS_DE_REDE //', 'Drop Station é uma plataforma estritamente +18. Ao continuar, você concorda com as regras da rede e a política de privacidade.', 'info')">Termos de Uso</a> e a <a onclick="event.preventDefault(); openPrivacyPolicy()">Política de Privacidade</a> da rede.</label>
+                    </div>
+                    <button type="submit" id="authSubmitBtn" class="auth-submit-btn">Acessar Sistema</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN: CONTRATOS / MISSÕES DE INVASÃO -->
+    <div id="screen-contracts" class="spa-screen">
+        <div class="vault-layout">
+            <div class="vault-header">
+                <h2 style="color:#ff6600;">CONTRATOS // MISSÕES_DE_INVASÃO</h2>
+                <p style="font-size:0.65rem; color:#888899;">Aloque seus cards em operações de alto risco. Recompensas em B$ ao término da missão.</p>
+            </div>
+
+            <!-- MISSÕES ATIVAS -->
+            <div id="activeContractsZone" style="margin-bottom:20px;"></div>
+
+            <!-- LISTA DE CONTRATOS DISPONÍVEIS -->
+            <div style="color:#ff6600; font-size:0.6rem; font-weight:bold; letter-spacing:2px; margin-bottom:12px;">> CONTRATOS_DISPONÍVEIS // SELECIONE E ALOQUE CARDS</div>
+            <div id="contractsGrid" class="contracts-grid"></div>
+        </div>
+    </div>
+
+    <!-- SCREEN: LOJA / MERCADO NEGRO DO SPIKE -->
+    <div id="screen-loja" class="spa-screen">
+        <div id="lojaScreen"></div>
+    </div>
+
+    <!-- MODAL: SELECIONAR CARDS PARA CONTRATO -->
+    <div class="modal-overlay" id="contractCardModal" onclick="closeContractCardModal()">
+        <div class="modal-card" onclick="event.stopPropagation()" style="border-color:#ff6600; max-width:560px;">
+            <h3 style="color:#ff6600;">ALOCAR CARDS // <span id="contractModalTitle"></span></h3>
+            <p style="font-size:0.6rem; color:#888899; margin-bottom:6px;" id="contractModalDesc"></p>
+            <p style="font-size:0.6rem; color:#ffaa00; margin-bottom:14px;" id="contractModalReq"></p>
+            <div id="contractCardSelectGrid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; max-height:280px; overflow-y:auto; margin-bottom:16px;"></div>
+            <div style="font-size:0.6rem; color:#888; margin-bottom:12px;">Selecionados: <span id="contractSelectedCount" style="color:#ff6600; font-weight:bold;">0</span></div>
+            <div style="display:flex; gap:10px;">
+                <button class="btn-action" style="border-color:#ff6600; background:#ff6600; color:#000; font-weight:bold; flex:1;" onclick="confirmContractStart()">⚡ INICIAR MISSÃO</button>
+                <button class="btn-action" style="border-color:#ff0044; flex:1;" onclick="closeContractCardModal()">CANCELAR</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CYBERPUNK TRANSACTION ALERT -->
+    <div class="cyber-alert-overlay" id="cyberAlertOverlay">
+        <div class="cyber-alert-box" id="cyberAlertBox">
+            <div class="cyber-alert-title" id="cyberAlertTitle">TRANSFERENCIA DE ATIVOS CONCLUIDA</div>
+            <div class="cyber-alert-msg" id="cyberAlertMsg"></div>
+            <button class="cyber-alert-close" onclick="closeCyberAlert()">// CONFIRMAR //</button>
+        </div>
+    </div>
+
+    <!-- POLÍTICA DE PRIVACIDADE -->
+    <div class="cyber-alert-overlay" id="privacyPolicyOverlay">
+        <div class="cyber-alert-box privacy-policy-box" id="privacyPolicyBox">
+            <div class="cyber-alert-title">// PROTOCOLO_DE_PRIVACIDADE // NÓ_DA_REDE</div>
+            <div class="cyber-alert-msg privacy-policy-body">
+                <p><b>[01] QUEM SOMOS</b><br>
+                Drop Station é um terminal de simulação P2P de cards digitais. Este protocolo descreve, em linguagem direta, como seus dados trafegam pela rede — em conformidade com a LGPD (Lei 13.709/2018).</p>
+
+                <p><b>[02] DADOS COLETADOS NO REGISTRO</b><br>
+                ▸ <b>E-mail:</b> usado exclusivamente para autenticar e recuperar o acesso ao seu Nó da Rede. Nunca é exibido publicamente nem vendido a terceiros.<br>
+                ▸ <b>Data de nascimento:</b> usada apenas para validar que o operador é +18, conforme exigido pela plataforma. Não é armazenada para nenhum outro fim.<br>
+                ▸ <b>Senha:</b> nunca é gravada em texto puro — passa por hashing/criptografia antes de tocar o banco de dados. Nem a própria equipe consegue lê-la.</p>
+
+                <p><b>[03] BUMPS NÃO SÃO DINHEIRO REAL</b><br>
+                Bumps (B$) são uma moeda interna de simulação, sem valor monetário fora da plataforma. A Drop Station <b>não processa nem armazena dados bancários, cartões ou chaves PIX</b> — qualquer carga de saldo é intermediada por processadores externos, fora do escopo deste terminal.</p>
+
+                <p><b>[04] O QUE NÃO FAZEMOS</b><br>
+                ▸ Não vendemos, alugamos ou compartilhamos seus dados pessoais com terceiros para fins de marketing.<br>
+                ▸ Não usamos seu e-mail para nada além de autenticação, avisos de segurança e comunicados essenciais da rede.</p>
+
+                <p><b>[05] DADOS PÚBLICOS NA REDE</b><br>
+                Username, avatar, moldura, bio, cards expostos na vitrine e atividade no mercado P2P são, por natureza do produto, visíveis publicamente a outros operadores. Isso não inclui e-mail, data de nascimento ou senha.</p>
+
+                <p><b>[06] SEUS DIREITOS (LGPD)</b><br>
+                Você pode solicitar a qualquer momento a exclusão da sua conta e dos dados pessoais associados a ela. Dados de transações já efetivadas (ledger de trocas) podem ser mantidos de forma anonimizada para integridade do sistema.</p>
+
+                <p style="color:#666; font-size:0.55rem; margin-top:14px;">Última atualização do protocolo: terminal v7.1.</p>
+            </div>
+            <button class="cyber-alert-close" onclick="closePrivacyPolicy()">// CONFIRMAR LEITURA //</button>
+        </div>
+    </div>
+
+
+    <div id="screen-vault" class="spa-screen">
+        <div class="vault-layout">
+            <div class="vault-header"><h2 data-i18n="vault-title">MEU COFRE</h2><p>Mutacoes salvas na sua carteira privada.</p></div>
+            <div class="filter-bar" id="vaultFilterBar">
+                <label>FILTRAR:</label>
+                <button class="filter-btn active" data-filter="all"       onclick="setVaultFilter('all')">TODOS</button>
+                <button class="filter-btn"         data-filter="common"    onclick="setVaultFilter('common')">COMMON</button>
+                <button class="filter-btn"         data-filter="epic"      onclick="setVaultFilter('epic')">EPIC</button>
+                <button class="filter-btn"         data-filter="legendary" onclick="setVaultFilter('legendary')">LEGENDARY</button>
+                <button class="filter-btn"         data-filter="ancestral" onclick="setVaultFilter('ancestral')" style="border-color:#ff007f; color:#ff007f;">ANCESTRAL</button>
+                <button class="filter-btn" style="border-color:#ff00ff; color:#ff00ff;" onclick="toggleAlchemyPanel()">⚗️ ALQUIMIA</button>
+                <button class="filter-btn" style="border-color:#ffaa00; color:#ffaa00; margin-left:auto;" onclick="toggleArenaPanel()">🎲 ARENA DE APOSTAS</button>
+            </div>
+            <!-- ═══════════════════════ ARENA DE APOSTAS ═══════════════════════
+                 Estrutura espelhada na Alquimia: painel com um menu principal
+                 (escolha do protocolo) + sub-views próprias, cada uma com seu
+                 próprio botão "VOLTAR" pro menu. Lógica de jogo entra no script.js. -->
+            <div id="arenaApostasPanel" style="display:none; background:#0a0700; border:1px solid #ffaa00; padding:20px; margin-bottom:20px;">
+
+                <!-- ═══════════════════ MENU PRINCIPAL DA ARENA ═══════════════════ -->
+                <div id="arenaMenuView">
+                    <div style="color:#ffaa00; font-weight:bold; font-size:0.75rem; letter-spacing:2px; margin-bottom:4px;">🎲 ARENA DE APOSTAS // ESCOLHA SEU PROTOCOLO</div>
+                    <p style="font-size:0.6rem; color:#888899; margin-bottom:16px;">Arrisque Bumps ou ativos do cofre contra outros operadores da rede.</p>
+                    <div style="display:flex; gap:14px; flex-wrap:wrap;">
+                        <button class="alch-menu-btn alch-menu-btn-fusao" onclick="setArenaMode('duelo')">
+                            <span class="alch-menu-btn-icon">⚔</span>
+                            <span class="alch-menu-btn-title">[ DUELO DIRETO ]</span>
+                            <span class="alch-menu-btn-sub">Desafie outro operador 1v1 · vencedor leva a aposta em B$</span>
+                        </button>
+                        <button class="alch-menu-btn alch-menu-btn-fornalha" onclick="setArenaMode('roleta')">
+                            <span class="alch-menu-btn-icon">🎡</span>
+                            <span class="alch-menu-btn-title">[ ROLETA DA SORTE ]</span>
+                            <span class="alch-menu-btn-sub">Mesa aberta da rede · multiplicadores de risco variável</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ═══════════════════ MODO: DUELO DIRETO ═══════════════════ -->
+                <div id="arenaDueloView" style="display:none;">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                        <button class="alch-back-btn" onclick="setArenaMode('menu')">‹ VOLTAR</button>
+                        <div style="color:#ffaa00; font-weight:bold; font-size:0.75rem; letter-spacing:2px;">⚔ ARENA // DUELO DIRETO</div>
+                    </div>
+                    <p style="font-size:0.6rem; color:#888899; margin-bottom:14px;">Módulo em construção // protocolo de pareamento entra em breve.</p>
+                    <div id="arenaDueloContent"></div>
+                </div>
+
+                <!-- ═══════════════════ MODO: ROLETA DA SORTE ═══════════════════ -->
+                <div id="arenaRoletaView" style="display:none;">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                        <button class="alch-back-btn furn-back-btn" onclick="setArenaMode('menu')">‹ VOLTAR</button>
+                        <div style="color:#ffaa00; font-weight:bold; font-size:0.75rem; letter-spacing:2px;">🎡 ARENA // ROLETA DA SORTE</div>
+                    </div>
+                    <p style="font-size:0.6rem; color:#888899; margin-bottom:14px;">Módulo em construção // mesa de apostas entra em breve.</p>
+                    <div id="arenaRoletaContent"></div>
+                </div>
+
+            </div>
+            <!-- ALQUIMIA MOVIDA PARA O COFRE -->
+            <div id="alchemyPanel" style="display:none; background:#070712; border:1px solid #ff00ff; padding:20px; margin-bottom:20px;">
+
+                <!-- ═══════════════════ MENU PRINCIPAL DA ALQUIMIA ═══════════════════ -->
+                <div id="alchMenuView">
+                    <div style="color:#ff00ff; font-weight:bold; font-size:0.75rem; letter-spacing:2px; margin-bottom:4px;">⚗️ CENTRAL DE ALQUIMIA // ESCOLHA SEU PROTOCOLO</div>
+                    <p style="font-size:0.6rem; color:#888899; margin-bottom:16px;">Selecione o módulo de mutação de ativos.</p>
+                    <div style="display:flex; gap:14px; flex-wrap:wrap;">
+                        <button class="alch-menu-btn alch-menu-btn-fusao" onclick="setAlchemyMode('fusao')">
+                            <span class="alch-menu-btn-icon">⚗</span>
+                            <span class="alch-menu-btn-title">[ FUSÃO PADRÃO ]</span>
+                            <span class="alch-menu-btn-sub">Combine 2 ativos · resultado probabilístico controlado</span>
+                        </button>
+                        <button class="alch-menu-btn alch-menu-btn-fornalha" onclick="setAlchemyMode('fornalha')">
+                            <span class="alch-menu-btn-icon">☢</span>
+                            <span class="alch-menu-btn-title">[ FORNALHA DE SOBRECARGA ]</span>
+                            <span class="alch-menu-btn-sub">Alto risco · até 3 ativos · 80% DERRETIMENTO / 20% MUTAÇÃO MÁXIMA</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ═══════════════════ MODO: FUSÃO PADRÃO ═══════════════════ -->
+                <div id="alchFusaoView" style="display:none;">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                        <button class="alch-back-btn" onclick="setAlchemyMode('menu')">‹ VOLTAR</button>
+                        <div style="color:#ff00ff; font-weight:bold; font-size:0.75rem; letter-spacing:2px;">⚗️ LABORATÓRIO DE ALQUIMIA // FUSÃO DE ATIVOS</div>
+                    </div>
+                    <p style="font-size:0.6rem; color:#888899; margin-bottom:14px;" id="alchDesc">Seleciona 2 cards do cofre para fundir. Os originais serão <b style="color:#ff0044">DESTRUÍDOS</b>. Resultado garantido mas raridade é probabilística.</p>
+
+                    <!-- Galeria de seleção (substitui os <select>) -->
+                    <div class="alchemy-gallery-wrap">
+                        <span class="alchemy-gallery-label">▶ CLIQUE PARA SELECIONAR CARD_ALPHA (rosa) e CARD_BETA (ciano)</span>
+                        <div class="alchemy-gallery-grid" id="alchGalleryGrid"></div>
+                    </div>
+
+                    <!-- Slots de preview lado a lado -->
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 0;" id="alchSlotContainer">
+                        <div class="alchemy-card-slot">
+                            <label>CARD_ALPHA</label>
+                            <!-- select mantido oculto para compatibilidade com fuseCards() -->
+                            <select id="fuseCard1" style="display:none;"></select>
+                            <div class="alchemy-card-preview" id="previewSlot1">
+                                <div class="alch-empty-slot">⚗<span>ALPHA VAZIO</span></div>
+                            </div>
+                            <div class="alch-slot-name" id="alchSlotName1">—</div>
+                        </div>
+                        <div class="alchemy-card-slot" style="flex:0; align-self:center; font-size:1.5rem; color:#ff00ff; text-shadow:0 0 15px #ff00ff; min-width:30px; text-align:center;">⚡</div>
+                        <div class="alchemy-card-slot">
+                            <label>CARD_BETA</label>
+                            <select id="fuseCard2" style="display:none;"></select>
+                            <div class="alchemy-card-preview" id="previewSlot2">
+                                <div class="alch-empty-slot">⚗<span>BETA VAZIO</span></div>
+                            </div>
+                            <div class="alch-slot-name" id="alchSlotName2">—</div>
+                        </div>
+                    </div>
+
+                    <div class="alchemy-prob-bar" id="alchProbBox" style="display:none;">
+                        <div style="color:#ff00ff; font-size:0.55rem; font-weight:bold; margin-bottom:8px; letter-spacing:1px;">MATRIZ DE PROBABILIDADE</div>
+                        <div class="prob-row"><span class="prob-success">✓ SUCESSO ÉPICO+</span><span id="probSuccess">—</span></div>
+                        <div class="prob-row"><span class="prob-break">✕ FALHA / CARTA QUEBRA</span><span id="probBreak">—</span></div>
+                        <div class="prob-row"><span class="prob-common">◆ ITEM COMUM</span><span id="probCommon">—</span></div>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
+                        <button class="btn-action" style="border-color:#ff00ff; background:#ff00ff; color:#000; font-weight:bold;" onclick="fuseCards(document.getElementById('fuseCard1').value, document.getElementById('fuseCard2').value)">⚡ EXECUTAR FUSÃO</button>
+                    </div>
+                </div>
+
+                <!-- ═══════════════════ MODO: FORNALHA DE SOBRECARGA ═══════════════════ -->
+                <div id="alchFornalhaView" style="display:none;">
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+                        <button class="alch-back-btn furn-back-btn" onclick="setAlchemyMode('menu')">‹ VOLTAR</button>
+                        <div style="color:#ff5500; font-weight:bold; font-size:0.75rem; letter-spacing:2px; text-shadow:0 0 8px #ff5500;">☢ FORNALHA DE SOBRECARGA // [ REACTOR CORE INSTABLE ]</div>
+                    </div>
+                    <p style="font-size:0.6rem; color:#ffaa0099; margin-bottom:14px;">Seleciona até 3 ativos de baixa raridade pra derreter no núcleo. <b style="color:#ff5500">80% DE CHANCE DE DESTRUIÇÃO TOTAL</b>. 20% de chance de MUTAÇÃO MÁXIMA (Lendário/Ancestral).</p>
+
+                    <div class="alchemy-gallery-wrap furnace-gallery-wrap">
+                        <span class="alchemy-gallery-label furnace-gallery-label">▶ CLIQUE PARA SELECIONAR ATÉ 3 CARDS PARA A FORNALHA</span>
+                        <div class="alchemy-gallery-grid furnace-gallery-grid" id="furnGalleryGrid"></div>
+                    </div>
+
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 0;" id="furnSlotContainer">
+                        <div class="furnace-card-slot"><div class="furnace-card-preview" id="furnPreviewSlot1"><div class="furn-empty-slot">☢<span>VAZIO</span></div></div></div>
+                        <div class="furnace-card-slot"><div class="furnace-card-preview" id="furnPreviewSlot2"><div class="furn-empty-slot">☢<span>VAZIO</span></div></div></div>
+                        <div class="furnace-card-slot"><div class="furnace-card-preview" id="furnPreviewSlot3"><div class="furn-empty-slot">☢<span>VAZIO</span></div></div></div>
+                    </div>
+
+                    <div class="furnace-prob-bar" id="furnProbBox">
+                        <div style="color:#ff5500; font-size:0.55rem; font-weight:bold; margin-bottom:8px; letter-spacing:1px;">MATRIZ DE INSTABILIDADE DO REATOR</div>
+                        <div class="prob-row"><span class="furn-prob-fail">☣ DERRETIMENTO / DESTRUIÇÃO TOTAL</span><span>80%</span></div>
+                        <div class="prob-row"><span class="furn-prob-success">☢ MUTAÇÃO MÁXIMA (LENDÁRIO/ANCESTRAL)</span><span>20%</span></div>
+                    </div>
+
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
+                        <button class="btn-action furn-overload-btn" id="furnOverloadBtn" onclick="startOverload()" disabled>☢ INICIAR SOBRECARGA</button>
+                    </div>
+                </div>
+
+            </div>
+            <div class="album-grid" id="albumGrid"></div>
+            <div class="pagination-bar" id="vaultPagination"></div>
+        </div>
+    </div>
+
+    <div id="screen-market" class="spa-screen">
+        <div class="vault-layout">
+            <div class="vault-header"><h2 style="color: #ffaa00;" data-i18n="market-title">MERCADO P2P DIRECT</h2><p>Negocie ou envie propostas de troca de cards criptograficos.</p></div>
+            <!-- LEDGER DE TRANSAÇÕES -->
+            <div id="marketLedgerBox" style="background:#020204; border:1px solid #ffaa00; padding:14px 18px; font-size:0.6rem; color:#888899; font-family:'Space Mono',monospace; margin-bottom:10px; max-height:120px; overflow-y:auto; display:none;">
+                <div style="color:#ffaa00; font-weight:bold; margin-bottom:6px; letter-spacing:2px;">> LEDGER_FEED // ÚLTIMAS TRANSAÇÕES</div>
+                <div id="marketLedgerList"></div>
+            </div>
+            <div class="filter-bar" id="marketFilterBar">
+                <label>FILTRAR:</label>
+                <button class="filter-btn active" data-filter="all"       onclick="setMarketFilter('all')">TODOS</button>
+                <button class="filter-btn"         data-filter="common"    onclick="setMarketFilter('common')">COMMON</button>
+                <button class="filter-btn"         data-filter="epic"      onclick="setMarketFilter('epic')">EPIC</button>
+                <button class="filter-btn"         data-filter="legendary" onclick="setMarketFilter('legendary')">LEGENDARY</button>
+                <button class="filter-btn"         data-filter="ancestral" onclick="setMarketFilter('ancestral')" style="border-color:#ff007f; color:#ff007f;">ANCESTRAL</button>
+            </div>
+            <div class="album-grid" id="marketGrid"></div>
+            <div class="pagination-bar" id="marketPagination"></div>
+        </div>
+    </div>
+
+    <div id="screen-messages" class="spa-screen">
+        <div class="vault-layout">
+            <div class="vault-header">
+                <h2 style="color: #ff00ff;" data-i18n="messages-title">INBOX // DIALOGOS_CRIPTOGRAFADOS</h2>
+                <p>Negociações diretas de mercado, propostas de figurinhas e contrapropostas de ativos.</p>
+            </div>
+            <div id="offersContainer" class="offers-container"></div>
+            <div class="chat-container">
+                <div class="chat-sidebar" id="chatSidebarThreads"></div>
+                
+                <div class="chat-window">
+                    <div class="deal-asset-banner" id="dealAssetBanner" style="display:none;">
+                        <div class="deal-asset-meta">
+                            <img src="" id="dealAssetImg" class="deal-asset-img">
+                            <div>
+                                <span style="color:#ff00ff; font-weight:bold;">CARD EM NEGOCIAÇÃO</span>
+                                <div id="dealAssetTitle" style="font-weight:700;">#000000</div>
+                            </div>
+                        </div>
+                        <div style="text-align: right;">
+                            <span id="dealAssetOwner" style="color:#00ff66;">Dono: @-</span>
+                            <div id="dealAssetPrice" style="color:#ffaa00; font-weight:bold;">Preço Original: 0 B$</div>
+                        </div>
+                    </div>
+
+                    <div class="deal-proposal-status-box" id="dealProposalBox" style="display:none;">
+                        <div>
+                            <span style="color:#ffaa00; font-weight:bold;">📦 PROPOSTA ATUAL NA MESA:</span>
+                            <span id="dealProposalDetails" style="margin-left:5px;">Aguardando parâmetros...</span>
+                        </div>
+                        <div class="proposal-actions-row" id="proposalActionButtonsZone">
+                            <button class="btn-action" style="border-color:#00ff66; background:#04140a;" onclick="acceptCurrentProposal()">ACEITAR OFERTA</button>
+                            <button class="btn-action" style="border-color:#ff0044; background:#14040a;" onclick="rejectCurrentProposal()">RECUSAR OFERTA</button>
+                        </div>
+                    </div>
+
+                    <div class="chat-messages" id="chatMessagesBox"></div>
+
+                    <div class="chat-counter-panel" id="counterPanelZone" style="display:none;">
+                        <span style="font-size:0.55rem; color:#ff00ff; font-weight:bold;">⚙️ ENGENHARIA DE CONTRAPROPOSTA // TROCA DIRECT</span>
+                        <div class="chat-counter-inputs">
+                            <div style="display:flex; flex-direction:column; gap:2px;">
+                                <label style="font-size:0.5rem; color:#556;">OFERTA BUMPS</label>
+                                <input type="number" id="counterBumpsInput" class="chat-input" style="padding:6px; width:110px;" placeholder="0 B$">
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:2px; flex:1;">
+                                <label style="font-size:0.5rem; color:#556;">ADICIONAR FIGURINHA DO SEU COFRE COMO TROCA</label>
+                                <select id="counterAssetSelect" class="counter-select-pfp">
+                                    <option value="">-- NENHUMA FIGURINHA SELECIONADA --</option>
+                                </select>
+                            </div>
+                            <button class="btn-action" style="border-color:#ffaa00; width:140px; margin-top:12px;" onclick="submitCounterProposal()">ENVIAR OFERTA</button>
+                        </div>
+                    </div>
+
+                    <div class="chat-input-row">
+                        <input type="text" id="inputChatMsg" class="chat-input" placeholder="Digite uma mensagem geral para o operador...">
+                        <button class="btn-action" style="width:100px; border-color:#ff00ff;" onclick="sendChatMessage()">ENVIAR</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="screen-leaderboard" class="spa-screen">
+        <div class="vault-layout">
+            <div class="vault-header">
+                <h2 style="color: #ff00ff;">PLACAR_GLOBAL // RANKING_DE_OPERADORES</h2>
+                <p>Top 5 operadores da rede Drop Station, atualizado em tempo real.</p>
+            </div>
+            <div class="filter-bar" id="leaderboardModeBar" style="margin-bottom:6px;">
+                <button class="filter-btn active" data-mode="bumps" onclick="setLeaderboardMode('bumps')">POR SALDO (B$)</button>
+                <button class="filter-btn" data-mode="powerscore" onclick="setLeaderboardMode('powerscore')">POR POWER SCORE</button>
+            </div>
+            <p style="font-size:0.5rem; color:#666688; letter-spacing:0.5px; margin-bottom:15px;">⚡ POWER SCORE = soma ponderada do cofre · COMUM <b style="color:#aaaaaa;">10</b> · ÉPICO <b style="color:#ffaa00;">50</b> · LENDÁRIO <b style="color:#00ffff;">150</b> · ANCESTRAL <b style="color:#ff007f;">500</b></p>
+            <div id="leaderboardList" class="leaderboard-list"></div>
+        </div>
+    </div>
+
+    <div id="screen-profile" class="spa-screen">
+        <div class="profile-layout">
+            <div class="profile-banner" id="profBannerView">
+                <div class="banner-lock-status" id="bannerLockStatus">BANNER PADRÃO</div>
+            </div>
+            <div class="profile-main-box" id="profileMainBox">
+                <div class="profile-sidebar">
+                    <div class="avatar-container frame-style-1" id="avatarFrameWrap" onclick="openAvatarSelector()"><div class="cyber-frame"><img id="profAvatarImg" src="" alt="Avatar"></div><div class="avatar-overlay-label">MUDAR AVATAR</div></div>
+                    <div>
+                        <h3 style="color: #00ff66; display: flex; align-items: center;">
+                            <span class="user-status-dot status-online" id="userStatusDot"></span>
+                            <span id="profUsername">@user</span>
+                        </h3>
+                        <p style="font-size: 0.75rem; font-weight:bold; margin-top:4px;" id="profCode">#0000</p>
+                        <div class="profile-bio-text" id="profBioView"></div>
+                        <div id="profBadgesZone" class="badges-row"></div>
+                    </div>
+                    
+                    <div class="social-row">
+                        <div class="social-stat"><span id="lbl-followers">0</span> seguidores</div>
+                        <div class="social-stat"><span id="lbl-following">0</span> seguindo</div>
+                    </div>
+                    <div id="socialActionZone"></div>
+
+                    <div class="stat-box">
+                        <div><label>SALDO</label><span style="color:#ffaa00;" id="profBumps">0 B$</span></div>
+                        <button class="btn-deposit" onclick="openDepositModal()">+ CARREGAR</button>
+                    </div>
+
+                    <div class="edit-profile-fields" id="profileEditZone">
+                        <label style="font-size:0.55rem; color:#00ff66;">STATUS DA REDE</label>
+                        <div class="status-selector" id="statusSelectorZone">
+                            <button class="status-btn active-online" onclick="setUserStatus('online')" data-s="online">● DISPONÍVEL</button>
+                            <button class="status-btn" onclick="setUserStatus('away')" data-s="away">◐ AUSENTE</button>
+                            <button class="status-btn" onclick="setUserStatus('busy')" data-s="busy">● OCUPADO</button>
+                        </div>
+                        <label style="font-size:0.55rem; color:#00ff66; margin-top:8px;">BANNERS DE PERFIL</label>
+                        <button class="btn-action" style="border-color:#ffaa00; margin-bottom:10px;" onclick="openBannerSelector()">MUDAR BANNER</button>
+                        <button id="relicInventoryBtn" class="btn-action" style="border-color:#a855f7; margin-bottom:10px;" onclick="openRelicInventoryModal()">[ INVENTÁRIO DE RELÍQUIAS ]</button>
+                        <label style="font-size:0.55rem; color:#00ff66;">BIO // EDITAR</label>
+                        <div class="bio-edit-zone">
+                            <button class="btn-edit-bio" id="btnEditBio" onclick="toggleBioEdit()">✎ EDITAR BIO</button>
+                            <textarea id="inputBio" class="bio-edit-textarea" placeholder="Escreva sua bio..." rows="3" maxlength="160"></textarea>
+                            <div class="bio-edit-actions" id="bioEditActions">
+                                <button class="btn-save-bio" onclick="saveProfileCustoms()">SALVAR</button>
+                                <button class="btn-cancel-bio" onclick="cancelBioEdit()">CANCELAR</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <div id="showcaseRankArea"></div>
+                    <h2 style="font-family:'Archivo Black'; font-size: 1rem; margin-bottom: 20px; border-bottom:1px solid #1c1c28; padding-bottom:10px;" data-i18n="profile-showcase">VITRINE EXPOSTA</h2>
+                    <div class="album-grid" id="showcaseGrid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="bannerSelectorModal" onclick="closeBannerSelector()">
+        <div class="modal-card" onclick="event.stopPropagation()" style="border-color:#ffaa00;">
+            <h3>DESBLOQUEIO DE BANNER // EVENTOS</h3>
+            <p style="font-size:0.6rem; color:#666; margin-bottom:15px;">Banners customizados são exclusivos de drops lendários coletados em eventos de rede.</p>
+            <div class="album-grid" id="bannerSelectorGrid" style="grid-template-columns:1fr; gap:10px; max-height:250px; overflow-y:auto;"></div>
+            <button class="btn-action" style="margin-top:20px; border-color:#ff0044;" onclick="closeBannerSelector()">FECHAR</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="depositModal" onclick="closeDepositModal()">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <h3>CARREGAR SALDO TERMINAL</h3>
+            <div style="display:flex; flex-direction:column; gap:10px; margin-top:15px;">
+                <button class="method-btn" style="background:#111; border:1px solid #223; color:#fff; padding:15px; text-align:left; cursor:pointer;" onclick="simularDeposito(50)">⚡ PIX AUTOMÁTICO <b>50 B$ ($1.00)</b></button>
+                <button class="method-btn" style="background:#111; border:1px solid #223; color:#fff; padding:15px; text-align:left; cursor:pointer;" onclick="simularDeposito(250)">🔗 CRIPTO NETWORK <b>250 B$ ($5.00)</b></button>
+            </div>
+            <button class="btn-action" style="margin-top:20px; border-color:#ffaa00;" onclick="closeDepositModal()">FECHAR</button>
+        </div>
+    </div>
+
+    <div id="relicInventoryModal" class="fixed inset-0 bg-black/90 z-50" style="display:none; align-items:center; justify-content:center; padding:20px;" onclick="closeRelicInventoryModal()">
+        <div onclick="event.stopPropagation()" class="w-full" style="max-width:520px; background:#05050a; border:1px solid #a855f7; box-shadow:0 0 30px rgba(168,85,247,0.35); padding:20px; font-family:'Space Mono', monospace;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h3 style="margin:0; color:#a855f7;">[ INVENTÁRIO DE RELÍQUIAS ]</h3>
+            </div>
+            <p style="font-size:0.6rem; color:#888; margin-bottom:15px;">&gt; TERMINAL_DE_SELEÇÃO // Acessórios de Vitrine, Adereços de Card, Estantes, Cores de Fundo Neon e Cyber_Emoticons comprados no Spike. Clique em EQUIPAR/ATIVAR pra aplicar na hora — o efeito é só seu, ninguém mais vê no perfil.</p>
+            <div id="relicInventoryGrid" class="equip-inv-list" style="max-height:50vh; overflow-y:auto;"></div>
+            <button class="btn-action" style="margin-top:20px; border-color:#ff0044; width:100%;" onclick="closeRelicInventoryModal()">X - FECHAR</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="avatarSelectorModal" onclick="closeAvatarSelector()">
+        <div class="modal-card" onclick="event.stopPropagation()" style="border-color:#00ffff; max-width:600px;">
+            <h3>SELECIONAR AVATAR DO COFRE</h3>
+            <p style="font-size:0.6rem; color:#666; margin-bottom:15px;">Apenas mutações salvas em seu cofre seguro podem ser usadas como identidade visual.</p>
+            <label style="font-size:0.55rem; color:#00ffff; letter-spacing:1px;">MOLDURA CYBERPUNK</label>
+            <div id="frameFilterZone" style="display:flex; gap:6px; margin:8px 0; flex-wrap:wrap;"></div>
+            <div id="frameSelectorRow" style="display:flex; gap:10px; margin:8px 0 16px; flex-wrap:wrap;"></div>
+            <div class="album-grid" id="avatarSelectorGrid" style="max-height:300px; overflow-y:auto; gap:10px;"></div>
+            <button class="btn-action" style="margin-top:20px; border-color:#ff0044;" onclick="closeAvatarSelector()">FECHAR</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="inspectModal" onclick="closeInspectModal()">
+        <div class="modal-card" onclick="event.stopPropagation()" style="border-color: #00ffff; text-align: center;">
+            <h3 id="inspectTitle" style="color: #00ffff; font-family:'Archivo Black'; font-size:1.1rem;">INSPEÇÃO_DE_ATIVO</h3>
+            <p style="font-size:0.6rem; color:#666;" id="inspectSubtitle">ARRASTE PARA ROTACIONAR EM 360°</p>
+            
+            <div class="inspect-card-container">
+                <div class="hologram-glow" id="holoGlow"></div>
+                <div class="inspect-card-3d" id="card3D" onmousemove="rotateCard(event)" onmouseleave="resetCardRotation()">
+                    <img id="inspectImg" src="" alt="Preview">
+                </div>
+            </div>
+
+            <div id="inspectMetaBox" style="font-size:0.7rem; text-align:left; background:#020204; padding:15px; border:1px solid #1c1c28; margin-bottom:15px;"></div>
+            <div id="inspectQrBox" style="display:flex; flex-direction:column; align-items:center; gap:6px; margin-bottom:15px;">
+                <div id="inspectQrCanvas"></div>
+                <span style="font-size:0.45rem; color:#666688; font-family:'Space Mono',monospace; letter-spacing:1px;">// ASSINATURA_QR_DINÂMICA</span>
+            </div>
+            <div id="inspectActionZone"></div>
+            <button class="btn-action" style="margin-top:10px; border-color:#ff0044;" onclick="closeInspectModal()">FECHAR PROJEÇÃO</button>
+        </div>
+    </div>
+
+    <!-- SISTEMA DE BROADCAST AÉREO — OVNI puxando faixa de texto, visível
+         em QUALQUER tela pra TODA a rede (ver initAirBroadcastRealtime() /
+         spawnAirBroadcast() no script.js) -->
+    <div id="airBroadcastLayer"></div>
+
+    <!-- MODAL: ENVIAR BROADCAST AÉREO (500 BUMPS) -->
+    <div class="modal-overlay" id="airBroadcastModal" onclick="closeAirBroadcastModal()">
+        <div class="modal-card" onclick="event.stopPropagation()" style="border-color:#00ff66; max-width:480px;">
+            <h3 style="color:#00ff66;">BROADCAST AÉREO // REDE INTEIRA</h3>
+            <p style="font-size:0.6rem; color:#888899; margin-bottom:6px;">Sua mensagem será exibida em TODAS as sessões ativas, puxada por um OVNI. Custo fixo: <b style="color:#00ff66;">500 BUMPS</b>.</p>
+            <p style="font-size:0.55rem; color:#666; margin-bottom:14px;">Saldo atual: <b id="airBroadcastBalance" style="color:#ffaa00;">0 B$</b></p>
+            <textarea id="airBroadcastInput" maxlength="120" rows="3" placeholder="Escreva a mensagem que vai sobrevoar a rede..." style="width:100%; background:#000; border:1px solid #223; color:#fff; font-family:'Space Mono', monospace; font-size:0.75rem; padding:10px; resize:vertical; box-sizing:border-box;"></textarea>
+            <div style="font-size:0.5rem; color:#444; text-align:right; margin-top:4px;"><span id="airBroadcastCount">0</span>/120</div>
+            <div style="display:flex; gap:10px; margin-top:16px;">
+                <button class="btn-action" style="border-color:#00ff66; background:#00ff66; color:#000; font-weight:bold; flex:1;" onclick="sendAirBroadcast()">⚡ ENVIAR // -500 B$</button>
+                <button class="btn-action" style="border-color:#ff0044; flex:1;" onclick="closeAirBroadcastModal()">CANCELAR</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHAT GLOBAL FLUTUANTE — acessível de qualquer tela/sessão -->
+    <button id="globalChatFab" onclick="toggleGlobalChat()" title="Chat Global">
+        <svg class="chat-fab-icon" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M6 10h36v22H20l-8 8v-8H6V10z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+            <line x1="12" y1="18" x2="20" y2="18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="12" y1="24" x2="30" y2="24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="24" y1="18" x2="36" y2="18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/>
+        </svg>
+        <span class="chat-fab-badge" id="globalChatBadge">0</span>
+    </button>
+    <div id="globalChatPanel">
+        <div class="global-chat-header">
+            <h4>CHAT_GLOBAL // REDE</h4>
+            <button class="gc-close" onclick="toggleGlobalChat()">✕</button>
+        </div>
+        <div class="global-chat-cost-note">Cada mensagem enviada custa <b style="color:#00ffff;">15 B$</b>.</div>
+        <div id="globalChatMessages"><div class="global-chat-empty">Carregando mensagens da rede...</div></div>
+        <!-- Painel seletor de emotes — fica oculto até o botão 😀 ser clicado.
+             O toggle (toggleGlobalChatEmotePanel) e a inserção no input
+             (insertGlobalChatEmote) entram no script.js. -->
+        <div id="globalChatEmotePanel" style="display:none; flex-wrap:wrap; gap:4px; padding:8px 10px; border-top:1px solid #1c1c28; background:#080810; max-height:90px; overflow-y:auto;">
+            <button type="button" style="background:#0a0a14; border:1px solid #223; font-size:0.9rem; line-height:1; padding:5px 7px; cursor:pointer;" onclick="insertGlobalChatEmote('😀')">😀</button>
+            <button type="button" style="background:#0a0a14; border:1px solid #223; font-size:0.9rem; line-height:1; padding:5px 7px; cursor:pointer;" onclick="insertGlobalChatEmote('😂')">😂</button>
+            <button type="button" style="background:#0a0a14; border:1px solid #223; font-size:0.9rem; line-height:1; padding:5px 7px; cursor:pointer;" onclick="insertGlobalChatEmote('🔥')">🔥</button>
+            <button type="button" style="background:#0a0a14; border:1px solid #223; font-size:0.9rem; line-height:1; padding:5px 7px; cursor:pointer;" onclick="insertGlobalChatEmote('💀')">💀</button>
+            <button type="button" style="background:#0a0a14; border:1px solid #223; font-size:0.9rem; line-height:1; padding:5px 7px; cursor:pointer;" onclick="insertGlobalChatEmote('👽')">👽</button>
+            <button type="button" style="background:#0a0a14; border:1px solid #223; font-size:0.9rem; line-height:1; padding:5px 7px; cursor:pointer;" onclick="insertGlobalChatEmote('💎')">💎</button>
+            <button type="button" style="background:#0a0a14; border:1px solid #223; font-size:0.9rem; line-height:1; padding:5px 7px; cursor:pointer;" onclick="insertGlobalChatEmote('⚡')">⚡</button>
+            <button type="button" style="background:#0a0a14; border:1px solid #223; font-size:0.9rem; line-height:1; padding:5px 7px; cursor:pointer;" onclick="insertGlobalChatEmote('🚀')">🚀</button>
+            <button type="button" style="background:#0a0a14; border:1px solid #223; font-size:0.9rem; line-height:1; padding:5px 7px; cursor:pointer;" onclick="insertGlobalChatEmote('☢️')">☢️</button>
+            <button type="button" style="background:#0a0a14; border:1px solid #223; font-size:0.9rem; line-height:1; padding:5px 7px; cursor:pointer;" onclick="insertGlobalChatEmote('🎲')">🎲</button>
+        </div>
+        <div class="global-chat-input-row">
+            <button type="button" id="globalChatEmoteToggle" style="background:#0a0a14; border:1px solid #00ffff; color:#00ffff; font-size:0.85rem; padding:0 10px; cursor:pointer; flex-shrink:0;" onclick="toggleGlobalChatEmotePanel()" title="Emotes">😀</button>
+            <input type="text" id="globalChatInput" maxlength="280" placeholder="Mensagem... (15 B$)" onkeydown="if(event.key==='Enter') sendGlobalChatMessage();">
+            <button id="globalChatSendBtn" onclick="sendGlobalChatMessage()">ENVIAR</button>
+        </div>
+    </div>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
