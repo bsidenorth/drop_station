@@ -28,8 +28,10 @@ let currentUser = {
     bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
     followers: 12, following: 4, followedByMe: false,
     inventory: [], // populado na Parte 3 (inventário)
-    cosmetics: [], // ids dos cosméticos da Loja (molduras/fundos/emoticons) já comprados — persistido em profiles.cosmetics
-    equippedAccessory: null // id do acessório de vitrine (fundo/emoticon) atualmente ativo — persistido em profiles.equipped_accessory
+    cosmetics: [], // ids dos cosméticos da Loja (molduras/fundos/adereços/estantes/emoticons) já comprados — persistido em profiles.cosmetics
+    // Slots de equipamento ativo (um item por slot, exceto a moldura que tem coluna própria avatar_frame).
+    // Persistido como objeto único em profiles.equipped_cosmetics (jsonb).
+    equippedCosmetics: { background: null, prop: null, shelf: null, emoticon: null }
 };
 
 // =========================================================
@@ -92,7 +94,7 @@ function secondsLoginLocked() {
 // select('email'). A resolução de e-mail para login passa pela
 // function security definer `email_by_username` (ver fetchEmailByUsername).
 // =========================================================
-const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, banner, status, following, fusion_count, cosmetics, equipped_accessory, created_at, updated_at';
+const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, banner, status, following, fusion_count, cosmetics, equipped_cosmetics, created_at, updated_at';
 
 async function fetchProfile(userId) {
     const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('id', userId).single();
@@ -185,7 +187,7 @@ async function fetchProfileByUsername(username) {
 const PROFILE_FIELD_TO_COLUMN = {
     bumps: 'bumps', bio: 'bio', avatar: 'avatar', avatarFrame: 'avatar_frame', banner: 'banner',
     status: 'status', following: 'following', code: 'code', username: 'username',
-    fusion_count: 'fusion_count', cosmetics: 'cosmetics', equippedAccessory: 'equipped_accessory'
+    fusion_count: 'fusion_count', cosmetics: 'cosmetics', equippedCosmetics: 'equipped_cosmetics'
 };
 async function updateProfileInSupabase(userId, fieldsCamel) {
     if (!userId) { console.warn('updateProfileInSupabase: userId ausente, ignorando update remoto.'); return false; }
@@ -219,7 +221,9 @@ function applyProfileToCurrentUser(profile) {
         followedByMe: false,
         inventory: [], // populado na Parte 3
         cosmetics: Array.isArray(profile.cosmetics) ? profile.cosmetics : [],
-        equippedAccessory: profile.equipped_accessory || null
+        equippedCosmetics: (profile.equipped_cosmetics && typeof profile.equipped_cosmetics === 'object' && !Array.isArray(profile.equipped_cosmetics))
+            ? { background: null, prop: null, shelf: null, emoticon: null, ...profile.equipped_cosmetics }
+            : { background: null, prop: null, shelf: null, emoticon: null }
     };
 
     const navText = document.getElementById('nav-btn-text');
@@ -237,7 +241,7 @@ function resetCurrentUserToAnon() {
         loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
         bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
         followers: 12, following: 4, followedByMe: false, inventory: [],
-        cosmetics: [], equippedAccessory: null
+        cosmetics: [], equippedCosmetics: { background: null, prop: null, shelf: null, emoticon: null }
     };
     messageThreads = {};
     activeThreadUser = null;
@@ -1269,7 +1273,7 @@ async function logoutSession() {
             viewTargetUserCollection(currentUser.username, currentUser.code, currentUser.bio, currentUser.avatar, currentUser.banner, true);
         }
         if (screenId === 'contracts') renderContractsScreen();
-        if (screenId === 'loja') renderLoja();
+        if (screenId === 'loja') renderLoja(true);
     }
 
     function handleProfileNavClick() {
@@ -4093,18 +4097,33 @@ async function logoutSession() {
         document.getElementById('profCode').innerText = code || '#0000';
         document.getElementById('profBioView').innerText = bio || '';
 
+        // Busca o profile completo do ALVO sendo exibido (uma única vez, reaproveitado
+        // abaixo pra vitrine/follow/cosméticos) sempre que não for o próprio dono.
+        // Isso é o que garante que moldura/fundo neon/adereço/estante mostrados na tela
+        // são SEMPRE os do dono daquele perfil — nunca os do currentUser logado, que
+        // só entra em jogo quando isOwner === true. Sem isso, visitar o perfil de outra
+        // pessoa "vazaria" os cosméticos equipados por quem está logado.
+        const targetProfile = isOwner ? null : await fetchProfileByUsername(username);
+        const displayFrame = isOwner
+            ? (currentUser.avatarFrame || FRAME_DEFAULT_ID)
+            : ((targetProfile && targetProfile.avatar_frame) || FRAME_DEFAULT_ID);
+        const displayEquipped = isOwner
+            ? (currentUser.equippedCosmetics || { background: null, prop: null, shelf: null, emoticon: null })
+            : ((targetProfile && targetProfile.equipped_cosmetics && typeof targetProfile.equipped_cosmetics === 'object')
+                ? { background: null, prop: null, shelf: null, emoticon: null, ...targetProfile.equipped_cosmetics }
+                : { background: null, prop: null, shelf: null, emoticon: null });
+
         // Avatar do usuário logado/visitado (BUGFIX: avatar sumido da tela de perfil)
         const avatarImg = document.getElementById('profAvatarImg');
         if (avatarImg) avatarImg.src = avatar || 'https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg';
         const avatarFrameWrap = document.getElementById('avatarFrameWrap');
         if (avatarFrameWrap) {
-            const frameClass = (isOwner ? currentUser.avatarFrame : null) || 'frame-style-1';
             avatarFrameWrap.classList.remove('frame-style-1', 'frame-style-2', 'frame-style-3', 'frame-style-4');
-            avatarFrameWrap.classList.add(frameClass);
+            avatarFrameWrap.classList.add(displayFrame);
         }
-        // Aplica o glow neon de fundo (Ponto 4) ao abrir o perfil, caso o
-        // dono já tenha algum acessório de vitrine equipado.
-        applyEquippedAccessoryEffect();
+        // Aplica os 3 efeitos visuais reais (glow de fundo, adereço de card,
+        // estante) usando ESTRITAMENTE os cosméticos do perfil exibido.
+        applyAllEquippedEffects(displayEquipped);
 
         // Banner
         const bannerEl = document.getElementById('profBannerView');
@@ -4120,9 +4139,18 @@ async function logoutSession() {
         const editZone = document.getElementById('profileEditZone');
         if (editZone) editZone.style.display = isOwner ? 'block' : 'none';
 
+        // ── PONTO 2: trava de usuário logado no botão [ INVENTÁRIO DE RELÍQUIAS ] ──
+        // Só renderiza/exibe o botão quando o profile.id do perfil visualizado é
+        // igual ao user.id da sessão logada. Visitantes nunca veem este botão,
+        // mesmo manipulando o DOM manualmente (openRelicInventoryModal também
+        // re-checa isso por segurança).
+        const relicBtn = document.getElementById('relicInventoryBtn');
+        if (relicBtn) relicBtn.style.display = isOwner ? 'block' : 'none';
+
         // Inventário de equipamentos (Molduras/Acessórios da Loja do Spike) —
         // também exclusivo do dono do perfil.
         renderEquipmentInventory(isOwner);
+        if (isOwner) renderRelicInventoryModal();
 
         const inputBio = document.getElementById('inputBio');
         if (inputBio) inputBio.value = isOwner ? (bio || '') : '';
@@ -4135,7 +4163,6 @@ async function logoutSession() {
         let sourceAssets = savedAssets;
         let targetUserId = isOwner ? currentUser.id : null;
         if (!isOwner) {
-            const targetProfile = await fetchProfileByUsername(username);
             targetUserId = targetProfile ? targetProfile.id : null;
             sourceAssets = targetProfile ? await loadCardsFromSupabase(targetProfile.id) : [];
         }
@@ -4160,6 +4187,9 @@ async function logoutSession() {
                     showcaseGrid.appendChild(card);
                 });
             }
+            // Reaplica a estante (o innerHTML='' acima não mexe nas classes do
+            // próprio grid, mas reforça o estado certo logo após popular os cards).
+            applyEquippedShelfEffect(displayEquipped);
         }
 
         const showcaseRankArea = document.getElementById('showcaseRankArea');
@@ -5597,7 +5627,33 @@ const LOJA_EMOTICON_ITEMS = [
     { id: 'emo-pack-ancestral', category: 'emoticon', name: 'Pack Ancestral', price: 600, accent: '#ff007f', tagline: '12 emoticons raros, tema runas digitais.', glyphs: ['✦','◈','✧','⟁'] }
 ];
 
-const LOJA_ALL_ITEMS = [...LOJA_FRAME_ITEMS, ...LOJA_BACKGROUND_ITEMS, ...LOJA_EMOTICON_ITEMS];
+// ── PONTO 1 — Adereços para os Cards: pequeno elemento absoluto injetado
+// acima da PFP do avatar quando equipado (ver applyEquippedPropEffect). ──
+const LOJA_PROP_ITEMS = [
+    { id: 'prop-chapeu-pixel',  category: 'adereco', name: 'Chapéu Pixel',   price: 450, accent: '#ffaa00', tagline: 'Chapéu 8-bit sobreposto na PFP. Clássico do underground.', glyph: '🎩' },
+    { id: 'prop-peruca-cyber',  category: 'adereco', name: 'Peruca Cyber',   price: 600, accent: '#00ffff', tagline: 'Fios de fibra ótica no lugar de cabelo. Carrega de noite.', glyph: '💇' },
+    { id: 'prop-oculos-glitch', category: 'adereco', name: 'Óculos Glitch',  price: 520, accent: '#ff00ff', tagline: 'Lente com falha de sinal permanente. Estilo, não defeito.', glyph: '🕶️' }
+];
+
+// ── PONTO 1 — Estantes e Expositores: mudam a moldura/fundo do slot
+// individual onde cada card fica posicionado na Vitrine (ver applyEquippedShelfEffect). ──
+const LOJA_SHELF_ITEMS = [
+    { id: 'shelf-suporte-mainframe', category: 'estante', name: 'Suporte Mainframe', price: 700, accent: '#00ffff', tagline: 'Slots com moldura metálica de placa-mãe industrial.' },
+    { id: 'shelf-estante-neon',      category: 'estante', name: 'Estante Neon',      price: 780, accent: '#ff00ff', tagline: 'Slots com glow neon individual atrás de cada card.' }
+];
+
+const LOJA_ALL_ITEMS = [...LOJA_FRAME_ITEMS, ...LOJA_BACKGROUND_ITEMS, ...LOJA_PROP_ITEMS, ...LOJA_SHELF_ITEMS, ...LOJA_EMOTICON_ITEMS];
+
+// Mapeia a categoria de um item de loja pro slot correspondente dentro de
+// currentUser.equippedCosmetics. Molduras NÃO entram aqui — elas usam a
+// coluna própria avatar_frame / a function setAvatarFrame.
+function cosmeticSlotForCategory(category) {
+    if (category === 'fundo') return 'background';
+    if (category === 'adereco') return 'prop';
+    if (category === 'estante') return 'shelf';
+    if (category === 'emoticon') return 'emoticon';
+    return null;
+}
 
 const LOJA_MOCK_CONTRACTS = [
     { id: 'ctr-001', title: 'EMPRÉSTIMO_DE_CARD // RAID NOTURNA',        status: 'EM_BREVE',  reward: 140, minRarity: 'epic',      description: 'Cede um card épico+ por 6h para operação coletiva. Recompensa em B$ ao final.' },
@@ -5632,6 +5688,16 @@ function lojaPreviewMarkup(item) {
     if (item.category === 'emoticon') {
         return `<div class="w-full h-full flex items-center justify-center gap-2 bg-black text-2xl">
                     ${(item.glyphs || []).slice(0, 4).map(g => `<span style="color:${item.accent}; text-shadow:0 0 8px ${item.accent};">${g}</span>`).join('')}
+                </div>`;
+    }
+    if (item.category === 'adereco') {
+        return `<div class="w-full h-full flex items-center justify-center bg-black text-4xl">
+                    <span style="filter: drop-shadow(0 0 8px ${item.accent});">${item.glyph || '✨'}</span>
+                </div>`;
+    }
+    if (item.category === 'estante') {
+        return `<div class="w-full h-full grid grid-cols-2 gap-1 p-2 bg-black">
+                    ${Array.from({ length: 4 }).map(() => `<div class="border" style="border-color:${item.accent}; box-shadow:inset 0 0 8px ${item.accent}66;"></div>`).join('')}
                 </div>`;
     }
     return '';
@@ -5775,6 +5841,8 @@ function lojaBuildMarkup() {
         <div id="lojaTabCosmeticos" class="relative z-10">
             ${lojaCategorySection('MOLDURAS', LOJA_FRAME_ITEMS)}
             ${lojaCategorySection('LUZ DE FUNDO', LOJA_BACKGROUND_ITEMS)}
+            ${lojaCategorySection('ADEREÇOS DE CARD', LOJA_PROP_ITEMS)}
+            ${lojaCategorySection('ESTANTES E EXPOSITORES', LOJA_SHELF_ITEMS)}
             ${lojaCategorySection('EMOTICONS', LOJA_EMOTICON_ITEMS)}
         </div>
 
@@ -5884,11 +5952,15 @@ function lojaHandleAcceptContract(contractId) {
 // [ EQUIPAR / ATIVAR ] que persiste no Supabase e aplica o efeito na hora.
 // =========================================================
 function openRelicInventoryModal() {
+    // Trava de usuário logado (camada extra além do display:none aplicado em
+    // viewTargetUserCollection): nunca abre pra quem não é o dono do perfil.
     if (!currentUser.loggedIn || selectedProfileUser !== currentUser.username) return;
     const modal = document.getElementById('relicInventoryModal');
     if (!modal) return;
-    modal.style.display = 'flex';
-    renderRelicInventoryModal();
+    ensureTailwindLoaded(() => {
+        modal.style.display = 'flex';
+        renderRelicInventoryModal();
+    });
 }
 
 function closeRelicInventoryModal() {
@@ -5917,14 +5989,17 @@ const EQUIPMENT_INVENTORY_TARGET_ID = 'equipmentInventoryZone';
 function lojaCategoryLabel(category) {
     if (category === 'moldura') return 'MOLDURA';
     if (category === 'fundo') return 'LUZ DE FUNDO';
+    if (category === 'adereco') return 'ADEREÇO DE CARD';
+    if (category === 'estante') return 'ESTANTE/EXPOSITOR';
     if (category === 'emoticon') return 'EMOTICONS';
     return category.toUpperCase();
 }
 
 function equipmentInventoryItemMarkup(item) {
     const isFrame = item.category === 'moldura';
+    const slot = cosmeticSlotForCategory(item.category);
     const isActiveFrame = isFrame && currentUser.avatarFrame === item.id;
-    const isActiveAccessory = !isFrame && currentUser.equippedAccessory === item.id;
+    const isActiveAccessory = !isFrame && slot && currentUser.equippedCosmetics && currentUser.equippedCosmetics[slot] === item.id;
     const isActive = isActiveFrame || isActiveAccessory;
 
     const actionLabel = isActive
@@ -5932,7 +6007,7 @@ function equipmentInventoryItemMarkup(item) {
         : (isFrame ? '[ EQUIPAR ]' : '[ ATIVAR ]');
     const onClickAttr = isFrame
         ? `lojaEquipFrame('${item.id}')`
-        : `lojaToggleAccessory('${item.id}')`;
+        : `lojaToggleCosmeticSlot('${item.id}')`;
 
     return `
         <div class="equip-inv-item${isActive ? ' equip-inv-active' : ''}">
@@ -5992,30 +6067,29 @@ async function lojaEquipFrame(itemId) {
 }
 
 // =========================================================
-// PONTO 4 — ATIVAÇÃO REAL DOS EFEITOS (FRONT-END)
-// Aplica de fato as classes Tailwind de glow/gradiente no container
-// .profile-main-box (#profileMainBox) conforme o acessório de fundo
-// (LOJA_BACKGROUND_ITEMS) que estiver equipado em currentUser.equippedAccessory.
-// Limpa todas as classes neon conhecidas antes de aplicar o conjunto novo,
-// pra nunca acumular dois glows ao trocar de acessório.
+// PONTO 3 — ATIVAÇÃO REAL DOS EFEITOS (FRONT-END), AGORA POR SLOT
+// As três funções abaixo recebem o objeto `equippedCosmetics` do PERFIL
+// QUE ESTÁ SENDO EXIBIDO (não necessariamente currentUser — ver
+// viewTargetUserCollection) — isso é o que garante que o cosmético do
+// usuário A nunca "vaze" pro perfil do usuário B: cada chamada usa
+// estritamente os dados de quem está na tela.
 // =========================================================
-function applyEquippedAccessoryEffect() {
+
+// Luz Neon de Fundo: injeta classes Tailwind reais de glow/gradiente em
+// .profile-main-box (#profileMainBox) conforme LOJA_BACKGROUND_ITEMS.
+function applyEquippedAccessoryEffect(equippedCosmetics) {
     const box = document.getElementById('profileMainBox');
     if (!box) return;
+    const eq = equippedCosmetics || { background: null };
 
-    // Garante o Tailwind CDN carregado (a Loja já carrega, mas o Perfil pode
-    // ser a primeira tela visitada na sessão).
     ensureTailwindLoaded(() => {
         box.classList.remove(...NEON_BG_TAILWIND_ALL_CLASSES);
 
-        const accessoryId = currentUser && currentUser.equippedAccessory;
-        const item = accessoryId && LOJA_BACKGROUND_ITEMS.find(i => i.id === accessoryId);
-
+        const item = eq.background && LOJA_BACKGROUND_ITEMS.find(i => i.id === eq.background);
         if (!item || !item.colorKey) {
             box.dataset.neonActive = '';
-            return; // nenhum fundo neon equipado (ou é um emoticon pack, que não mexe no fundo) — fica limpo
+            return;
         }
-
         const classes = NEON_BG_TAILWIND_CLASSES[item.colorKey];
         if (classes && classes.length) {
             box.classList.add(...classes);
@@ -6024,32 +6098,119 @@ function applyEquippedAccessoryEffect() {
     });
 }
 
-// Ativa/desativa um acessório de vitrine (fundo ou pack de emoticons)
-// comprado na Loja. Apenas um acessório fica ativo por vez (clicar no que
-// já está ativo desativa). Persistido em profiles.equipped_accessory.
-async function lojaToggleAccessory(itemId) {
+// Adereços de Card: injeta o glifo (chapéu/peruca/óculos) num elemento
+// absoluto sobreposto exatamente acima da PFP do avatar (#avatarFrameWrap).
+function applyEquippedPropEffect(equippedCosmetics) {
+    const wrap = document.getElementById('avatarFrameWrap');
+    if (!wrap) return;
+
+    let layer = document.getElementById('avatarPropLayer');
+    if (!layer) {
+        layer = document.createElement('div');
+        layer.id = 'avatarPropLayer';
+        layer.className = 'avatar-prop-layer';
+        wrap.appendChild(layer);
+    }
+
+    const eq = equippedCosmetics || { prop: null };
+    const item = eq.prop && LOJA_PROP_ITEMS.find(i => i.id === eq.prop);
+    layer.innerHTML = item
+        ? `<span class="avatar-prop-glyph" style="filter: drop-shadow(0 0 6px ${item.accent});" title="${item.name}">${item.glyph}</span>`
+        : '';
+}
+
+// Estantes/Expositores: troca o container temático do grid de vitrine
+// (#showcaseGrid), mudando a borda/fundo de cada slot individual de card.
+function applyEquippedShelfEffect(equippedCosmetics) {
+    const grid = document.getElementById('showcaseGrid');
+    if (!grid) return;
+    grid.classList.remove('shelf-mainframe', 'shelf-neon');
+
+    const eq = equippedCosmetics || { shelf: null };
+    if (eq.shelf === 'shelf-suporte-mainframe') grid.classList.add('shelf-mainframe');
+    else if (eq.shelf === 'shelf-estante-neon') grid.classList.add('shelf-neon');
+}
+
+// Aplica os 3 efeitos de uma vez só — chamada central usada tanto ao abrir
+// um perfil (próprio ou de terceiros) quanto após equipar/ativar algo no
+// modal de relíquias.
+function applyAllEquippedEffects(equippedCosmetics) {
+    applyEquippedAccessoryEffect(equippedCosmetics);
+    applyEquippedPropEffect(equippedCosmetics);
+    applyEquippedShelfEffect(equippedCosmetics);
+}
+
+// Ativa/desativa um cosmético de slot único (fundo neon, adereço de card,
+// estante ou pack de emoticons) comprado na Loja. Apenas um item por slot
+// fica ativo por vez (clicar no que já está ativo desativa). O objeto
+// inteiro é persistido junto em profiles.equipped_cosmetics (jsonb).
+async function lojaToggleCosmeticSlot(itemId) {
     if (!currentUser || !currentUser.loggedIn) return;
     if (!Array.isArray(currentUser.cosmetics) || !currentUser.cosmetics.includes(itemId)) return;
 
-    const newValue = currentUser.equippedAccessory === itemId ? null : itemId;
-    console.log('[LOJA] Ativando acessório de vitrine:', newValue || '(nenhum)');
+    const item = LOJA_ALL_ITEMS.find(i => i.id === itemId);
+    const slot = item && cosmeticSlotForCategory(item.category);
+    if (!slot) return;
 
-    const ok = await updateProfileInSupabase(currentUser.id, { equippedAccessory: newValue });
+    if (!currentUser.equippedCosmetics) currentUser.equippedCosmetics = { background: null, prop: null, shelf: null, emoticon: null };
+    const newEquipped = { ...currentUser.equippedCosmetics };
+    newEquipped[slot] = newEquipped[slot] === itemId ? null : itemId;
+
+    console.log('[LOJA] Ativando cosmético de slot:', slot, '->', newEquipped[slot] || '(nenhum)');
+
+    const ok = await updateProfileInSupabase(currentUser.id, { equippedCosmetics: newEquipped });
     if (!ok) {
-        console.error('[LOJA] Falha ao persistir acessório de vitrine ativo.');
+        console.error('[LOJA] Falha ao persistir cosmético ativo.');
         if (typeof showCyberAlert === 'function') {
             showCyberAlert('FALHA NA TRANSAÇÃO', 'O nó central recusou a gravação do equipamento. Tenta novamente.', 'error');
         }
         return;
     }
-    currentUser.equippedAccessory = newValue;
+    currentUser.equippedCosmetics = newEquipped;
     renderEquipmentInventory(true);
     renderRelicInventoryModal();
-    applyEquippedAccessoryEffect(); // aplica/retira o glow neon na hora, sem precisar de F5
+    applyAllEquippedEffects(currentUser.equippedCosmetics); // aplica/retira o efeito na hora, sem precisar de F5
+}
+
+// ── PONTO 1 — Efeito Sonoro "Ding-Dong Cyberpunk" tocado quando a Loja é
+// aberta (não em re-renderizações internas pós-compra). Usa dois osciladores
+// em sequência via AudioContext (sem dependência de link de áudio externo,
+// que poderia cair/quebrar CORS) simulando o clássico sino de loja antiga
+// com um timbre mais robótico (onda quadrada + decaimento rápido).
+function playLojaChime() {
+    try {
+        initAudio();
+        const now = audioCtx.currentTime;
+
+        // "Ding" — nota mais aguda primeiro
+        const osc1 = audioCtx.createOscillator();
+        const gain1 = audioCtx.createGain();
+        osc1.type = 'square';
+        osc1.frequency.setValueAtTime(1046.5, now); // C6
+        gain1.gain.setValueAtTime(0.0001, now);
+        gain1.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc1.connect(gain1); gain1.connect(audioCtx.destination);
+        osc1.start(now); osc1.stop(now + 0.35);
+
+        // "Dong" — nota mais grave logo em seguida, robótica (sawtooth leve)
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(783.99, now + 0.16); // G5
+        gain2.gain.setValueAtTime(0.0001, now + 0.16);
+        gain2.gain.exponentialRampToValueAtTime(0.1, now + 0.18);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+        osc2.connect(gain2); gain2.connect(audioCtx.destination);
+        osc2.start(now + 0.16); osc2.stop(now + 0.55);
+    } catch (e) { /* AudioContext bloqueado até primeira interação — silenciosamente ignora */ }
 }
 
 // ── PONTO DE ENTRADA ──
-function renderLoja() {
+// playChime=true toca o ding-dong (só ao NAVEGAR pra Loja, ver navigateTo).
+// Re-renders internos pós-compra/equip chamam renderLoja() sem argumento,
+// então o som nunca repete a cada clique.
+function renderLoja(playChime) {
     const target = document.getElementById(LOJA_TARGET_ID);
     if (!target) {
         console.warn(`[LOJA] Elemento #${LOJA_TARGET_ID} não encontrado no DOM. Ajuste LOJA_TARGET_ID para o id da sua div de tela.`);
@@ -6058,5 +6219,6 @@ function renderLoja() {
     ensureTailwindLoaded(() => {
         target.innerHTML = lojaBuildMarkup();
         lojaSwitchTab('cosmeticos');
+        if (playChime) playLojaChime();
     });
 }
