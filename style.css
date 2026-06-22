@@ -4344,3 +4344,153 @@
         font-size: 0.72rem;
     }
 }
+/* ==========================================================
+   PATCH DE CORREÇÃO RESPONSIVA - MODO GALERIA SUCESSO TOTAL
+   ========================================================== */
+
+/* Garante comportamento limpo do menu hamburguer em telas grandes */
+.btn-hamburger-menu {
+    display: none !important;
+}
+
+@media (max-width: 480px) {
+    /* 1. Oculta os links de navegação horizontais do PC no mobile */
+    .nav-links-desktop, 
+    .header-navigation-horizontal,
+    header nav ul {
+        display: none !important;
+    }
+    
+    /* 2. Estilização Hacker do Botão Hambúrguer */
+    .btn-hamburger-menu {
+        display: block !important;
+        background: transparent !important;
+        border: 1px solid #ff0055 !important;
+        color: #ff0055 !important;
+        padding: 6px 12px !important;
+        font-size: 16px !important;
+        font-family: monospace;
+        cursor: pointer;
+        box-shadow: 0 0 8px #ff0055;
+        border-radius: 4px;
+        text-shadow: 0 0 5px #ff0055;
+    }
+
+    /* 3. Gaveta do Menu Lateral Responsivo */
+    .nav-menu-wrapper {
+        position: fixed !important;
+        top: 60px !important;
+        left: -100% !important;
+        width: 80% !important;
+        height: calc(100vh - 60px) !important;
+        background: rgba(10, 10, 12, 0.98) !important;
+        border-right: 2px solid #ff0055 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        padding: 24px !important;
+        gap: 16px !important;
+        transition: left 0.3s ease-in-out !important;
+        z-index: 9999 !important;
+        box-shadow: 10px 0 20px rgba(0, 0, 0, 0.8);
+    }
+
+    /* Gatilho disparado via JavaScript */
+    .nav-menu-wrapper.is-open {
+        left: 0 !important;
+    }
+
+    .nav-menu-wrapper button, 
+    .nav-menu-wrapper a {
+        width: 100% !important;
+        padding: 12px 16px !important;
+        text-align: left !important;
+        background: rgba(255, 255, 255, 0.02) !important;
+        border: 1px solid rgba(255, 0, 85, 0.2) !important;
+        color: #ffffff !important;
+        font-size: 14px !important;
+        font-family: monospace;
+        text-transform: uppercase;
+        border-radius: 2px;
+    }
+
+    /* 4. Alinhamento Perfeito do Grid (2 Colunas Simétricas) */
+    .vault-layout, 
+    #vaultGrid, 
+    .inventory-grid {
+        display: grid !important;
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px !important;
+        padding: 8px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    /* 5. A Moldura Híbrida do Card */
+    .card-slot {
+        width: 100% !important;
+        height: auto !important; /* Remove qualquer trava de altura de PC */
+        display: flex !important;
+        flex-direction: column !important;
+        background: #0d0d11 !important;
+        border: 1px solid rgba(0, 255, 204, 0.25) !important;
+        padding: 0 !important; /* Cola a imagem nas bordas superiores */
+        overflow: hidden !important;
+        border-radius: 4px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+
+    /* 6. Isolamento Quadrado Perfeito da Mídia */
+    .card-media-wrapper, 
+    .card-media-box {
+        width: 100% !important;
+        aspect-ratio: 1 / 1 !important; /* Garante o formato igual à galeria */
+        height: auto !important;
+        position: relative !important;
+        overflow: hidden !important;
+        background: #000000 !important;
+    }
+
+    .card-media-box img, 
+    .card-media-wrapper img,
+    .card-media-box div[style*="background"] {
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: cover !important; /* Preenche sem distorcer e sem bordinha preta */
+        object-position: center !important;
+    }
+
+    /* 7. Painel de Controle e Informações Inferiores */
+    .card-controls-panel,
+    .card-info-footer {
+        padding: 8px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 6px !important;
+        background: #0d0d11 !important;
+        flex-grow: 1 !important; /* Faz todos os rodapés se alinharem na mesma altura */
+    }
+
+    /* 8. Proteção contra Textos Longos */
+    .card-title-neon,
+    .card-slot h3,
+    .card-slot p {
+        font-size: 11px !important;
+        line-height: 1.3 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important; /* Adiciona os "..." se o nome for gigante */
+        margin: 0 !important;
+        color: #00ffcc !important;
+    }
+
+    /* 9. Compactação dos Botões de Ação */
+    .card-controls-panel button {
+        font-size: 10px !important;
+        padding: 6px !important;
+        width: 100% !important;
+        height: auto !important;
+        letter-spacing: 0.5px !important;
+        text-transform: uppercase !important;
+    }
+}
+
