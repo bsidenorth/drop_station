@@ -2503,21 +2503,70 @@ async function logoutSession() {
             showCyberAlert('🔒 ATIVO BLOQUEADO EM CUSTÓDIA NO MERCADO', 'Este card já está em custódia no mercado. Remove o anúncio primeiro.', 'error');
             return;
         }
-        const price = prompt("Insira o valor de venda em Bumps (B$):", savedAssets[index].price || 100);
-        if (price === null) return; const parsed = parseInt(price);
+        const asset = savedAssets[index];
+        const suggested = asset.price > 0 ? asset.price : (asset.rarityType === 'ancestral' ? 5000 : asset.rarityType === 'legendary' ? 1500 : asset.rarityType === 'epic' ? 500 : 100);
+
+        // Remove painel anterior se existir
+        const oldPanel = document.getElementById('inlinePricePanel');
+        if (oldPanel) oldPanel.remove();
+
+        const card = document.querySelector(`[data-vault-index="${index}"]`);
+        if (!card) return;
+
+        const panel = document.createElement('div');
+        panel.id = 'inlinePricePanel';
+        panel.className = 'inline-price-panel';
+        panel.innerHTML = `
+            <div class="ipp-title">💵 DEFINIR PREÇO DE VENDA</div>
+            <div class="ipp-asset-id">${asset.id} // ${asset.rarityType.toUpperCase()}</div>
+            <div class="ipp-presets">
+                <button class="ipp-preset-btn" data-val="50">50 B$</button>
+                <button class="ipp-preset-btn" data-val="100">100 B$</button>
+                <button class="ipp-preset-btn" data-val="250">250 B$</button>
+                <button class="ipp-preset-btn" data-val="500">500 B$</button>
+                <button class="ipp-preset-btn" data-val="1000">1K B$</button>
+                <button class="ipp-preset-btn" data-val="2500">2.5K B$</button>
+            </div>
+            <div class="ipp-custom-row">
+                <input id="ippInput" class="ipp-input" type="number" min="1" max="999999" value="${suggested}" placeholder="Ou insira valor custom...">
+                <span class="ipp-unit">B$</span>
+            </div>
+            <div class="ipp-actions">
+                <button class="ipp-confirm-btn" onclick="confirmMarketList(${index})">▶ LISTAR NO MERCADO</button>
+                <button class="ipp-cancel-btn" onclick="document.getElementById('inlinePricePanel').remove()">CANCELAR</button>
+            </div>
+        `;
+
+        // Presets clicáveis atualizam o input
+        panel.querySelectorAll('.ipp-preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                panel.querySelectorAll('.ipp-preset-btn').forEach(b => b.classList.remove('ipp-preset-active'));
+                btn.classList.add('ipp-preset-active');
+                document.getElementById('ippInput').value = btn.dataset.val;
+            });
+        });
+
+        card.appendChild(panel);
+        setTimeout(() => panel.classList.add('ipp-visible'), 10);
+        document.getElementById('ippInput').focus();
+    }
+
+    async function confirmMarketList(index) {
+        const input = document.getElementById('ippInput');
+        if (!input) return;
+        const parsed = parseInt(input.value);
         if (isNaN(parsed) || parsed <= 0) { showCyberAlert('ERRO DE INPUT', 'Valor de venda inválido. Insere um número positivo.', 'error'); return; }
 
-        // listCardOnMarket persiste no Supabase (cards.for_sale / is_listed / price)
-        // e já atualiza savedAssets[index] em memória (mesma referência de objeto).
+        const panel = document.getElementById('inlinePricePanel');
+        if (panel) panel.remove();
+
         const ok = await listCardOnMarket(savedAssets[index], parsed);
         if (!ok) {
             showCyberAlert('ERRO_DE_REDE', 'Falha ao listar o card no mercado. Tenta novamente.', 'error');
             return;
         }
 
-        // Ledger (Ponto 4)
         pushLedger(`${currentUser.username} listou o card ${savedAssets[index].id} [${savedAssets[index].rarityNameEN}] por ${parsed} B$`);
-
         renderVaultGrid();
     }
 
@@ -5495,28 +5544,35 @@ async function claimAssetLogic() {
 // =========================================================
 async function toggleExposeAsset(index) {
     const asset = savedAssets[index];
+    if (!asset) { console.warn('toggleExposeAsset: index inválido', index); return; }
     if (asset.isListed) {
         playSynthSound('shatter');
         showCyberAlert('🔒 ATIVO BLOQUEADO EM CUSTÓDIA NO MERCADO', 'Este card está listado no mercado e está em custódia. Remove o anúncio primeiro para alterar o seu estado.', 'error');
         return;
     }
+    if (!asset._dbId) {
+        showCyberAlert('ERRO DE SINCRONIZAÇÃO', 'Este card ainda não foi sincronizado com o servidor. Recarregue a página.', 'error');
+        return;
+    }
+
     const novoEstado = !asset.exposed;
     savedAssets[index].exposed = novoEstado;
+    renderVaultGrid(); // feedback imediato na UI
 
     const ok = await updateCardInSupabase(asset, { exposed: novoEstado });
     if (!ok) {
-        // rollback do estado local se a escrita remota falhar
-        savedAssets[index].exposed = !novoEstado;
-        showCyberAlert('ERRO_DE_REDE:', 'Não foi possível atualizar a vitrine. Tenta novamente.', 'error');
+        savedAssets[index].exposed = !novoEstado; // rollback
+        showCyberAlert('ERRO_DE_REDE', 'Não foi possível atualizar a vitrine. Tenta novamente.', 'error');
         renderVaultGrid();
         return;
     }
 
-    // Nota: não há mais sincronia manual com um array local de mercado —
-    // a visibilidade no mercado é 100% derivada de cards.for_sale/is_listed
-    // no Supabase, lida sob demanda por loadMarketFromSupabase() sempre que
-    // a tela de mercado é aberta.
-    renderVaultGrid();
+    playSynthSound(novoEstado ? 'success' : 'click');
+    showCyberAlert(
+        novoEstado ? '⭐ EXPOSTO NA VITRINE' : '📁 RETIRADO DA VITRINE',
+        novoEstado ? `Card <b>${asset.id}</b> agora aparece na sua vitrine pública.` : `Card <b>${asset.id}</b> retirado da vitrine.`,
+        'success'
+    );
 }
 // =========================================================
 // DROP STATION — PARTE 3/4: INVENTÁRIO / ITENS (SUPABASE)
@@ -6517,20 +6573,20 @@ function renderRelicInventoryModal() {
 
         slot.innerHTML = `
             <div class="relic-slot-header">
-                <span class="relic-slot-type" style="color:\${accentColor};">\${rarityLabel} // \${cat.toUpperCase()}</span>
-                \${isEquipped ? '<span class="relic-slot-equipped-badge">EQUIPADO</span>' : ''}
+                <span class="relic-slot-type" style="color:${accentColor};">${rarityLabel} // ${cat.toUpperCase()}</span>
+                ${isEquipped ? '<span class="relic-slot-equipped-badge">EQUIPADO</span>' : ''}
             </div>
-            <div class="relic-slot-icon" style="color:\${accentColor};">\${item.rarity === 'ancestral' ? '☠' : item.rarity === 'lendario' ? '◈' : '⬡'}</div>
-            <div class="relic-slot-name" style="color:\${accentColor};">\${item.name.toUpperCase()}</div>
-            <div class="relic-slot-desc">\${item.tagline || ''}</div>
+            <div class="relic-slot-icon" style="color:${accentColor};">${item.rarity === 'ancestral' ? '☠' : item.rarity === 'lendario' ? '◈' : '⬡'}</div>
+            <div class="relic-slot-name" style="color:${accentColor};">${item.name.toUpperCase()}</div>
+            <div class="relic-slot-desc">${item.tagline || ''}</div>
             <div class="relic-slot-data-lines">
-                <div class="relic-data-line"><span class="rdl-key">CATEGORIA</span><span class="rdl-val">\${cat.toUpperCase()}</span></div>
-                <div class="relic-data-line"><span class="rdl-key">SLOT</span><span class="rdl-val">\${slotKey ? slotKey.toUpperCase() : 'MOLDURA'}</span></div>
-                <div class="relic-data-line"><span class="rdl-key">STATUS</span><span class="rdl-val" style="color:\${isEquipped ? '#00ff66' : '#888899'}">\${isEquipped ? 'ATIVO' : 'INATIVO'}</span></div>
+                <div class="relic-data-line"><span class="rdl-key">CATEGORIA</span><span class="rdl-val">${cat.toUpperCase()}</span></div>
+                <div class="relic-data-line"><span class="rdl-key">SLOT</span><span class="rdl-val">${slotKey ? slotKey.toUpperCase() : 'MOLDURA'}</span></div>
+                <div class="relic-data-line"><span class="rdl-key">STATUS</span><span class="rdl-val" style="color:${isEquipped ? '#00ff66' : '#888899'}">${isEquipped ? 'ATIVO' : 'INATIVO'}</span></div>
             </div>
-            <button class="btn-action relic-equip-btn" style="border-color:\${accentColor};color:\${accentColor};margin-top:auto;"
-                onclick="lojaEquipItem('\${item.id}','\${item.category}')">
-                \${isEquipped ? '✓ DESATIVAR' : '▶ EQUIPAR'}
+            <button class="btn-action relic-equip-btn" style="border-color:${accentColor};color:${accentColor};margin-top:auto;"
+                onclick="lojaEquipItem('${item.id}','${item.category}')">
+                ${isEquipped ? '✓ DESATIVAR' : '▶ EQUIPAR'}
             </button>
         `;
         grid.appendChild(slot);
@@ -6544,16 +6600,16 @@ function renderRelicInventoryModal() {
         slot.className = 'relic-slot relic-slot-item';
         slot.innerHTML = `
             <div class="relic-slot-header">
-                <span class="relic-slot-type" style="color:#ffaa00;">\${tpl.category}</span>
-                <span class="relic-slot-qty">x\${item.qty || 1}</span>
+                <span class="relic-slot-type" style="color:#ffaa00;">${tpl.category}</span>
+                <span class="relic-slot-qty">x${item.qty || 1}</span>
             </div>
             <div class="relic-slot-icon">⚗</div>
-            <div class="relic-slot-name">\${tpl.name.toUpperCase()}</div>
-            <div class="relic-slot-desc">\${tpl.nameEN}</div>
+            <div class="relic-slot-name">${tpl.name.toUpperCase()}</div>
+            <div class="relic-slot-desc">${tpl.nameEN}</div>
             <div class="relic-slot-data-lines">
-                <div class="relic-data-line"><span class="rdl-key">EFEITO</span><span class="rdl-val">\${tpl.effect.type}</span></div>
+                <div class="relic-data-line"><span class="rdl-key">EFEITO</span><span class="rdl-val">${tpl.effect.type}</span></div>
                 <div class="relic-data-line"><span class="rdl-key">USO</span><span class="rdl-val">FUSÃO / ALQUIMIA</span></div>
-                <div class="relic-data-line"><span class="rdl-key">QTD</span><span class="rdl-val" style="color:#ffaa00;">\${item.qty || 1}</span></div>
+                <div class="relic-data-line"><span class="rdl-key">QTD</span><span class="rdl-val" style="color:#ffaa00;">${item.qty || 1}</span></div>
             </div>
         `;
         grid.appendChild(slot);
@@ -6864,31 +6920,62 @@ function openAirBroadcastModal() {
         showCyberAlert('ACESSO NEGADO', 'Você precisa estar conectado pra enviar um broadcast aéreo.', 'error');
         return;
     }
-    const modal = document.getElementById('airBroadcastModal');
-    const balanceEl = document.getElementById('airBroadcastBalance');
-    const input = document.getElementById('airBroadcastInput');
-    const counter = document.getElementById('airBroadcastCount');
-    if (balanceEl) balanceEl.innerText = `${currentUser.bumps.toLocaleString('pt-BR')} B$`;
-    if (input) { input.value = ''; }
-    if (counter) counter.innerText = '0';
-    if (input) {
-        input.oninput = () => { if (counter) counter.innerText = String(input.value.length); };
+    // Abre o painel de broadcast inline no chat, sem modal separado
+    const existing = document.getElementById('inlineBroadcastPanel');
+    if (existing) { existing.remove(); return; } // toggle: clicou de novo = fecha
+
+    const panel = document.createElement('div');
+    panel.id = 'inlineBroadcastPanel';
+    panel.className = 'inline-broadcast-panel';
+    panel.innerHTML = `
+        <div class="ibp-header">
+            <span class="ibp-title">📡 BROADCAST AÉREO // REDE INTEIRA</span>
+            <button class="ibp-close" onclick="document.getElementById('inlineBroadcastPanel').remove()">✕</button>
+        </div>
+        <p class="ibp-desc">Sua mensagem sobrevoa TODAS as sessões ativas puxada por um OVNI.<br>Custo fixo: <b style="color:#00ff66;">500 B$</b> &nbsp;|&nbsp; Saldo: <b id="ibpBalance" style="color:#ffaa00;">${(currentUser.bumps||0).toLocaleString('pt-BR')} B$</b></p>
+        <textarea id="ibpInput" class="ibp-textarea" maxlength="120" rows="2" placeholder="Escreva a mensagem que vai sobrevoar a rede..."></textarea>
+        <div class="ibp-footer">
+            <span class="ibp-counter"><span id="ibpCount">0</span>/120</span>
+            <button class="ibp-send-btn" onclick="sendAirBroadcast()">⚡ ENVIAR // -500 B$</button>
+        </div>
+    `;
+    panel.querySelector('#ibpInput').addEventListener('input', (e) => {
+        const c = document.getElementById('ibpCount');
+        if (c) c.textContent = e.target.value.length;
+    });
+
+    // Injeta logo acima do input do chat
+    const chatInput = document.querySelector('#globalChatPanel .global-chat-input-row') ||
+                      document.querySelector('#globalChatPanel .gc-input-row') ||
+                      document.querySelector('#globalChatPanel .chat-input-area');
+    if (chatInput) {
+        chatInput.parentNode.insertBefore(panel, chatInput);
+    } else {
+        document.getElementById('globalChatPanel').appendChild(panel);
     }
-    if (modal) modal.style.display = 'flex';
+
+    // Garante que o chat está aberto
+    const chatPanel = document.getElementById('globalChatPanel');
+    if (chatPanel && !chatPanel.classList.contains('open')) toggleGlobalChat();
 }
+
 function closeAirBroadcastModal() {
+    const panel = document.getElementById('inlineBroadcastPanel');
+    if (panel) panel.remove();
+    // Compatibilidade com o modal legado (caso ainda exista no DOM)
     const modal = document.getElementById('airBroadcastModal');
     if (modal) modal.style.display = 'none';
 }
 
 async function sendAirBroadcast() {
-    const input = document.getElementById('airBroadcastInput');
+    // Suporta tanto o painel inline quanto o modal legado
+    const input = document.getElementById('ibpInput') || document.getElementById('airBroadcastInput');
     const text = input ? input.value.trim() : '';
     if (!text) { showCyberAlert('MENSAGEM VAZIA', 'Escreva algo pra rede ver no céu.', 'warn'); return; }
     if (text.length > 120) { showCyberAlert('MENSAGEM MUITO LONGA', 'Máximo de 120 caracteres.', 'warn'); return; }
 
     const newBalance = await debitBumpsAtomic(AIR_BROADCAST_COST);
-    if (newBalance === null) return; // alerta já mostrado por debitBumpsAtomic
+    if (newBalance === null) return;
 
     try {
         const { error } = await sb.from('broadcasts_aereos').insert({
@@ -6908,9 +6995,6 @@ async function sendAirBroadcast() {
 
     closeAirBroadcastModal();
     showCyberAlert('BROADCAST ENVIADO', `Sua mensagem está sobrevoando a rede inteira agora.<br>Débito: <b style="color:#00ff66;">-${AIR_BROADCAST_COST} B$</b> &nbsp;|&nbsp; Saldo atual: <b>${currentUser.bumps} B$</b>`, 'success');
-    // A própria animação (pra TODO mundo, inclusive quem enviou) acontece
-    // via Realtime em initAirBroadcastRealtime() — não precisa disparar
-    // manualmente aqui, evitando duplicar o OVNI nesta aba.
 }
 
 // Calcula, em milissegundos, quanto tempo depois do spawn a FRENTE do OVNI
