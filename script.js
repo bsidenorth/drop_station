@@ -7471,9 +7471,7 @@ function openAirBroadcastModal() {
     });
 
     // Injeta logo acima do input do chat
-    const chatInput = document.querySelector('#globalChatPanel .global-chat-input-row') ||
-                      document.querySelector('#globalChatPanel .gc-input-row') ||
-                      document.querySelector('#globalChatPanel .chat-input-area');
+    const chatInput = document.querySelector('#globalChatPanel .global-chat-input-row');
     if (chatInput) {
         chatInput.parentNode.insertBefore(panel, chatInput);
     } else {
