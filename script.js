@@ -1885,7 +1885,8 @@ async function logoutSession() {
         if (!list) return;
 
         // Busca todos os perfis (substitui loadRegistry()) + contagem de lendários por usuário
-        const { data: profilesData, error: profErr } = await sb.from('profiles').select('id, username, bumps, fusion_count');
+        // Também busca avatar e avatar_frame pra renderizar a moldura neon de cada operador no Placar.
+        const { data: profilesData, error: profErr } = await sb.from('profiles').select('id, username, bumps, fusion_count, avatar, avatar_frame');
         if (profErr) { console.error('renderLeaderboard (profiles):', profErr.message); list.innerHTML = '<div class="empty-vault-notice">FALHA AO CARREGAR PLACAR.</div>'; return; }
 
         const { data: legendaryRows, error: cardsErr } = await sb.from('cards').select('id_usuario').eq('rarity_type', 'legendary');
@@ -1894,7 +1895,11 @@ async function logoutSession() {
         (legendaryRows || []).forEach(r => { legendaryCounts[r.id_usuario] = (legendaryCounts[r.id_usuario] || 0) + 1; });
 
         const rows = (profilesData || []).map(u => ({
-            username: u.username, bumps: u.bumps || 0, legendaryCount: legendaryCounts[u.id] || 0
+            username: u.username,
+            bumps: u.bumps || 0,
+            legendaryCount: legendaryCounts[u.id] || 0,
+            avatar: u.avatar || 'https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg',
+            avatarFrame: u.avatar_frame || FRAME_DEFAULT_ID
         }));
 
         rows.sort((a, b) => leaderboardMode === 'bumps' ? (b.bumps - a.bumps) : (b.legendaryCount - a.legendaryCount));
@@ -1905,11 +1910,27 @@ async function logoutSession() {
             return;
         }
 
+        // Recompensas sazonais (simuladas, sem valor real) atreladas a cada posição do Placar Global.
+        const SEASON_REWARDS = [
+            '+500 B$ + Caixa Lendária',
+            '+300 B$ + Caixa Épica',
+            '+150 B$ + Caixa Épica',
+            '+75 B$ + Caixa Comum',
+            '+50 B$ + Caixa Comum'
+        ];
+
         list.innerHTML = top5.map((r, i) => {
             const medal = ['🥇','🥈','🥉','🎖️','🎖️'][i] || '▫️';
             const value = leaderboardMode === 'bumps' ? `${r.bumps} B$` : `${r.legendaryCount} LENDÁRIOS`;
             const isMe = r.username === currentUser.username ? ' style="color:#00ffff;"' : '';
-            return `<div class="leaderboard-row"${isMe}><span>${medal} #${i+1}</span><span>${r.username}</span><span>${value}</span></div>`;
+            const reward = SEASON_REWARDS[i] || '—';
+            return `<div class="leaderboard-row"${isMe}>
+                <span>${medal} #${i+1}</span>
+                <span class="avatar-container ${r.avatarFrame}"><span class="cyber-frame"><img src="${r.avatar}" draggable="false" loading="lazy"></span></span>
+                <span>${r.username}</span>
+                <span>${value}</span>
+                <span class="lb-rewards">🎁 ${reward}</span>
+            </div>`;
         }).join('');
     }
 
@@ -3010,7 +3031,7 @@ async function logoutSession() {
 
                 const tradeBtn = document.createElement('button');
                 tradeBtn.className = 'btn-action'; tradeBtn.style.borderColor = '#ff00ff';
-                tradeBtn.innerText = "PROPOR TROCA / CHAT";
+                tradeBtn.innerText = "FAZER PROPOSTA";
                 tradeBtn.addEventListener('click', () => initiateTradeContact(a.creator, a.id));
 
                 actionsZone.appendChild(buyBtn);
@@ -3195,7 +3216,7 @@ async function logoutSession() {
         const zone = document.getElementById('inspectActionZone'); zone.innerHTML = '';
         if (cardAsset.registered && ownerName !== currentUser.username && !cardAsset.isPurged) {
             const btn = document.createElement('button'); btn.className = 'btn-action'; btn.style.borderColor = '#ff00ff';
-            btn.innerText = `💬 ABRIR NEGOCIAÇÃO COM ${ownerName}`;
+            btn.innerText = `📝 FAZER PROPOSTA PARA ${ownerName}`;
             btn.onclick = () => { closeInspectModal(); initiateTradeContact(ownerName, cardAsset.id); };
             zone.appendChild(btn);
         }
@@ -6848,12 +6869,21 @@ function lojaBuildMarkup() {
         </div>
 
         <div id="lojaTabCosmeticos" class="relative z-10">
-            ${lojaCategorySection('MOLDURAS', LOJA_FRAME_ITEMS)}
-            ${lojaCategorySection('MOLDURAS DE SUB-REDE', LOJA_SUBNET_FRAME_ITEMS)}
-            ${lojaCategorySection('LUZ DE FUNDO', LOJA_BACKGROUND_ITEMS)}
-            ${lojaCategorySection('ADEREÇOS DE CARD', LOJA_PROP_ITEMS)}
-            ${lojaCategorySection('ESTANTES E EXPOSITORES', LOJA_SHELF_ITEMS)}
-            ${lojaCategorySection('EMOTICONS', LOJA_EMOTICON_ITEMS)}
+            <div class="loja-filter-bar">
+                <button class="loja-filter-btn active" data-loja-cat="todos" onclick="lojaFilterCategory('todos')">TODOS</button>
+                <button class="loja-filter-btn" data-loja-cat="molduras" onclick="lojaFilterCategory('molduras')">MOLDURAS</button>
+                <button class="loja-filter-btn" data-loja-cat="subnet" onclick="lojaFilterCategory('subnet')">MOLDURAS SUB-REDE</button>
+                <button class="loja-filter-btn" data-loja-cat="fundo" onclick="lojaFilterCategory('fundo')">LUZ DE FUNDO</button>
+                <button class="loja-filter-btn" data-loja-cat="adereco" onclick="lojaFilterCategory('adereco')">ADEREÇOS</button>
+                <button class="loja-filter-btn" data-loja-cat="estante" onclick="lojaFilterCategory('estante')">ESTANTES</button>
+                <button class="loja-filter-btn" data-loja-cat="emoticon" onclick="lojaFilterCategory('emoticon')">EMOTICONS</button>
+            </div>
+            <div id="lojaCatMolduras" data-loja-cat="molduras">${lojaCategorySection('MOLDURAS', LOJA_FRAME_ITEMS)}</div>
+            <div id="lojaCatSubnet" data-loja-cat="subnet">${lojaCategorySection('MOLDURAS DE SUB-REDE', LOJA_SUBNET_FRAME_ITEMS)}</div>
+            <div id="lojaCatFundo" data-loja-cat="fundo">${lojaCategorySection('LUZ DE FUNDO', LOJA_BACKGROUND_ITEMS)}</div>
+            <div id="lojaCatAdereco" data-loja-cat="adereco">${lojaCategorySection('ADEREÇOS DE CARD', LOJA_PROP_ITEMS)}</div>
+            <div id="lojaCatEstante" data-loja-cat="estante">${lojaCategorySection('ESTANTES E EXPOSITORES', LOJA_SHELF_ITEMS)}</div>
+            <div id="lojaCatEmoticon" data-loja-cat="emoticon">${lojaCategorySection('EMOTICONS', LOJA_EMOTICON_ITEMS)}</div>
         </div>
 
         <div id="lojaTabFragmentos" class="hidden relative z-10">
@@ -6962,6 +6992,28 @@ async function redeemFragment(type) {
     // Re-renderiza aba de fragmentos
     const fragTab = document.getElementById('lojaTabFragmentos');
     if (fragTab) fragTab.innerHTML = lojaFragmentosTabMarkup();
+}
+
+// ── FILTRO HORIZONTAL DE CATEGORIAS DA ABA COSMÉTICOS ──
+// Alterna visibilidade das seções de categoria dentro de #lojaTabCosmeticos
+// sem afetar as abas Contratos/Fragmentos nem o restante do markup da Loja.
+function lojaFilterCategory(cat) {
+    const map = {
+        molduras: 'lojaCatMolduras',
+        subnet: 'lojaCatSubnet',
+        fundo: 'lojaCatFundo',
+        adereco: 'lojaCatAdereco',
+        estante: 'lojaCatEstante',
+        emoticon: 'lojaCatEmoticon'
+    };
+    document.querySelectorAll('.loja-filter-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.lojaCat === cat);
+    });
+    Object.entries(map).forEach(([key, id]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = (cat === 'todos' || cat === key) ? '' : 'none';
+    });
 }
 
 function lojaSwitchTab(tab) {
@@ -7380,7 +7432,7 @@ function speakZrkLine(forcedText) {
 
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = (typeof currentLang !== 'undefined' && currentLang === 'EN') ? 'en-US' : 'pt-BR';
+    u.lang = 'pt-BR'; // Voz da Loja fixa em PT-BR, independente do toggle global de idioma.
     u.rate = 1.15;   // levemente acelerado — cadência "nervosa" de hacker
     u.pitch = 0.35;  // bem grave — timbre alienígena/distorcido
     u.volume = 0.85;
