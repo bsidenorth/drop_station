@@ -23,7 +23,7 @@
     </div>
 
     <header>
-        <h5 id="appLogo" onclick="navigateTo('engine')">DR0P_STATION</h5>
+        <h5 id="appLogo" onclick="navigateTo('engine')">dr0p_station</h5>
 
         <div class="header-right">
             <!-- [ESCOPO 7] Busca sutil de operadores pelo @username -->
@@ -37,7 +37,7 @@
             <span class="overload-indicator" id="overloadIndicator" style="display:none;">⚠️ SOBRECARGA NA REDE</span>
 
             <button class="audio-toggle" id="audioToggleBtn" onclick="toggleBackgroundAudio()" title="MÚSICA BGM">
-                <span id="audioLabel">MUSIC</span>
+                <span id="audioLabel">MÚSICA</span>
                 <div class="switch-track"><div class="switch-thumb"></div></div>
             </button>
 
@@ -198,7 +198,7 @@
                     <div class="ticket-wrapper ticket-premium-gold" id="btnPremium" onclick="executeHardwareRoll(true)">
                         <div class="ticket-main">
                             <div class="ticket-title">PREMIUM_DROP_PASS</div>
-                            <div class="ticket-sub" data-i18n="premium-sub">100% SECURE // GARANTIA DE COMPILAÇÃO</div>
+                            <div class="ticket-sub" data-i18n="premium-sub">100% SEGURO // GARANTIA DE COMPILAÇÃO</div>
                         </div>
                         <div class="ticket-stub">
                             <div class="ticket-cost">50 BUMPS</div>
@@ -265,12 +265,14 @@
                     <button class="auth-tab-btn active" id="tab-login" onclick="switchAuthMode('login')">Conectar</button>
                     <button class="auth-tab-btn" id="tab-register" onclick="switchAuthMode('register')">Registrar Nó</button>
                 </div>
-                <h2 id="authTitle">SINCRO_CONTA</h2>
+                <h2 id="authTitle">ENTRAR NA REDE</h2>
                 <div class="auth-subtitle" id="authSubtitle">Acessar terminal seguro do dr0p_station.</div>
                 <div class="auth-error" id="authErrorMsg">Chave inválida ou usuário não encontrado.</div>
                 <form onsubmit="handleAuthSubmit(event)">
                     <div class="auth-form-group">
-                        <label>@USERNAME / ALIAS NETWORK</label>
+                        <label>@USERNAME
+                        
+        </label>
                         <input type="text" id="authUsername" class="auth-input" required placeholder="cyber_punk99" autocomplete="username">
                     </div>
                     <div class="auth-form-group register-only" id="authEmailGroup" style="display:none;">
@@ -420,7 +422,7 @@
                     </div>
                     <p style="font-size:0.6rem; color:#888899; margin-bottom:14px;" id="alchDesc">Seleciona 2 cards do cofre para fundir. Os originais serão <b style="color:#ff0044">DESTRUÍDOS</b>. Resultado garantido mas raridade é probabilística.</p>
                     <div class="alchemy-gallery-wrap">
-                        <span class="alchemy-gallery-label">▶ CLIQUE PARA SELECIONAR CARD_ALPHA (rosa) e CARD_BETA (ciano)</span>
+                        <span class="alchemy-gallery-label">▶ CLIQUE PARA SELECIONAR CARD_ALPHA  e CARD_BETA </span>
                         <div class="alchemy-gallery-grid" id="alchGalleryGrid"></div>
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 0;" id="alchSlotContainer">
@@ -494,7 +496,7 @@
 
             <!-- LEDGER DE TRANSAÇÕES — [ESCOPO 4] maior, fontes maiores, avatares -->
             <div id="marketLedgerBox" class="market-ledger-expanded" style="display:none;">
-                <div class="ledger-header">> LEDGER_FEED // ÚLTIMAS TRANSAÇÕES</div>
+                <div class="ledger-header">> // ÚLTIMAS TRANSAÇÕES</div>
                 <div id="marketLedgerList" class="market-ledger-list"></div>
             </div>
 
@@ -517,7 +519,7 @@
     <div id="screen-messages" class="spa-screen">
         <div class="vault-layout">
             <div class="vault-header">
-                <h2 style="color: #ff00ff;" data-i18n="messages-title">INBOX // DIALOGOS_CRIPTOGRAFADOS</h2>
+                <h2 style="color: #ff00ff;" data-i18n="messages-title"> CAIXA DE MENSAGENS  // PROPOSTA_MERCADO</h2>
                 <p>Negociações diretas de mercado, propostas de figurinhas e contrapropostas de ativos.</p>
             </div>
             <div id="offersContainer" class="offers-container"></div>
@@ -584,9 +586,9 @@
             </div>
             <div class="filter-bar" id="leaderboardModeBar" style="margin-bottom:6px;">
                 <button class="filter-btn active" data-mode="bumps" onclick="setLeaderboardMode('bumps')">POR SALDO (B$)</button>
-                <button class="filter-btn" data-mode="powerscore" onclick="setLeaderboardMode('powerscore')">POR POWER SCORE</button>
+                <button class="filter-btn" data-mode="powerscore" onclick="setLeaderboardMode('powerscore')">POR SCORE</button>
             </div>
-            <p style="font-size:0.5rem; color:#666688; letter-spacing:0.5px; margin-bottom:15px;">⚡ <b style="color:#ff00ff;">POWER SCORE</b> = soma ponderada do cofre · COMUM <b style="color:#aaaaaa;">10</b> · ÉPICO <b style="color:#ffaa00;">50</b> · LENDÁRIO <b style="color:#00ffff;">150</b> · ANCESTRAL <b style="color:#ff007f;">500</b></p>
+            <p style="font-size:0.5rem; color:#666688; letter-spacing:0.5px; margin-bottom:15px;">⚡ <b style="color:#ff00ff;">SCORE</b> = soma ponderada do cofre · COMUM <b style="color:#aaaaaa;">10</b> · ÉPICO <b style="color:#ffaa00;">50</b> · LENDÁRIO <b style="color:#00ffff;">150</b> · ANCESTRAL <b style="color:#ff007f;">500</b></p>
             <div id="leaderboardList" class="leaderboard-list"></div>
         </div>
     </div>
