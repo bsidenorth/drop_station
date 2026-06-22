@@ -1396,7 +1396,42 @@ async function logoutSession() {
         }
         if (screenId === 'contracts') renderContractsScreen();
         if (screenId === 'loja') renderLoja(true);
+
+        closeMobileNavMenu();
     }
+
+    // ── MENU HAMBÚRGUER MOBILE ──────────────────────────────────────────
+    // Alterna o painel de navegação no mobile (.nav-menu-wrapper.is-open).
+    // No desktop o botão fica oculto via CSS e o menu permanece sempre
+    // visível em modo horizontal — esta função só tem efeito visual abaixo
+    // do breakpoint de 480px.
+    function toggleMobileNavMenu() {
+        const wrapper = document.getElementById('navMenuWrapper');
+        const btn = document.getElementById('btnHamburgerMenu');
+        if (!wrapper || !btn) return;
+        const isOpen = wrapper.classList.toggle('is-open');
+        btn.classList.toggle('is-active', isOpen);
+        btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    }
+
+    function closeMobileNavMenu() {
+        const wrapper = document.getElementById('navMenuWrapper');
+        const btn = document.getElementById('btnHamburgerMenu');
+        if (!wrapper || !btn) return;
+        wrapper.classList.remove('is-open');
+        btn.classList.remove('is-active');
+        btn.setAttribute('aria-expanded', 'false');
+    }
+
+    // Fecha o menu mobile ao clicar/tocar fora dele
+    document.addEventListener('click', (e) => {
+        const wrapper = document.getElementById('navMenuWrapper');
+        const btn = document.getElementById('btnHamburgerMenu');
+        if (!wrapper || !btn) return;
+        if (!wrapper.classList.contains('is-open')) return;
+        if (wrapper.contains(e.target) || btn.contains(e.target)) return;
+        closeMobileNavMenu();
+    });
 
     function handleProfileNavClick() {
         if (!currentUser.loggedIn) {
