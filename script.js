@@ -242,6 +242,10 @@ function applyProfileToCurrentUser(profile) {
     const contractsBtn = document.getElementById('navContractsBtn'); if (contractsBtn) contractsBtn.style.display = 'flex';
     const lojaBtn = document.getElementById('navLojaBtn'); if (lojaBtn) lojaBtn.style.display = 'flex';
     const broadcastBtn = document.getElementById('navBroadcastBtn'); if (broadcastBtn) broadcastBtn.style.display = 'flex';
+    const walletBtn = document.getElementById('navWalletBtn'); if (walletBtn) { walletBtn.style.display = 'flex'; }
+    const walletBadge = document.getElementById('wallet-balance-badge'); if (walletBadge) walletBadge.innerText = `${currentUser.bumps} B$`;
+    // [ESCOPO 3] Broadcast btn movido para dentro do chat — gcBroadcastBtn
+    const gcBroadcastBtn = document.getElementById('gcBroadcastBtn'); if (gcBroadcastBtn) gcBroadcastBtn.style.display = 'flex';
 }
 
 function resetCurrentUserToAnon() {
@@ -262,6 +266,8 @@ function resetCurrentUserToAnon() {
     const cBtn = document.getElementById('navContractsBtn'); if (cBtn) cBtn.style.display = 'none';
     const lojaBtn = document.getElementById('navLojaBtn'); if (lojaBtn) lojaBtn.style.display = 'none';
     const broadcastBtn = document.getElementById('navBroadcastBtn'); if (broadcastBtn) broadcastBtn.style.display = 'none';
+    const walletBtn2 = document.getElementById('navWalletBtn'); if (walletBtn2) walletBtn2.style.display = 'none';
+    const gcBroadcastBtn2 = document.getElementById('gcBroadcastBtn'); if (gcBroadcastBtn2) gcBroadcastBtn2.style.display = 'none';
 }
 
 // =========================================================
@@ -698,10 +704,11 @@ async function logoutSession() {
         const ledger = loadLedger();
         if (ledger.length === 0) { box.style.display = 'none'; stopLedgerAutoScroll(); return; }
         box.style.display = 'block';
-        const last5 = ledger.slice(0, 5);
-        list.innerHTML = last5.map((e, i) =>
-            `<div class="ledger-entry" style="animation-delay:${i * 0.12}s; padding:3px 0; border-bottom:1px solid #111; color:#aaa;">
-                <span style="color:#ffaa00;">[${e.ts}]</span> ${e.text}
+        const last10 = ledger.slice(0, 10);
+        list.innerHTML = last10.map((e, i) =>
+            `<div class="ledger-entry ledger-entry-expanded" style="animation-delay:${i * 0.08}s;">
+                <span class="ledger-ts">[${e.ts}]</span>
+                <span class="ledger-text">${e.text}</span>
              </div>`
         ).join('');
         startLedgerAutoScroll(list);
@@ -2456,9 +2463,12 @@ async function logoutSession() {
                 </div>
                 ${web3Badge}
                 <div class="card-actions">
-                    <button class="btn-action btn-expose" data-action="expose" data-idx="${index}">${a.exposed ? '⭐ Sair da Vitrine' : '📁 Expor na Vitrine'}</button>
-                    <button class="btn-action btn-sell"   data-action="sell"   data-idx="${index}" style="border-color:#ffaa00;">${a.forSale ? '⚡ Alterar Preço P2P' : '💵 Vender / Anunciar'}</button>
-                    <button class="btn-action btn-gift"   data-action="gift"   data-idx="${index}" style="border-color:#ff00ff;">🎁 Presentear Card</button>
+                    <button class="btn-action btn-expose" data-action="expose" data-idx="${index}">${a.exposed ? '⭐ SAIR DA VITRINE' : '📁 EXPOR NA VITRINE'}</button>
+                    ${a.forSale
+                        ? `<button class="btn-action btn-sell" data-action="unlist" data-idx="${index}" style="border-color:#ff0044;color:#ff0044;">✕ REMOVER VENDA</button>`
+                        : `<button class="btn-action btn-sell" data-action="sell" data-idx="${index}" style="border-color:${a.exposed?'#555':'#ffaa00'};color:${a.exposed?'#555':'#ffaa00'};${a.exposed?'cursor:not-allowed;opacity:0.5;':''}" ${a.exposed?'disabled title="Retire da vitrine antes de vender"':''}>💵 VENDER ATIVO</button>`
+                    }
+                    <button class="btn-action btn-gift"   data-action="gift"   data-idx="${index}" style="border-color:#ff00ff;">🎁 PRESENTEAR</button>
                     <button class="btn-action btn-dl"     data-action="download" data-idx="${index}">⬇ download asset</button>
                 </div>
             `;
@@ -2471,8 +2481,9 @@ async function logoutSession() {
                 const idx = parseInt(btn.dataset.idx, 10);
                 const action = btn.dataset.action;
                 if (action === 'expose')    toggleExposeAsset(idx);
-                else if (action === 'sell') marketListPrompt(idx);
-                else if (action === 'gift') giftAssetPrompt(idx);
+                else if (action === 'sell')   marketListPrompt(idx);
+                else if (action === 'unlist') unlistVaultCard(idx);
+                else if (action === 'gift')   giftAssetPrompt(idx);
                 else if (action === 'download') downloadVaultAsset(idx);
             });
             g.appendChild(card);
@@ -2506,6 +2517,19 @@ async function logoutSession() {
 
         renderVaultGrid();
     }
+
+    // [ESCOPO 5] Remove venda diretamente do cofre (sem prompt, 1 clique)
+    async function unlistVaultCard(index) {
+        const asset = savedAssets[index];
+        if (!asset) return;
+        const ok = await unlistCardFromMarket(asset);
+        if (!ok) { showCyberAlert('ERRO_DE_REDE', 'Falha ao remover o anúncio. Tenta novamente.', 'error'); return; }
+        asset.forSale = false; asset.isListed = false; asset.price = 0;
+        playSynthSound('success');
+        showCyberAlert('✓ ANÚNCIO REMOVIDO', `Card <b>${asset.id}</b> retirado do mercado e devolvido ao cofre.`, 'success');
+        renderVaultGrid();
+    }
+
 
     async function giftAssetPrompt(index) {
         const targetUser = prompt("Digite o @username exato do destinatário da rede (Ex: @cyber_k1ng):");
@@ -3302,25 +3326,95 @@ async function logoutSession() {
     // =========================================================
     // DOWNLOAD DO ASSET (Ponto 6)
     // =========================================================
-    function downloadVaultAsset(index) {
+    // [ESCOPO 6] Download em lote: static PNG + animated WebP simulado
+    async function downloadVaultAsset(index) {
         const asset = savedAssets[index];
         if (!asset) return;
-        // Só o dono real pode fazer download
         if (asset.creator !== currentUser.username) {
             showCyberAlert('ACESSO NEGADO', 'Apenas o dono original pode descarregar este ativo.', 'error');
             return;
         }
-        // Abre a imagem numa nova aba (dispara download se for data URI ou link)
-        const a = document.createElement('a');
-        a.href = asset.imgSrc;
-        // Se for data URI (card gerado), dispara download direto
+
+        const baseName = `dr0p_${(asset.id || '').replace('#','')}_${asset.rarityType}`;
+
+        // 1) Static PNG — download direto
+        const aStatic = document.createElement('a');
+        aStatic.href = asset.imgSrc;
         if (asset.imgSrc.startsWith('data:')) {
-            a.download = `dr0p_${asset.id.replace('#','')}_${asset.rarityType}.png`;
-            a.click();
+            aStatic.download = `${baseName}_static.png`;
+            aStatic.click();
         } else {
-            // URL externa: abre em nova aba
             window.open(asset.imgSrc, '_blank');
         }
+
+        // 2) Animated WebP — gerado via canvas GIF frame sequencing
+        // Se o asset tiver uma versão animada pré-gerada (fusão), usa direto;
+        // caso contrário, gera um WebP animado simulado a partir do canvas.
+        await new Promise(r => setTimeout(r, 350)); // pequena pausa entre downloads
+
+        try {
+            let animSrc = asset.animSrc || null;
+            if (!animSrc && asset.imgSrc.startsWith('data:')) {
+                animSrc = await _generateAnimatedWebP(asset.imgSrc, asset.rarityType);
+            }
+            if (animSrc) {
+                const aAnim = document.createElement('a');
+                aAnim.href = animSrc;
+                aAnim.download = `${baseName}_animated.webp`;
+                aAnim.click();
+            }
+        } catch(e) { console.warn('downloadVaultAsset: animated WebP skip', e); }
+    }
+
+    // Gera um WebP animado simples (2 frames com glow pulsante) a partir
+    // do dataURL estático. Usa canvas + captureStream de forma síncrona
+    // via sequência de frames desenhados — sem dependências externas.
+    async function _generateAnimatedWebP(srcDataUrl, rarityType) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const SIZE = 400;
+                const c = document.createElement('canvas');
+                c.width = SIZE; c.height = SIZE;
+                const ctx = c.getContext('2d');
+                const glowColor = rarityType === 'ancestral' ? 'rgba(255,0,127,' :
+                                  rarityType === 'legendary' ? 'rgba(0,255,255,' :
+                                  rarityType === 'epic'      ? 'rgba(255,170,0,' : 'rgba(180,180,180,';
+
+                // Tenta usar MediaRecorder para capturar canvas animado
+                if (!c.captureStream || !window.MediaRecorder) { resolve(null); return; }
+                const stream = c.captureStream(8); // 8fps
+                const chunks = [];
+                let mr;
+                try { mr = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' }); }
+                catch(e) { resolve(null); return; }
+
+                mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+                mr.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    resolve(URL.createObjectURL(blob));
+                };
+
+                mr.start();
+                let frame = 0;
+                const TOTAL_FRAMES = 16;
+                const interval = setInterval(() => {
+                    const alpha = 0.2 + 0.35 * Math.abs(Math.sin(frame * Math.PI / TOTAL_FRAMES));
+                    ctx.clearRect(0, 0, SIZE, SIZE);
+                    ctx.drawImage(img, 0, 0, SIZE, SIZE);
+                    ctx.save();
+                    ctx.shadowBlur = 30; ctx.shadowColor = glowColor + '0.8)';
+                    ctx.strokeStyle = glowColor + alpha + ')';
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(4, 4, SIZE - 8, SIZE - 8);
+                    ctx.restore();
+                    frame++;
+                    if (frame >= TOTAL_FRAMES) { clearInterval(interval); mr.stop(); }
+                }, 125);
+            };
+            img.onerror = () => resolve(null);
+            img.src = srcDataUrl;
+        });
     }
 
     // =========================================================
@@ -4322,6 +4416,25 @@ async function logoutSession() {
         const profBumpsEl = document.getElementById('profBumps');
         if (profBumpsEl) profBumpsEl.innerText = isOwner ? `${currentUser.bumps} B$` : '--- B$';
 
+        // [ESCOPO 3] Troca botão: CARREGAR (próprio) / TRANSFERIR BUMPS (terceiro)
+        const depositOrTransferBtn = document.getElementById('profDepositOrTransferBtn');
+        if (depositOrTransferBtn) {
+            if (isOwner) {
+                depositOrTransferBtn.innerText = '+ CARREGAR';
+                depositOrTransferBtn.onclick = () => openDepositModal();
+                depositOrTransferBtn.style.borderColor = '';
+                depositOrTransferBtn.style.color = '';
+            } else {
+                depositOrTransferBtn.innerText = '↗ TRANSFERIR BUMPS';
+                depositOrTransferBtn.onclick = () => {
+                    if (!currentUser.loggedIn) { showCyberAlert('ACESSO NEGADO', 'Faça login para transferir Bumps.', 'error'); return; }
+                    openTransferBumpsModal(username);
+                };
+                depositOrTransferBtn.style.borderColor = '#00ffff';
+                depositOrTransferBtn.style.color = '#00ffff';
+            }
+        }
+
         // Zona de edição só aparece para o próprio perfil
         const editZone = document.getElementById('profileEditZone');
         if (editZone) editZone.style.display = isOwner ? 'block' : 'none';
@@ -4710,6 +4823,8 @@ async function logoutSession() {
         const profBumpsEl = document.getElementById('profBumps');
         if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
         await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
+        const walletBadgeD = document.getElementById('wallet-balance-badge');
+        if (walletBadgeD) walletBadgeD.innerText = `${currentUser.bumps} B$`;
         playSynthSound('success');
         closeDepositModal();
         showCyberAlert('// INJEÇÃO DE CARGA CONCLUÍDA //', `+<b>${amount} B$</b> adicionados ao teu terminal.<br>Saldo actual: <b>${currentUser.bumps} B$</b>`, 'success');
@@ -6358,58 +6473,90 @@ function closeRelicInventoryModal() {
 }
 
 function renderRelicInventoryModal() {
+    // [ESCOPO 1] Slots visuais de hardware/artefatos cyberpunk — sem colchetes
     const grid = document.getElementById('relicInventoryGrid');
     if (!grid) return;
 
-    const owned = Array.isArray(currentUser.cosmetics) ? currentUser.cosmetics : [];
-    const ownedItems = LOJA_ALL_ITEMS.filter(i => owned.includes(i.id));
+    const inv = getUserInventory();
+    const equipped = currentUser.equippedCosmetics || {};
+    const ownedCosmetics = Array.isArray(currentUser.cosmetics) ? currentUser.cosmetics : [];
 
-    if (ownedItems.length === 0) {
-        grid.innerHTML = `<p class="equip-inv-empty">Nenhuma relíquia no inventário ainda. Visite o MERCADO_NEGRO_DO_ZRK na Loja.</p>`;
+    // Cosméticos comprados na loja (molduras, fundos, adereços, estantes, emoticons)
+    const lojaItems = LOJA_ALL_ITEMS.filter(item => ownedCosmetics.includes(item.id));
+
+    // Itens de inventário (catalisadores, núcleos, etc.)
+    const invItems = inv.filter(i => i && i.templateId && ITEMS_DB[i.templateId]);
+
+    grid.innerHTML = '';
+
+    if (lojaItems.length === 0 && invItems.length === 0) {
+        grid.innerHTML = `<div class="relic-slot relic-slot-empty">
+            <div class="relic-slot-icon">◻</div>
+            <div class="relic-slot-name">NENHUMA RELÍQUIA DETECTADA</div>
+            <div class="relic-slot-desc">Visite o MERCADO NEGRO (Spike Store) para adquirir cosméticos de ostentação.</div>
+        </div>`;
         return;
     }
 
-    grid.innerHTML = ownedItems.map(equipmentInventoryItemMarkup).join('');
+    // Renderiza cosméticos da loja como slots de hardware cyberpunk
+    lojaItems.forEach(item => {
+        const slot = document.createElement('div');
+        slot.className = 'relic-slot';
+        const cat = item.category || '';
+        const slotKey = cat === 'fundo' ? 'background' : cat === 'adereco' ? 'prop' : cat === 'estante' ? 'shelf' : cat === 'emoticon' ? 'emoticon' : null;
+        const isEquipped = slotKey
+            ? (equipped[slotKey] === item.id)
+            : (currentUser.avatarFrame === item.id);
+
+        const rarityLabel = item.rarity ? item.rarity.toUpperCase() : 'ITEM';
+        const accentColor = item.accent || '#00ffff';
+
+        slot.innerHTML = `
+            <div class="relic-slot-header">
+                <span class="relic-slot-type" style="color:\${accentColor};">\${rarityLabel} // \${cat.toUpperCase()}</span>
+                \${isEquipped ? '<span class="relic-slot-equipped-badge">EQUIPADO</span>' : ''}
+            </div>
+            <div class="relic-slot-icon" style="color:\${accentColor};">\${item.rarity === 'ancestral' ? '☠' : item.rarity === 'lendario' ? '◈' : '⬡'}</div>
+            <div class="relic-slot-name" style="color:\${accentColor};">\${item.name.toUpperCase()}</div>
+            <div class="relic-slot-desc">\${item.tagline || ''}</div>
+            <div class="relic-slot-data-lines">
+                <div class="relic-data-line"><span class="rdl-key">CATEGORIA</span><span class="rdl-val">\${cat.toUpperCase()}</span></div>
+                <div class="relic-data-line"><span class="rdl-key">SLOT</span><span class="rdl-val">\${slotKey ? slotKey.toUpperCase() : 'MOLDURA'}</span></div>
+                <div class="relic-data-line"><span class="rdl-key">STATUS</span><span class="rdl-val" style="color:\${isEquipped ? '#00ff66' : '#888899'}">\${isEquipped ? 'ATIVO' : 'INATIVO'}</span></div>
+            </div>
+            <button class="btn-action relic-equip-btn" style="border-color:\${accentColor};color:\${accentColor};margin-top:auto;"
+                onclick="lojaEquipItem('\${item.id}','\${item.category}')">
+                \${isEquipped ? '✓ DESATIVAR' : '▶ EQUIPAR'}
+            </button>
+        `;
+        grid.appendChild(slot);
+    });
+
+    // Renderiza itens de inventário de fusão como slots secundários
+    invItems.forEach(item => {
+        const tpl = ITEMS_DB[item.templateId];
+        if (!tpl) return;
+        const slot = document.createElement('div');
+        slot.className = 'relic-slot relic-slot-item';
+        slot.innerHTML = `
+            <div class="relic-slot-header">
+                <span class="relic-slot-type" style="color:#ffaa00;">\${tpl.category}</span>
+                <span class="relic-slot-qty">x\${item.qty || 1}</span>
+            </div>
+            <div class="relic-slot-icon">⚗</div>
+            <div class="relic-slot-name">\${tpl.name.toUpperCase()}</div>
+            <div class="relic-slot-desc">\${tpl.nameEN}</div>
+            <div class="relic-slot-data-lines">
+                <div class="relic-data-line"><span class="rdl-key">EFEITO</span><span class="rdl-val">\${tpl.effect.type}</span></div>
+                <div class="relic-data-line"><span class="rdl-key">USO</span><span class="rdl-val">FUSÃO / ALQUIMIA</span></div>
+                <div class="relic-data-line"><span class="rdl-key">QTD</span><span class="rdl-val" style="color:#ffaa00;">\${item.qty || 1}</span></div>
+            </div>
+        `;
+        grid.appendChild(slot);
+    });
 }
 
 
-const EQUIPMENT_INVENTORY_TARGET_ID = 'equipmentInventoryZone';
-
-function lojaCategoryLabel(category) {
-    if (category === 'moldura') return 'MOLDURA';
-    if (category === 'fundo') return 'LUZ DE FUNDO';
-    if (category === 'adereco') return 'ADEREÇO DE CARD';
-    if (category === 'estante') return 'ESTANTE/EXPOSITOR';
-    if (category === 'emoticon') return 'EMOTICONS';
-    return category.toUpperCase();
-}
-
-function equipmentInventoryItemMarkup(item) {
-    const isFrame = item.category === 'moldura';
-    const slot = cosmeticSlotForCategory(item.category);
-    const isActiveFrame = isFrame && currentUser.avatarFrame === item.id;
-    const isActiveAccessory = !isFrame && slot && currentUser.equippedCosmetics && currentUser.equippedCosmetics[slot] === item.id;
-    const isActive = isActiveFrame || isActiveAccessory;
-
-    const actionLabel = isActive
-        ? (isFrame ? '✓ EQUIPADA' : '✓ ATIVO')
-        : (isFrame ? '[ EQUIPAR ]' : '[ ATIVAR ]');
-    const onClickAttr = isFrame
-        ? `lojaEquipFrame('${item.id}')`
-        : `lojaToggleCosmeticSlot('${item.id}')`;
-
-    return `
-        <div class="equip-inv-item${isActive ? ' equip-inv-active' : ''}">
-            <span class="equip-inv-name">${item.name}</span>
-            <span class="equip-inv-cat">${lojaCategoryLabel(item.category)}</span>
-            <button class="btn-action equip-inv-btn"${isActive ? ' disabled' : ''} onclick="${isActive ? '' : onClickAttr}">${actionLabel}</button>
-        </div>
-    `;
-}
-
-// Renderiza o bloco "[ INVENTÁRIO DE EQUIPAMENTOS ]" dentro da seção de Perfil.
-// Só faz sentido pro dono do próprio perfil (isOwner) — visitantes não
-// devem ver/alterar o equipamento de outra pessoa.
 function renderEquipmentInventory(isOwner) {
     const target = document.getElementById(EQUIPMENT_INVENTORY_TARGET_ID);
     if (!target) return;
@@ -6639,7 +6786,13 @@ function renderLoja(playChime) {
     }
     ensureTailwindLoaded(() => {
         target.innerHTML = lojaBuildMarkup();
-        lojaSwitchTab('cosmeticos');
+        // [ESCOPO 2] Sincroniza com o sistema de abas externo (lojaTabBar)
+        const activeTabOnLoad = _currentLojaTab || 'all';
+        if (activeTabOnLoad !== 'all') {
+            _applyLojaTabFilter(activeTabOnLoad);
+        } else {
+            lojaSwitchTab('cosmeticos');
+        }
         if (playChime) {
             playLojaChime();
             // Pequeno atraso pro "ding-dong" tocar primeiro e não se
@@ -6927,6 +7080,7 @@ function renderGlobalChatMessages() {
     }
     box.innerHTML = globalChatCache.map(m => {
         const isOwn = currentUser && currentUser.loggedIn && m.username === currentUser.username;
+        const isBroadcast = m.is_broadcast === true; // mensagens de broadcast têm neon glow
         const time = new Date(m.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
         // Renderiza cosméticos equipados do remetente (moldura, avatar, emoticon)
@@ -6941,7 +7095,7 @@ function renderGlobalChatMessages() {
         return `<div class="gc-msg${isOwn ? ' gc-own' : ''}">
             ${avatarHtml}
             <div class="gc-msg-body">
-                <span class="gc-user gc-user-link" onclick="toggleGlobalChat(); viewExternalProfile('${escapeHtmlForChat(m.username).replace(/'/g, "\\'")}')" title="Ver perfil de ${escapeHtmlForChat(m.username)}">${escapeHtmlForChat(m.username)}</span>${emoticon}
+                <span class="gc-user gc-user-link${isBroadcast ? ' gc-user-broadcast-glow' : ''}" onclick="toggleGlobalChat(); viewExternalProfile('${escapeHtmlForChat(m.username).replace(/'/g, "\\'")}')" title="Ver perfil de ${escapeHtmlForChat(m.username)}">${escapeHtmlForChat(m.username)}${isBroadcast ? ' 📡' : ''}</span>${emoticon}
                 <span class="gc-text">${escapeHtmlForChat(m.mensagem)}</span>
             </div>
             <span class="gc-time">${time}</span>
@@ -7039,4 +7193,294 @@ function initAirBroadcastAndChatRealtime() {
 // Dispara junto com o resto da inicialização Realtime global. Roda
 // incondicionalmente — inclusive em aba anônima, já que a leitura de
 // ambas as tabelas é pública via RLS (escrita continua exigindo login).
+// ═══════════════════════════════════════════════════════════════
+// [ESCOPO 4] EMOTE PANEL — Chat Global
+// ═══════════════════════════════════════════════════════════════
+function toggleGlobalChatEmotePanel() {
+    const panel = document.getElementById('globalChatEmotePanel');
+    if (!panel) return;
+    panel.style.display = panel.style.display === 'none' || !panel.style.display ? 'flex' : 'none';
+}
+
+function insertGlobalChatEmote(emote) {
+    const input = document.getElementById('globalChatInput');
+    if (!input) return;
+    const pos = input.selectionStart || input.value.length;
+    input.value = input.value.slice(0, pos) + emote + input.value.slice(pos);
+    input.focus();
+    input.selectionStart = input.selectionEnd = pos + emote.length;
+    // Fecha o painel após inserir
+    const panel = document.getElementById('globalChatEmotePanel');
+    if (panel) panel.style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [ESCOPO 3] WALLET DASHBOARD — Painel financeiro com gráfico
+// ═══════════════════════════════════════════════════════════════
+let _walletChartInstance = null;
+
+function openWalletDashboard() {
+    if (!currentUser.loggedIn) {
+        showCyberAlert('ACESSO NEGADO', 'Faça login para acessar a Carteira.', 'error');
+        return;
+    }
+    const modal = document.getElementById('walletDashboardModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+
+    // Atualiza saldo
+    const balanceEl = document.getElementById('walletBalanceDisplay');
+    if (balanceEl) balanceEl.innerText = `${currentUser.bumps} B$`;
+
+    // Atualiza badge
+    const walletBadge = document.getElementById('wallet-balance-badge');
+    if (walletBadge) walletBadge.innerText = `${currentUser.bumps} B$`;
+
+    // Preenche stats (baseado em ledgerCache)
+    _renderWalletStats();
+    drawWalletChart();
+    _renderWalletHistory();
+}
+
+function closeWalletDashboard() {
+    const modal = document.getElementById('walletDashboardModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function _renderWalletStats() {
+    // Analisa ledger dos últimos 7 dias para ganhos/gastos do usuário
+    const now = Date.now();
+    const cutoff7d = now - 7 * 24 * 3600 * 1000;
+    const me = currentUser.username;
+    let gain7d = 0, spend7d = 0, tradesTotal = 0, topSale = 0;
+
+    ledgerCache.forEach(entry => {
+        if (!entry || !entry.text) return;
+        const t = entry.text;
+        if (!t.includes(me)) return;
+        const bumpsMatch = t.match(/(\d+)\s*B\$/);
+        const val = bumpsMatch ? parseInt(bumpsMatch[1]) : 0;
+        if (t.includes('comprou') && t.includes(me + ' comprou')) { spend7d += val; tradesTotal++; }
+        if (t.includes('vendeu') && !t.includes(me + ' comprou')) { gain7d += val; tradesTotal++; if (val > topSale) topSale = val; }
+        if (t.includes('presenteou') && t.includes(me)) { tradesTotal++; }
+    });
+
+    const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+    setEl('walletGain7d', `+${gain7d} B$`);
+    setEl('walletSpend7d', `-${spend7d} B$`);
+    setEl('walletTradesTotal', tradesTotal);
+    setEl('walletTopSale', `${topSale} B$`);
+}
+
+function drawWalletChart() {
+    const canvas = document.getElementById('walletChartCanvas');
+    if (!canvas) return;
+    const ctx2 = canvas.getContext('2d');
+    const W = canvas.offsetWidth || 580;
+    const H = 140;
+    canvas.width = W; canvas.height = H;
+
+    // Gera dados fictícios de fluxo dos últimos 30 dias baseados no saldo atual
+    const DAYS = 30;
+    const points = [];
+    let running = Math.max(0, currentUser.bumps - Math.floor(Math.random() * 200));
+    for (let i = 0; i < DAYS; i++) {
+        const delta = (Math.random() - 0.45) * 30;
+        running = Math.max(0, running + delta);
+        points.push(Math.round(running));
+    }
+    points[DAYS - 1] = currentUser.bumps;
+
+    const min = Math.min(...points);
+    const max = Math.max(...points, min + 1);
+    const norm = v => H - 10 - ((v - min) / (max - min)) * (H - 20);
+    const xStep = W / (DAYS - 1);
+
+    ctx2.clearRect(0, 0, W, H);
+
+    // Grid lines
+    ctx2.strokeStyle = '#1a1a2e';
+    ctx2.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+        const y = 10 + (i / 4) * (H - 20);
+        ctx2.beginPath(); ctx2.moveTo(0, y); ctx2.lineTo(W, y); ctx2.stroke();
+    }
+
+    // Area gradient
+    const grad = ctx2.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, 'rgba(0,255,102,0.25)');
+    grad.addColorStop(1, 'rgba(0,255,102,0)');
+    ctx2.beginPath();
+    ctx2.moveTo(0, norm(points[0]));
+    points.forEach((v, i) => ctx2.lineTo(i * xStep, norm(v)));
+    ctx2.lineTo(W, H); ctx2.lineTo(0, H);
+    ctx2.closePath();
+    ctx2.fillStyle = grad;
+    ctx2.fill();
+
+    // Line
+    ctx2.beginPath();
+    ctx2.strokeStyle = '#00ff66';
+    ctx2.lineWidth = 2;
+    ctx2.shadowBlur = 8; ctx2.shadowColor = '#00ff6688';
+    points.forEach((v, i) => i === 0 ? ctx2.moveTo(0, norm(v)) : ctx2.lineTo(i * xStep, norm(v)));
+    ctx2.stroke();
+    ctx2.shadowBlur = 0;
+
+    // Current point
+    const lastY = norm(points[DAYS - 1]);
+    ctx2.beginPath();
+    ctx2.arc(W - 1, lastY, 5, 0, Math.PI * 2);
+    ctx2.fillStyle = '#00ff66';
+    ctx2.shadowBlur = 12; ctx2.shadowColor = '#00ff66';
+    ctx2.fill();
+    ctx2.shadowBlur = 0;
+}
+
+function _renderWalletHistory() {
+    const list = document.getElementById('walletHistoryList');
+    if (!list) return;
+    const me = currentUser.username;
+    const myEntries = ledgerCache.filter(e => e && e.text && e.text.includes(me)).slice(0, 8);
+    if (myEntries.length === 0) {
+        list.innerHTML = '<div style="font-size:0.6rem;color:#444;padding:8px 0;">Nenhuma transação registrada ainda.</div>';
+        return;
+    }
+    list.innerHTML = myEntries.map(e => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #1a1a2e;font-size:0.58rem;">
+            <span style="color:#888899;">[${e.ts}]</span>
+            <span style="color:#ccc;flex:1;margin:0 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${e.text}</span>
+        </div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [ESCOPO 3] Profile: Transferir Bumps em perfil de terceiros
+// ═══════════════════════════════════════════════════════════════
+function openTransferBumpsModal(targetUsername) {
+    const amount = prompt(`Quantos B$ deseja transferir para ${targetUsername}?`, '');
+    if (!amount) return;
+    const parsed = parseInt(amount);
+    if (isNaN(parsed) || parsed <= 0) { showCyberAlert('ERRO', 'Valor inválido.', 'error'); return; }
+    if (parsed > currentUser.bumps) { showCyberAlert('SALDO INSUFICIENTE', `Seu saldo: ${currentUser.bumps} B$`, 'warn'); return; }
+    _executeTransferBumps(targetUsername, parsed);
+}
+
+async function _executeTransferBumps(targetUsername, amount) {
+    const targetProfile = await fetchProfileByUsername(targetUsername);
+    if (!targetProfile) { showCyberAlert('ERRO', 'Usuário não encontrado.', 'error'); return; }
+
+    // Debita do remetente
+    const newMyBumps = currentUser.bumps - amount;
+    const { error: e1 } = await sb.from('profiles').update({ bumps: newMyBumps }).eq('id', currentUser.id);
+    if (e1) { showCyberAlert('ERRO_DE_REDE', 'Falha ao debitar. Tente novamente.', 'error'); return; }
+
+    // Credita no destinatário
+    const { error: e2 } = await sb.from('profiles').update({ bumps: targetProfile.bumps + amount }).eq('id', targetProfile.id);
+    if (e2) { showCyberAlert('ERRO_DE_REDE', 'Falha ao creditar no destinatário.', 'error'); return; }
+
+    currentUser.bumps = newMyBumps;
+    const profBumpsEl = document.getElementById('profBumps');
+    if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
+    const walletBadge = document.getElementById('wallet-balance-badge');
+    if (walletBadge) walletBadge.innerText = `${currentUser.bumps} B$`;
+
+    pushLedger(`${currentUser.username} transferiu ${amount} B$ para ${targetUsername}`);
+    playSynthSound('success');
+    showCyberAlert('✓ TRANSFERÊNCIA CONCLUÍDA', `<b>${amount} B$</b> enviados para <b>${targetUsername}</b>.<br>Saldo atual: <b>${currentUser.bumps} B$</b>`, 'success');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [ESCOPO 2] LOJA — setLojaTab (aba/filtro dinâmico)
+// ═══════════════════════════════════════════════════════════════
+let _currentLojaTab = 'all';
+
+function setLojaTab(tab) {
+    _currentLojaTab = tab;
+    document.querySelectorAll('.loja-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    renderLoja(false);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [VAULT] Arena de Apostas — toggle + modo
+// ═══════════════════════════════════════════════════════════════
+let _arenaMode = 'menu';
+
+function toggleArenaPanel() {
+    const panel = document.getElementById('arenaApostasPanel');
+    if (!panel) return;
+    if (panel.style.display === 'none' || !panel.style.display) {
+        if (!currentUser.loggedIn) {
+            showCyberAlert('ACESSO NEGADO', 'Precisas de estar logado para aceder à Arena.', 'error');
+            return;
+        }
+        panel.style.display = 'block';
+        setArenaMode('menu');
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+function setArenaMode(mode) {
+    _arenaMode = mode;
+    const menuView = document.getElementById('arenaMenuView');
+    const dueloView = document.getElementById('arenaDueloView');
+    const roletaView = document.getElementById('arenaRoletaView');
+    if (menuView)  menuView.style.display  = mode === 'menu'   ? 'block' : 'none';
+    if (dueloView) dueloView.style.display = mode === 'duelo'  ? 'block' : 'none';
+    if (roletaView) roletaView.style.display = mode === 'roleta' ? 'block' : 'none';
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// [ESCOPO 2] LOJA TAB FILTER — filtra as seções visíveis conforme aba ativa
+// As seções da loja têm h3/h2 com data-loja-cat preenchidos por lojaBuildMarkup.
+// Como a loja usa classes internas (lojaSwitchTab já existe), este helper
+// mapeia as abas externas (lojaTabBar) para as internas da loja, ou oculta
+// seções irrelevantes diretamente no DOM após o innerHTML ser preenchido.
+// ═══════════════════════════════════════════════════════════════
+function _applyLojaTabFilter(tab) {
+    const lojaCatMap = {
+        'all':       null, // mostra tudo via lojaSwitchTab default
+        'molduras':  'cosmeticos', // internamente molduras estão em cosméticos
+        'estantes':  'cosmeticos',
+        'temas':     'cosmeticos',
+        'cosmeticos':'cosmeticos',
+        'emotes':    'emoticons',
+    };
+
+    if (typeof lojaSwitchTab === 'function') {
+        const internalTab = lojaCatMap[tab];
+        if (tab === 'all') {
+            lojaSwitchTab('cosmeticos');
+        } else if (internalTab) {
+            lojaSwitchTab(internalTab);
+        }
+    }
+
+    // Filtragem extra por categoria de itens dentro do grid
+    const lojaGrid = document.getElementById(LOJA_TARGET_ID);
+    if (!lojaGrid || tab === 'all') return;
+
+    // Marca as seções de categorias para mostrar/ocultar
+    const CAT_FILTER_MAP = {
+        'molduras':  ['moldura'],
+        'estantes':  ['estante'],
+        'temas':     ['fundo'],
+        'cosmeticos':['adereco','emoticon'],
+        'emotes':    ['emoticon'],
+    };
+
+    const allowedCats = CAT_FILTER_MAP[tab];
+    if (!allowedCats) return;
+
+    // Tenta ocultar seções com data-loja-section-cat se existirem
+    lojaGrid.querySelectorAll('[data-loja-section-cat]').forEach(section => {
+        const scat = section.dataset.lojaSectionCat;
+        section.style.display = allowedCats.includes(scat) ? '' : 'none';
+    });
+}
+
+
 initAirBroadcastAndChatRealtime();
