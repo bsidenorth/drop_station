@@ -2305,7 +2305,10 @@ async function logoutSession() {
             return;
         }
 
-        if(globalFeed.length === 0) return;
+        if (globalFeed.length === 0) {
+            container.innerHTML = '<div class="feed-loading-notice">[ REDE SEM DROPS AINDA // NENHUM EVENTO REGISTRADO ]</div>';
+            return;
+        }
         
         const displayItems = globalFeed.length > 4 ? [...globalFeed, ...globalFeed] : globalFeed;
 
@@ -5970,6 +5973,7 @@ const SPIKE_LINES_LOJA = [
 // entra em LOJA_FRAME_ITEMS (que só lista o que é comprável), mas precisa
 // de uma entrada de raridade própria pro seletor/filtro saber como tratá-la.
 const FRAME_DEFAULT_ID = 'frame-style-1';
+const EQUIPMENT_INVENTORY_TARGET_ID = 'profEquipmentInventoryZone';
 const FRAME_DEFAULT_RARITY = 'raro';
 
 const LOJA_FRAME_ITEMS = [
