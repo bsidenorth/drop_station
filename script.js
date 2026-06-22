@@ -1364,38 +1364,41 @@ async function logoutSession() {
     }
 
     function navigateTo(screenId, skipProfileReload) {
-        playSynthSound('click');
+        try { playSynthSound('click'); } catch(e) {}
 
         // Limpa estado anterior do drop ao sair do engine, evitando botão travado/duplicação
-        if (screenId !== 'engine') {
-            downloadBtn.disabled = false;
-            // Não destruímos activeAssetData aqui para não perder o card no free roll
-            // mas garantimos que o botão não fica disabled ao regressar
-        } else {
-            // Ao regressar ao engine, re-habilita o botão se houver card ativo
-            downloadBtn.disabled = false;
-        }
+        try {
+            if (screenId !== 'engine') {
+                downloadBtn.disabled = false;
+            } else {
+                downloadBtn.disabled = false;
+            }
+        } catch(e) {}
 
-        document.querySelectorAll('.spa-screen').forEach(s => s.classList.remove('active'));
-        const t = document.getElementById(`screen-${screenId}`);
-        if(t) t.classList.add('active');
-        if (screenId === 'engine') { setTimeout(resizeCanvases, 50); renderDailyDropButton(); renderDailyMissions(); renderDropStyleFilters(); }
-        if (screenId === 'leaderboard') renderLeaderboard();
-        if (screenId === 'vault') renderVaultGrid();
-        if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); }
-        else { stopLedgerAutoScroll(); }
-        if (screenId === 'messages') { renderChatThreads(); renderGlobalOffers('offersContainer'); }
+        try {
+            document.querySelectorAll('.spa-screen').forEach(s => s.classList.remove('active'));
+            const t = document.getElementById(`screen-${screenId}`);
+            if(t) t.classList.add('active');
+        } catch(e) { console.warn('navigateTo screen switch error:', e); return; }
+
+        try { if (screenId === 'engine') { setTimeout(resizeCanvases, 50); renderDailyDropButton(); renderDailyMissions(); renderDropStyleFilters(); } } catch(e) { console.warn('navigateTo engine init:', e); }
+        try { if (screenId === 'leaderboard') renderLeaderboard(); } catch(e) { console.warn('navigateTo leaderboard:', e); }
+        try { if (screenId === 'vault') renderVaultGrid(); } catch(e) { console.warn('navigateTo vault:', e); }
+        try { if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); } else { stopLedgerAutoScroll(); } } catch(e) { console.warn('navigateTo market:', e); }
+        try { if (screenId === 'messages') { renderChatThreads(); renderGlobalOffers('offersContainer'); } } catch(e) { console.warn('navigateTo messages:', e); }
         // BUGFIX (redirecionamento): navegar para 'profile' SEMPRE recarregava os dados
         // do usuário logado, mesmo quando vínhamos de viewExternalProfile() (clique em
         // "VER PERFIL" no Inspect). Isso fazia a tela "voltar" pro próprio perfil
         // imediatamente após abrir o perfil de outra pessoa. Agora, quem já carregou
         // o perfil-alvo (ex: viewExternalProfile) passa skipProfileReload=true e
         // navigateTo não pisa em cima dos dados já renderizados.
-        if (screenId === 'profile' && !skipProfileReload) {
-            viewTargetUserCollection(currentUser.username, currentUser.code, currentUser.bio, currentUser.avatar, currentUser.banner, true);
-        }
-        if (screenId === 'contracts') renderContractsScreen();
-        if (screenId === 'loja') renderLoja(true);
+        try {
+            if (screenId === 'profile' && !skipProfileReload) {
+                viewTargetUserCollection(currentUser.username, currentUser.code, currentUser.bio, currentUser.avatar, currentUser.banner, true);
+            }
+        } catch(e) { console.warn('navigateTo profile load:', e); }
+        try { if (screenId === 'contracts') renderContractsScreen(); } catch(e) { console.warn('navigateTo contracts:', e); }
+        try { if (screenId === 'loja') renderLoja(true); } catch(e) { console.warn('navigateTo loja:', e); }
     }
 
     // ── MENU HAMBÚRGUER MOBILE — REMOVIDO ───────────────────────────────
@@ -1767,7 +1770,9 @@ async function logoutSession() {
     function regenerateQrSignature(cardObj) {
         const suffix = `F${cardObj.fusion_count || 0}`;
         cardObj.qr_code_hash   = `${cardObj.provenance.hash}-${suffix}`;
-        cardObj.qr_payload_url = `https://dropstation.app/proveniencia/${cardObj.qr_code_hash}`;
+        // URL pública de inspeção direta do card
+        const cardDisplayId = encodeURIComponent(cardObj.id || cardObj.qr_code_hash);
+        cardObj.qr_payload_url = `https://dr0p-station.vercel.app/inspect?card=${cardDisplayId}&hash=${encodeURIComponent(cardObj.qr_code_hash)}`;
         return cardObj;
     }
 
@@ -1893,13 +1898,15 @@ async function logoutSession() {
             const medal = ['🥇','🥈','🥉','🎖️','🎖️'][i] || '▫️';
             const value = leaderboardMode === 'bumps' ? `${r.bumps} B$` : `${r.legendaryCount} LENDÁRIOS`;
             const isMe = r.username === currentUser.username ? ' style="color:#00ffff;"' : '';
-            const reward = SEASON_REWARDS[i] || '—';
-            return `<div class="leaderboard-row"${isMe}>
+            // Mostra SOMENTE recompensas em Bumps na coluna de recompensas
+            const bumpsReward = ['500 B$', '300 B$', '150 B$', '75 B$', '50 B$'][i] || '—';
+            const avatarSrc = r.avatar || 'https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg';
+            return `<div class="leaderboard-row" onclick="viewExternalProfile('${r.username.replace(/'/g,"\\'")}');"${isMe}>
                 <span>${medal} #${i+1}</span>
-                <span class="avatar-container ${r.avatarFrame}"><span class="cyber-frame"><img src="${r.avatar}" draggable="false" loading="lazy"></span></span>
+                <span class="avatar-container ${r.avatarFrame}"><span class="cyber-frame"><img src="${avatarSrc}" draggable="false" loading="lazy" onerror="this.src='https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg'"></span></span>
                 <span>${r.username}</span>
                 <span>${value}</span>
-                <span class="lb-rewards">🎁 ${reward}</span>
+                <span class="lb-rewards">💰 ${bumpsReward}</span>
             </div>`;
         }).join('');
     }
@@ -2162,7 +2169,93 @@ async function logoutSession() {
     // (caro e impreciso), os filtros restringem diretamente os arrays de
     // candidatos usados por executeHardwareRoll — ver _applyDropFilters().
     // =========================================================
-    const DROP_VISUAL_STYLES = ["CHROME DECAY", "GOTHIC APOCALYPSE", "VIRTUAL OVERDRIVE", "ROSE PHANTOM", "RETRO GLITCH", "BINARY DEEP"];
+    // =========================================================
+    // [ESCOPO 6] BANCO DE DADOS DE FILTROS — 15+ VARIAÇÕES POR RARIDADE
+    // Cada raridade tem um pool de variações estéticas (sub-raças) que são
+    // embaralhadas aleatoriamente no momento da dropagem.
+    // =========================================================
+    const DROP_FILTER_DB = {
+        common: [
+            { name: 'CHROME DECAY',       filter: 'contrast(180%) saturate(30%) invert(10%)' },
+            { name: 'BINARY DEEP',        filter: 'saturate(400%) contrast(150%)' },
+            { name: 'RETRO GLITCH',       filter: 'invert(100%) hue-rotate(180deg)' },
+            { name: 'STATIC NOISE',       filter: 'contrast(200%) brightness(80%) saturate(0%)' },
+            { name: 'STEEL PULSE',        filter: 'sepia(60%) contrast(140%) brightness(110%)' },
+            { name: 'GHOST SIGNAL',       filter: 'opacity(80%) saturate(20%) brightness(140%)' },
+            { name: 'ACID WASH',          filter: 'hue-rotate(45deg) saturate(250%) contrast(120%)' },
+            { name: 'DARK MATTER',        filter: 'brightness(60%) contrast(180%) saturate(50%)' },
+            { name: 'FLUX STATIC',        filter: 'contrast(160%) saturate(60%) hue-rotate(200deg)' },
+            { name: 'VOID REMNANT',       filter: 'invert(30%) sepia(40%) contrast(130%)' },
+            { name: 'DATA SMEAR',         filter: 'blur(0.3px) contrast(170%) saturate(80%)' },
+            { name: 'PHANTOM_WIRE',       filter: 'hue-rotate(270deg) contrast(150%) brightness(90%)' },
+            { name: 'JUNK_PULSE',         filter: 'sepia(100%) brightness(120%) saturate(200%)' },
+            { name: 'PALE_SIGNAL',        filter: 'saturate(10%) brightness(130%) contrast(120%)' },
+            { name: 'CARBON_DRIFT',       filter: 'grayscale(80%) contrast(160%) brightness(95%)' }
+        ],
+        epic: [
+            { name: 'GOTHIC APOCALYPSE',  filter: 'grayscale(100%) brightness(120%) contrast(200%)' },
+            { name: 'VIRTUAL OVERDRIVE',  filter: 'sepia(80%) hue-rotate(320deg) saturate(300%)' },
+            { name: 'NEON PULSE',         filter: 'hue-rotate(60deg) saturate(180%) invert(5%)' },
+            { name: 'PLASMA BURN',        filter: 'hue-rotate(15deg) saturate(350%) contrast(160%)' },
+            { name: 'ULTRAVIOLET',        filter: 'hue-rotate(240deg) saturate(400%) brightness(85%)' },
+            { name: 'GLITCH_LAYER',       filter: 'saturate(500%) hue-rotate(120deg) contrast(180%)' },
+            { name: 'TOXIC_GLITCH',       filter: 'hue-rotate(90deg) saturate(600%) contrast(200%) brightness(80%)' },
+            { name: 'SOLAR_FLARE',        filter: 'hue-rotate(30deg) saturate(450%) brightness(110%) contrast(150%)' },
+            { name: 'SHOCK_WAVE',         filter: 'contrast(220%) saturate(280%) hue-rotate(165deg)' },
+            { name: 'PROTOCOL_9',         filter: 'invert(20%) saturate(350%) hue-rotate(75deg) contrast(190%)' },
+            { name: 'CIRCUIT_BURN',       filter: 'sepia(60%) hue-rotate(280deg) saturate(400%) contrast(170%)' },
+            { name: 'DARK_SURGE',         filter: 'brightness(70%) saturate(500%) hue-rotate(200deg)' },
+            { name: 'EMERALD_STATIC',     filter: 'hue-rotate(100deg) saturate(300%) contrast(140%) brightness(95%)' },
+            { name: 'CRIMSON_BYTE',       filter: 'hue-rotate(345deg) saturate(450%) contrast(175%)' },
+            { name: 'HYPERION_DRIFT',     filter: 'saturate(600%) contrast(160%) hue-rotate(50deg) brightness(90%)' }
+        ],
+        legendary: [
+            { name: 'ROSE PHANTOM',       filter: 'hue-rotate(60deg) saturate(180%) invert(5%)' },
+            { name: 'CYBER_VOID',         filter: 'hue-rotate(185deg) saturate(500%) contrast(200%) brightness(75%)' },
+            { name: 'OBSIDIAN_CORE',      filter: 'brightness(50%) contrast(250%) saturate(200%) hue-rotate(220deg)' },
+            { name: 'AQUA_GENESIS',       filter: 'hue-rotate(175deg) saturate(400%) contrast(160%) brightness(90%)' },
+            { name: 'SILVER_PROTOCOL',    filter: 'saturate(0%) brightness(140%) contrast(200%) invert(10%)' },
+            { name: 'GOLDEN_BREACH',      filter: 'sepia(100%) hue-rotate(20deg) saturate(350%) contrast(160%)' },
+            { name: 'ELECTRIC_DEITY',     filter: 'hue-rotate(195deg) saturate(600%) brightness(85%) contrast(190%)' },
+            { name: 'TEMPEST_CORE',       filter: 'hue-rotate(210deg) saturate(450%) brightness(70%) contrast(220%)' },
+            { name: 'STARFALL_DRIFT',     filter: 'brightness(80%) saturate(300%) hue-rotate(240deg) contrast(180%)' },
+            { name: 'VOID_CIRCUIT',       filter: 'invert(15%) hue-rotate(190deg) saturate(550%) contrast(210%)' },
+            { name: 'NEON_FROST',         filter: 'hue-rotate(168deg) saturate(500%) brightness(95%) contrast(170%)' },
+            { name: 'AURORA_SIGNAL',      filter: 'hue-rotate(150deg) saturate(400%) brightness(85%) contrast(160%)' },
+            { name: 'PHANTOM_CIRCUIT',    filter: 'invert(10%) hue-rotate(200deg) saturate(480%) contrast(195%)' },
+            { name: 'DEEP_NETWORK',       filter: 'brightness(65%) saturate(550%) hue-rotate(205deg) contrast(230%)' },
+            { name: 'CHROME_DEITY',       filter: 'saturate(20%) contrast(280%) brightness(85%) hue-rotate(190deg)' }
+        ],
+        ancestral: [
+            { name: 'ROSA PHANTASMA',     filter: 'hue-rotate(300deg) saturate(400%) contrast(130%) brightness(90%)' },
+            { name: 'ROSE_PHANTASMA_MkII',filter: 'hue-rotate(320deg) saturate(600%) contrast(180%) brightness(80%)' },
+            { name: 'BLOOD_PROTOCOL',     filter: 'hue-rotate(350deg) saturate(700%) contrast(200%) brightness(70%)' },
+            { name: 'VOID_MONARCH',       filter: 'invert(30%) hue-rotate(280deg) saturate(800%) contrast(220%) brightness(65%)' },
+            { name: 'DARK_ANCESTRAL',     filter: 'brightness(45%) saturate(900%) hue-rotate(310deg) contrast(250%)' },
+            { name: 'CRIMSON_GOD',        filter: 'hue-rotate(340deg) saturate(750%) brightness(75%) contrast(210%)' },
+            { name: 'SILICON_DEITY',      filter: 'sepia(100%) hue-rotate(330deg) saturate(600%) contrast(190%)' },
+            { name: 'OMEGA_FLUX',         filter: 'invert(20%) saturate(800%) hue-rotate(305deg) contrast(230%) brightness(70%)' },
+            { name: 'PHANTOM_SOUL',       filter: 'hue-rotate(295deg) saturate(700%) brightness(60%) contrast(240%)' },
+            { name: 'TOXIC_GLITCH_MkII',  filter: 'hue-rotate(285deg) saturate(900%) contrast(260%) brightness(55%)' },
+            { name: 'VOID_GENESIS',       filter: 'brightness(50%) saturate(1000%) hue-rotate(315deg) contrast(270%)' },
+            { name: 'INFERNO_CORE',       filter: 'hue-rotate(355deg) saturate(800%) contrast(220%) brightness(65%)' },
+            { name: 'ABYSS_PROTOCOL',     filter: 'invert(25%) hue-rotate(300deg) saturate(750%) brightness(60%)' },
+            { name: 'SPECTRAL_MONARCH',   filter: 'hue-rotate(275deg) saturate(850%) contrast(240%) brightness(70%)' },
+            { name: 'NEURAL_PHANTOM',     filter: 'invert(15%) saturate(950%) hue-rotate(290deg) contrast(260%) brightness(62%)' }
+        ]
+    };
+
+    // Helpers para selecionar variações aleatórias do banco de filtros
+    function _getRandomDropVariant(rarityKey) {
+        const pool = DROP_FILTER_DB[rarityKey] || DROP_FILTER_DB.common;
+        const idx = Math.floor(Math.random() * pool.length);
+        return pool[idx];
+    }
+
+    const DROP_VISUAL_STYLES = DROP_FILTER_DB.common.map(v => v.name)
+        .concat(DROP_FILTER_DB.epic.map(v => v.name))
+        .concat(DROP_FILTER_DB.legendary.map(v => v.name));
+
 
     let dropFilters = {
         rarity: 'all',   // all | common | epic | legendary | ancestral
@@ -2302,17 +2395,11 @@ async function logoutSession() {
             let randRarity = Math.random();
             if (!isPremium && randRarity < 0.15) { shatterAsset(); isRolling = false; return; }
 
-            const visualStylesPT = ["CHROME DECAY", "GOTHIC APOCALYPSE", "VIRTUAL OVERDRIVE", "ROSE PHANTOM", "RETRO GLITCH", "BINARY DEEP"];
-            const visualStylesEN = ["CHROME DECAY", "GOTHIC APOCALYPSE", "VIRTUAL OVERDRIVE", "ROSE PHANTOM", "RETRO GLITCH", "BINARY DEEP"];
-            const visualFilters = [
-                "contrast(180%) saturate(30%) invert(10%)",
-                "grayscale(100%) brightness(120%) contrast(200%)",
-                "sepia(80%) hue-rotate(320deg) saturate(300%)",
-                "hue-rotate(60deg) saturate(180%) invert(5%)",
-                "invert(100%) hue-rotate(180deg)",
-                "saturate(400%) contrast(150%)"
-            ];
-            let styleIndex = _resolveFilteredStyleIndex(Math.floor(Math.random() * visualStylesPT.length));
+            const visualStylesPT = DROP_VISUAL_STYLES;
+            const visualStylesEN = DROP_VISUAL_STYLES;
+            // visualFilters is now resolved per-rarity from DROP_FILTER_DB
+            // styleIndex is kept for backward compat but overridden below
+            let styleIndex = _resolveFilteredStyleIndex(Math.floor(Math.random() * 6));
 
             // TAXAS EXACTAS: 1% ANCESTRAL, 1% LEGENDARY, 14% EPIC, 84% COMMON
             let rarityRoll = Math.random();
@@ -2348,19 +2435,22 @@ async function logoutSession() {
             updateMarketQuotes(rarityKey);
 
             if (rarityKey === "ancestral") {
-                filterStyle = "hue-rotate(300deg) saturate(400%) contrast(130%) brightness(90%)";
-                styleName   = "ROSA PHANTASMA";
-                styleNameEN = "ROSE PHANTASMA";
+                const variant = _getRandomDropVariant('ancestral');
+                filterStyle = variant.filter;
+                styleName   = variant.name;
+                styleNameEN = variant.name;
                 if(!isPremium) claimCost = 50;
             } else if (rarityKey !== "common") {
-                filterStyle = rarityKey === "legendary" ? "hue-rotate(210deg) saturate(250%) contrast(120%)" : "hue-rotate(140deg) saturate(200%) brightness(90%)";
-                styleName = rarityKey === "legendary" ? "NEON GHOST" : "ACID GLITCH";
-                styleNameEN = rarityKey === "legendary" ? "NEON GHOST" : "ACID GLITCH";
+                const variant = _getRandomDropVariant(rarityKey);
+                filterStyle = variant.filter;
+                styleName = variant.name;
+                styleNameEN = variant.name;
                 if(!isPremium) claimCost = 50;
             } else {
-                filterStyle = visualFilters[styleIndex];
-                styleName = visualStylesPT[styleIndex];
-                styleNameEN = visualStylesEN[styleIndex];
+                const variant = _getRandomDropVariant('common');
+                filterStyle = variant.filter;
+                styleName = variant.name;
+                styleNameEN = variant.name;
             }
 
             targetContainer.className = "target-box";
@@ -3771,14 +3861,11 @@ async function logoutSession() {
     }
 
     // =========================================================
-    // DOWNLOAD DO ASSET (Ponto 6)
+    // DOWNLOAD DO ASSET (Ponto 6) — SOMENTE IMAGEM ESTÁTICA HD
+    // O botão "Obter Item 📥" baixa EXCLUSIVAMENTE a imagem
+    // estática (.png/.jpg) em alta definição, mesmo que o card
+    // possua variações animadas. Download em lote removido.
     // =========================================================
-    // [ESCOPO 6] Download em lote: static PNG + animated WebP simulado
-    // [ESCOPO 3] ROTINA DE DOWNLOAD DE MÍDIA DUPLA (ASSET EM LOTE)
-    // Dispara as duas rotas de download SIMULTANEAMENTE (sem await sequencial
-    // entre elas): a estática é instantânea (clique direto no <a>), e a
-    // animada roda em paralelo assim que o frame de captura terminar — ambas
-    // são iniciadas no mesmo tick em vez de uma esperar a outra terminar.
     async function downloadVaultAsset(index) {
         const asset = savedAssets[index];
         if (!asset) return;
@@ -3789,37 +3876,27 @@ async function logoutSession() {
 
         const baseName = `dr0p_${(asset.id || '').replace('#','')}_${asset.rarityType}`;
 
-        // 1) Static PNG — download direto, disparado imediatamente
+        // Somente download estático PNG/JPG
         const aStatic = document.createElement('a');
         aStatic.href = asset.imgSrc;
-        if (asset.imgSrc.startsWith('data:')) {
-            aStatic.download = `${baseName}_static.png`;
+        if (asset.imgSrc && asset.imgSrc.startsWith('data:')) {
+            aStatic.download = `${baseName}_hd.png`;
             aStatic.click();
-        } else {
-            window.open(asset.imgSrc, '_blank');
-        }
-
-        // 2) Animated GIF/WebP — disparado em paralelo, SEM aguardar o passo 1.
-        // Se o card já tiver uma versão animada pré-gerada pelo sistema de
-        // fusão (asset.animSrc), usa direto; caso contrário gera uma na hora.
-        // Roda como uma Promise solta (fire-and-forget) em vez de bloquear
-        // com await antes do clique — os dois downloads do navegador acontecem
-        // ao mesmo tempo, em vez de um esperar o outro terminar.
-        (async () => {
+        } else if (asset.imgSrc) {
+            // Tenta fetch para forçar download em vez de abrir no browser
             try {
-                let animSrc = asset.animSrc || null;
-                if (!animSrc && asset.imgSrc.startsWith('data:')) {
-                    animSrc = await _generateAnimatedWebP(asset.imgSrc, asset.rarityType);
-                }
-                if (animSrc) {
-                    const aAnim = document.createElement('a');
-                    aAnim.href = animSrc;
-                    const ext = asset.animatedMime === 'image/gif' ? 'gif' : 'webp';
-                    aAnim.download = `${baseName}_animated.${ext}`;
-                    aAnim.click();
-                }
-            } catch (e) { console.warn('downloadVaultAsset: animated media skip', e); }
-        })();
+                const resp = await fetch(asset.imgSrc);
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a2 = document.createElement('a');
+                a2.href = url;
+                a2.download = `${baseName}_hd.png`;
+                a2.click();
+                setTimeout(() => URL.revokeObjectURL(url), 5000);
+            } catch(e) {
+                window.open(asset.imgSrc, '_blank');
+            }
+        }
     }
 
     // Gera um WebP animado simples (2 frames com glow pulsante) a partir
@@ -4937,6 +5014,9 @@ async function logoutSession() {
             sourceAssets = targetProfile ? await loadCardsFromSupabase(targetProfile.id) : [];
         }
         const exposedAssets = sourceAssets.filter(a => a.exposed);
+        // Ordenação: da carta mais rara/poderosa para a menos rara
+        const RARITY_POWER = { ancestral: 4, legendary: 3, epic: 2, common: 1 };
+        exposedAssets.sort((a, b) => (RARITY_POWER[b.rarityType] || 0) - (RARITY_POWER[a.rarityType] || 0));
         const showcaseGrid = document.getElementById('showcaseGrid');
         if (showcaseGrid) {
             showcaseGrid.innerHTML = '';
@@ -5326,16 +5406,26 @@ async function logoutSession() {
     });
 
     async function viewExternalProfile(username) {
-        closeInspectModal();
-        const p = await fetchProfileByUsername(username);
-        // BUGFIX (redirecionamento): troca a tela ANTES de popular os dados,
-        // e usa skipProfileReload=true para impedir que navigateTo('profile')
-        // recarregue o perfil do usuário logado por cima do perfil-alvo.
-        navigateTo('profile', true);
-        if(p) {
-            await viewTargetUserCollection(p.username, p.code, p.bio, p.avatar, p.banner, p.username === currentUser.username);
-        } else {
-            await viewTargetUserCollection(username, "#9999", "Membro estável.", "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", "", false);
+        try {
+            closeInspectModal();
+        } catch(e) {}
+        try {
+            const p = await fetchProfileByUsername(username);
+            // BUGFIX (redirecionamento): troca a tela ANTES de popular os dados,
+            // e usa skipProfileReload=true para impedir que navigateTo('profile')
+            // recarregue o perfil do usuário logado por cima do perfil-alvo.
+            navigateTo('profile', true);
+            if(p) {
+                await viewTargetUserCollection(p.username, p.code, p.bio, p.avatar, p.banner, p.username === currentUser.username);
+            } else {
+                await viewTargetUserCollection(username, "#9999", "Membro estável.", "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", "", false);
+            }
+        } catch(e) {
+            console.warn('viewExternalProfile error (fallback mockup):', e);
+            try {
+                navigateTo('profile', true);
+                await viewTargetUserCollection(username, "#9999", "Operador desconectado.", "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", "", false);
+            } catch(e2) { console.warn('viewExternalProfile fallback failed:', e2); }
         }
     }
 
@@ -6989,6 +7079,7 @@ function lojaFilterCategory(cat) {
 }
 
 function lojaSwitchTab(tab) {
+    try {
     const contratosPanel   = document.getElementById('lojaTabContratos');
     const cosmeticosPanel  = document.getElementById('lojaTabCosmeticos');
     const fragmentosPanel  = document.getElementById('lojaTabFragmentos');
@@ -7011,8 +7102,7 @@ function lojaSwitchTab(tab) {
 
     if (tab === 'contratos') {
         contratosPanel.classList.remove('hidden');
-        btnContratos.classList.remove(...inactiveBtnClasses);
-        btnContratos.classList.add(...activeBtnClasses);
+        if (btnContratos) { btnContratos.classList.remove(...inactiveBtnClasses); btnContratos.classList.add(...activeBtnClasses); }
     } else if (tab === 'fragmentos') {
         if (fragmentosPanel) fragmentosPanel.classList.remove('hidden');
         if (btnFragmentos) {
@@ -7023,9 +7113,9 @@ function lojaSwitchTab(tab) {
         }
     } else {
         cosmeticosPanel.classList.remove('hidden');
-        btnCosmeticos.classList.remove(...inactiveBtnClasses);
-        btnCosmeticos.classList.add(...activeBtnClasses);
+        if (btnCosmeticos) { btnCosmeticos.classList.remove(...inactiveBtnClasses); btnCosmeticos.classList.add(...activeBtnClasses); }
     }
+    } catch(e) { console.warn('lojaSwitchTab error:', e); }
 }
 
 // ── HANDLERS ESTRUTURADOS — INTEGRAÇÃO SUPABASE ──
