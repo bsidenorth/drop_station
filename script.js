@@ -31,7 +31,7 @@ let authMode = 'login';
 
 let currentUser = {
     loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
-    bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
+    bio: "Explorador da rede dr0p_station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
     followers: 12, following: 4, followedByMe: false,
     inventory: [], // populado na Parte 3 (inventário)
     cosmetics: [], // ids dos cosméticos da Loja (molduras/fundos/adereços/estantes/emoticons) já comprados — persistido em profiles.cosmetics
@@ -251,7 +251,7 @@ function applyProfileToCurrentUser(profile) {
 function resetCurrentUserToAnon() {
     currentUser = {
         loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
-        bio: "Explorador da rede Drop Station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
+        bio: "Explorador da rede dr0p_station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
         followers: 12, following: 4, followedByMe: false, inventory: [],
         cosmetics: [], equippedCosmetics: { background: null, prop: null, shelf: null, emoticon: null }, fragments: 0
     };
@@ -383,7 +383,7 @@ async function handleAuthSubmit(event) {
             }
             const age = calculateAge(parseInt(day, 10), parseInt(month, 10), parseInt(year, 10));
             if (age < 18) {
-                showCyberAlert('// ACESSO_BLOQUEADO //', 'Drop Station é uma rede exclusiva para operadores +18. Este terminal não pode ser consolidado por menores de idade.', 'error');
+                showCyberAlert('// ACESSO_BLOQUEADO //', 'dr0p_station é uma rede exclusiva para operadores +18. Este terminal não pode ser consolidado por menores de idade.', 'error');
                 return;
             }
             if (!termsOk) {
@@ -1056,7 +1056,7 @@ async function logoutSession() {
             'vault-title': 'MEU COFRE', 'market-title': 'MERCADO P2P DIRECT', 'messages-title': 'INBOX // DIALOGOS_CRIPTOGRAFADOS', 'profile-showcase': 'VITRINE EXPOSTA',
             'lbl-id': 'CÓDIGO ID CARD', 'free-sub': 'RISCO DE QUEBRA // FLUXO INESTÁVEL', 'premium-sub': '100% SEGURO // GARANTIA DE COMPILAÇÃO',
             'faq-title': '> TERMINAL_INFO // PERGUNTAS_FREQUENTES',
-            'faq-q1': '[+] O que é o Drop Station?',
+            'faq-q1': '[+] O que é o dr0p_station?',
             'faq-a1': '▸ Plataforma P2P de cards digitais gerados por IA. Cada card é único, rastreado no registry e negociável em B$ (Bumps).',
             'faq-q2': '[+] O que são Bumps (B$)?',
             'faq-a2': '▸ Moeda interna da rede. Usada para resgatar cards épicos/lendários, comprar no mercado P2P e propor trocas. Carregue via PIX ou cripto.',
@@ -1069,7 +1069,7 @@ async function logoutSession() {
             'faq-q6': '[+] Existe risco de perder cards na Fornalha ou em Contratos?',
             'faq-a6': '▸ Sim. Tanto a Fornalha de Sobrecarga quanto os Contratos envolvem risco real de destruição permanente da carta submetida — uma vez confirmada a operação, instabilidades de rede podem corromper o ativo sem aviso prévio, sem direito a estorno. Cards destruídos rendem Fragmentos de Sucata como compensação parcial, nunca o card em si.',
             'faq-q7': '[+] De onde vêm as artes dos cards?',
-            'faq-a7': '▸ O terminal intercepta sinais soltos pela rede mundial — referências de cultura pop, memes e ruído visual coletivo — e os processa através de algoritmos de mutação visual próprios. O resultado é uma paródia artística reinterpretada e única, gerada pela própria rede Drop Station.',
+            'faq-a7': '▸ O terminal intercepta sinais soltos pela rede mundial — referências de cultura pop, memes e ruído visual coletivo — e os processa através de algoritmos de mutação visual próprios. O resultado é uma paródia artística reinterpretada e única, gerada pela própria rede dr0p_station.',
             'log-prefix': 'LOG // ', 'download-btn': 'RESGATAR ATIVO',
             'stability-label': 'TEMPO DE RESGATE: 10s',
             'market-landing-sub': 'VISUALIZAÇÃO PÚBLICA — LOGIN NECESSÁRIO PARA COMPRAR',
@@ -1081,7 +1081,7 @@ async function logoutSession() {
             'vault-title': 'MY SECURE VAULT', 'market-title': 'P2P MARKET DIRECT', 'messages-title': 'INBOX // ENCRYPTED_CHATS', 'profile-showcase': 'EXPOSED SHOWCASE',
             'lbl-id': 'CARD ID CODE', 'free-sub': 'RISK OF SHATTER // UNSTABLE FLOW', 'premium-sub': '100% SECURE // COMPILATION WARRANTY',
             'faq-title': '> TERMINAL_INFO // FREQUENTLY ASKED',
-            'faq-q1': '[+] What is Drop Station?',
+            'faq-q1': '[+] What is dr0p_station?',
             'faq-a1': '▸ P2P platform for AI-generated digital cards. Each card is unique, tracked in the registry and tradeable in B$ (Bumps).',
             'faq-q2': '[+] What are Bumps (B$)?',
             'faq-a2': '▸ Internal network currency. Used to claim epic/legendary cards, buy on P2P market and propose trades. Load via PIX or crypto.',
@@ -1094,7 +1094,7 @@ async function logoutSession() {
             'faq-q6': '[+] Is there a risk of losing cards in the Furnace or Contracts?',
             'faq-a6': '▸ Yes. Both the Overload Furnace and Contracts carry a real risk of permanent destruction of the submitted card — once the operation is confirmed, network instabilities can corrupt the asset without prior warning, with no refund. Destroyed cards yield Scrap Fragments as partial compensation, never the card itself.',
             'faq-q7': '[+] Where do the card arts come from?',
-            'faq-a7': '▸ The terminal intercepts stray signals from the global network — pop culture references, memes and collective visual noise — and processes them through proprietary visual mutation algorithms. The result is a unique, reinterpreted artistic parody generated by the Drop Station network itself.',
+            'faq-a7': '▸ The terminal intercepts stray signals from the global network — pop culture references, memes and collective visual noise — and processes them through proprietary visual mutation algorithms. The result is a unique, reinterpreted artistic parody generated by the dr0p_station network itself.',
             'log-prefix': 'LOG // ', 'download-btn': 'CLAIM ASSET',
             'stability-label': 'CLAIM TIME LEFT: 10s',
             'market-landing-sub': 'PUBLIC VIEW — LOGIN REQUIRED TO PURCHASE',
@@ -1104,13 +1104,13 @@ async function logoutSession() {
 
     const CYBER_VOICES = {
         PT: [
-            "Acesso concedido.", "Brecha de dados detectada.", "Drop Station online.", "Mutação instável.",
+            "Acesso concedido.", "Brecha de dados detectada.", "dr0p_station online.", "Mutação instável.",
             "Ativo integrado ao cofre.", "Protocolo de fusão iniciado.", "Rede segura estabelecida.",
             "Identidade verificada.", "Transmissão criptografada.", "Alerta de rede ativado.",
             "Compra confirmada.", "Card lendário detectado.", "Terminal ativado. Bem-vindo, operador."
         ],
         EN: [
-            "Access granted.", "Data breach detected.", "Drop Station online.", "Mutation unstable.",
+            "Access granted.", "Data breach detected.", "dr0p_station online.", "Mutation unstable.",
             "Asset secured in vault.", "Fusion protocol initiated.", "Secure channel established.",
             "Identity verified.", "Encrypted transmission.", "Network alert activated.",
             "Purchase confirmed.", "Legendary card detected.", "Terminal activated. Welcome, operator."
@@ -1396,42 +1396,12 @@ async function logoutSession() {
         }
         if (screenId === 'contracts') renderContractsScreen();
         if (screenId === 'loja') renderLoja(true);
-
-        closeMobileNavMenu();
     }
 
-    // ── MENU HAMBÚRGUER MOBILE ──────────────────────────────────────────
-    // Alterna o painel de navegação no mobile (.nav-menu-wrapper.is-open).
-    // No desktop o botão fica oculto via CSS e o menu permanece sempre
-    // visível em modo horizontal — esta função só tem efeito visual abaixo
-    // do breakpoint de 480px.
-    function toggleMobileNavMenu() {
-        const wrapper = document.getElementById('navMenuWrapper');
-        const btn = document.getElementById('btnHamburgerMenu');
-        if (!wrapper || !btn) return;
-        const isOpen = wrapper.classList.toggle('is-open');
-        btn.classList.toggle('is-active', isOpen);
-        btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    }
-
-    function closeMobileNavMenu() {
-        const wrapper = document.getElementById('navMenuWrapper');
-        const btn = document.getElementById('btnHamburgerMenu');
-        if (!wrapper || !btn) return;
-        wrapper.classList.remove('is-open');
-        btn.classList.remove('is-active');
-        btn.setAttribute('aria-expanded', 'false');
-    }
-
-    // Fecha o menu mobile ao clicar/tocar fora dele
-    document.addEventListener('click', (e) => {
-        const wrapper = document.getElementById('navMenuWrapper');
-        const btn = document.getElementById('btnHamburgerMenu');
-        if (!wrapper || !btn) return;
-        if (!wrapper.classList.contains('is-open')) return;
-        if (wrapper.contains(e.target) || btn.contains(e.target)) return;
-        closeMobileNavMenu();
-    });
+    // ── MENU HAMBÚRGUER MOBILE — REMOVIDO ───────────────────────────────
+    // O menu hambúrguer foi eliminado do projeto. A navegação mobile agora
+    // usa o mesmo .nav-menu-wrapper empilhado por flex-wrap, sem painel
+    // suspenso nem botão de alternância.
 
     function handleProfileNavClick() {
         if (!currentUser.loggedIn) {
@@ -2117,11 +2087,11 @@ async function logoutSession() {
                     <p style="margin:0 0 8px;">Para transformar este card num <b style="color:#9933ff;">NFT ERC-721</b> na blockchain, você precisará:</p>
                     <div style="padding-left:8px; border-left:2px solid #9933ff44;">
                         <div>① Conectar sua carteira (ex: <b style="color:#fff;">MetaMask</b>)</div>
-                        <div>② Aprovar o contrato do Drop Station</div>
+                        <div>② Aprovar o contrato do dr0p_station</div>
                         <div>③ Pagar o <b style="color:#ffaa00;">gas fee</b> em ETH (custo variável da rede)</div>
                         <div>④ Aguardar a confirmação on-chain (~30s)</div>
                     </div>
-                    <p style="margin:10px 0 0; color:#555566; font-size:0.48rem;">O controle e o custo são <b style="color:#fff;">inteiramente seus</b>. O Drop Station nunca cobra taxas de mint — apenas o gás da rede Ethereum.</p>
+                    <p style="margin:10px 0 0; color:#555566; font-size:0.48rem;">O controle e o custo são <b style="color:#fff;">inteiramente seus</b>. O dr0p_station nunca cobra taxas de mint — apenas o gás da rede Ethereum.</p>
                 </div>
 
                 <!-- Aviso de simulação -->
@@ -2677,7 +2647,7 @@ async function logoutSession() {
                     }
                     <button class="btn-action btn-gift" data-action="gift" data-idx="${index}" style="border-color:${(a.exposed||a.forSale)?'#555':'#ff00ff'};color:${(a.exposed||a.forSale)?'#555':'#ff00ff'};${(a.exposed||a.forSale)?'cursor:not-allowed;opacity:0.5;':''}" ${(a.exposed||a.forSale)?'disabled title="Card indisponível para presente (exposto ou listado)"':''}>🎁 PRESENTEAR</button>
                     `}
-                    <button class="btn-action btn-dl"     data-action="download" data-idx="${index}">⬇ download asset</button>
+                    <button class="btn-action btn-dl"     data-action="download" data-idx="${index}">Obter Item 📥</button>
                 </div>
             `;
             card.querySelector('.album-preview-wrapper').addEventListener('click', () => {
@@ -3235,10 +3205,12 @@ async function logoutSession() {
                     ${prov.parentIds ? `<div>LINHAGEM: <span style="color:#ffaa00;">${prov.parentIds.join(' + ')}</span></div>` : ''}
                     ${cardAsset.isTokenized
                         ? `<div style="color:#00ff66; margin-top:4px;">✓ TOKENIZADO EM NFT</div>`
-                        : `<button class="btn-action inspect-web3-btn" style="margin-top:8px; border-color:#9933ff; color:#9933ff; font-size:0.5rem; padding:5px 12px; width:auto;"
-                            onclick="showTokenizeModal(${JSON.stringify(cardAsset.id).replace(/"/g,'&quot;')})">
-                            ⬡ TOKENIZAR CARD (Web3)
-                           </button>`
+                        : (ownerName === currentUser.username
+                            ? `<button class="btn-action inspect-web3-btn" style="margin-top:8px; border-color:#9933ff; color:#9933ff; font-size:0.5rem; padding:5px 12px; width:auto;"
+                                onclick="showTokenizeModal(${JSON.stringify(cardAsset.id).replace(/"/g,'&quot;')})">
+                                ⬡ TOKENIZAR CARD (Web3)
+                               </button>`
+                            : '')
                     }
                </div>`
             : `<div style="font-size:0.45rem; color:#333344; margin-top:10px; font-family:'Space Mono',monospace;">
