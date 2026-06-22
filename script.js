@@ -1,5 +1,5 @@
 // =========================================================
-// DROP STATION — PARTE 1/4: AUTH (SUPABASE)
+// dr0p_station — PARTE 1/4: AUTH (SUPABASE)
 // SUBSTITUI no script.js original:
 //   - bloco "PERSISTÊNCIA DA SESSÃO ATIVA" (saveCurrentSession / restoreCurrentSession)
 //   - bloco "REGISTRY CENTRALIZADO DE UTILIZADORES" (REGISTRY_KEY, SEED_USERS,
@@ -1363,42 +1363,100 @@ async function logoutSession() {
         ans.style.display = (ans.style.display === 'block') ? 'none' : 'block';
     }
 
+    // =========================================================
+    // [FIX ANTI-CRASH] safeNavigationRouter — navigateTo blindada com
+    // try/catch estruturado em TODOS os pontos críticos. Impede o
+    // crash intermitente que redirecionava o usuário para a Home.
+    // =========================================================
     function navigateTo(screenId, skipProfileReload) {
+        // [safeNavigationRouter] Guarda de tipo: screenId deve ser string
+        try {
+            if (!screenId || typeof screenId !== 'string') {
+                console.error('[safeNavigationRouter] screenId inválido:', screenId);
+                return;
+            }
+        } catch(routeGuardErr) {
+            console.error('[safeNavigationRouter] Erro no guard de tipo:', routeGuardErr);
+            return;
+        }
+
         try { playSynthSound('click'); } catch(e) {}
 
-        // Limpa estado anterior do drop ao sair do engine, evitando botão travado/duplicação
+        // Limpa estado anterior do drop ao sair do engine
         try {
-            if (screenId !== 'engine') {
-                downloadBtn.disabled = false;
-            } else {
-                downloadBtn.disabled = false;
-            }
+            if (downloadBtn) downloadBtn.disabled = false;
         } catch(e) {}
 
+        // Troca de tela SPA
         try {
             document.querySelectorAll('.spa-screen').forEach(s => s.classList.remove('active'));
-            const t = document.getElementById(`screen-${screenId}`);
-            if(t) t.classList.add('active');
-        } catch(e) { console.warn('navigateTo screen switch error:', e); return; }
+            const t = document.getElementById('screen-' + screenId);
+            if (t) {
+                t.classList.add('active');
+            } else {
+                console.warn('[safeNavigationRouter] Tela não encontrada no DOM:', 'screen-' + screenId);
+                // [anti-crash] NÃO redireciona para Home automaticamente — apenas loga o aviso
+                return;
+            }
+        } catch(screenSwitchErr) {
+            console.error('[safeNavigationRouter] Erro ao trocar tela:', screenSwitchErr);
+            return; // aborta navegação sem redirecionar
+        }
 
-        try { if (screenId === 'engine') { setTimeout(resizeCanvases, 50); renderDailyDropButton(); renderDailyMissions(); renderDropStyleFilters(); } } catch(e) { console.warn('navigateTo engine init:', e); }
-        try { if (screenId === 'leaderboard') renderLeaderboard(); } catch(e) { console.warn('navigateTo leaderboard:', e); }
-        try { if (screenId === 'vault') renderVaultGrid(); } catch(e) { console.warn('navigateTo vault:', e); }
-        try { if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); } else { stopLedgerAutoScroll(); } } catch(e) { console.warn('navigateTo market:', e); }
-        try { if (screenId === 'messages') { renderChatThreads(); renderGlobalOffers('offersContainer'); } } catch(e) { console.warn('navigateTo messages:', e); }
-        // BUGFIX (redirecionamento): navegar para 'profile' SEMPRE recarregava os dados
-        // do usuário logado, mesmo quando vínhamos de viewExternalProfile() (clique em
-        // "VER PERFIL" no Inspect). Isso fazia a tela "voltar" pro próprio perfil
-        // imediatamente após abrir o perfil de outra pessoa. Agora, quem já carregou
-        // o perfil-alvo (ex: viewExternalProfile) passa skipProfileReload=true e
-        // navigateTo não pisa em cima dos dados já renderizados.
+        // Inicialização específica por tela — cada bloco isolado
+        try {
+            if (screenId === 'engine') {
+                setTimeout(resizeCanvases, 50);
+                renderDailyDropButton();
+                renderDailyMissions();
+                renderDropStyleFilters();
+            }
+        } catch(e) { console.warn('[safeNavigationRouter] engine init:', e); }
+
+        try { if (screenId === 'leaderboard') renderLeaderboard(); }
+        catch(e) { console.warn('[safeNavigationRouter] leaderboard:', e); }
+
+        try { if (screenId === 'vault') renderVaultGrid(); }
+        catch(e) { console.warn('[safeNavigationRouter] vault:', e); }
+
+        try {
+            if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); }
+            else { stopLedgerAutoScroll(); }
+        } catch(e) { console.warn('[safeNavigationRouter] market:', e); }
+
+        try {
+            if (screenId === 'messages') { renderChatThreads(); renderGlobalOffers('offersContainer'); }
+        } catch(e) { console.warn('[safeNavigationRouter] messages:', e); }
+
+        // [safeNavigationRouter] Carregamento do perfil — protegido contra
+        // redirecionamento fantasma causado por exceção em viewTargetUserCollection.
         try {
             if (screenId === 'profile' && !skipProfileReload) {
-                viewTargetUserCollection(currentUser.username, currentUser.code, currentUser.bio, currentUser.avatar, currentUser.banner, true);
+                if (!currentUser || !currentUser.loggedIn) {
+                    // Usuário deslogado tentando acessar perfil — redireciona para auth
+                    // de forma controlada (não como crash)
+                    navigateTo('auth');
+                    return;
+                }
+                viewTargetUserCollection(
+                    currentUser.username,
+                    currentUser.code,
+                    currentUser.bio,
+                    currentUser.avatar,
+                    currentUser.banner,
+                    true
+                );
             }
-        } catch(e) { console.warn('navigateTo profile load:', e); }
-        try { if (screenId === 'contracts') renderContractsScreen(); } catch(e) { console.warn('navigateTo contracts:', e); }
-        try { if (screenId === 'loja') renderLoja(true); } catch(e) { console.warn('navigateTo loja:', e); }
+        } catch(profileErr) {
+            console.error('[safeNavigationRouter] Erro ao carregar perfil:', profileErr);
+            // [anti-crash] NÃO redireciona para Home — mantém tela atual visível
+        }
+
+        try { if (screenId === 'contracts') renderContractsScreen(); }
+        catch(e) { console.warn('[safeNavigationRouter] contracts:', e); }
+
+        try { if (screenId === 'loja') renderLoja(true); }
+        catch(e) { console.warn('[safeNavigationRouter] loja:', e); }
     }
 
     // ── MENU HAMBÚRGUER MOBILE — REMOVIDO ───────────────────────────────
@@ -1701,7 +1759,7 @@ async function logoutSession() {
     // =========================================================
     // PROVENIÊNCIA — ID Único, Hash Criptográfico e Timestamp
     // Sistema interno de prova de origem: todo card gerado no
-    // Drop Station carrega uma assinatura imutável. Mesmo sem
+    // dr0p_station carrega uma assinatura imutável. Mesmo sem
     // blockchain, o registro no localStorage funciona como
     // "ata de nascimento" do ativo. Útil para detectar cópias
     // e como base para tokenização futura (Web3).
@@ -2255,6 +2313,57 @@ async function logoutSession() {
     const DROP_VISUAL_STYLES = DROP_FILTER_DB.common.map(v => v.name)
         .concat(DROP_FILTER_DB.epic.map(v => v.name))
         .concat(DROP_FILTER_DB.legendary.map(v => v.name));
+
+    // =========================================================
+    // [FIX FUSÃO] BANCO INTERNO DE FILTROS DE FUSÃO (30 MODIFICADORES EXCLUSIVOS)
+    // Estes filtros NÃO aparecem em nenhum menu de seleção — são aplicados
+    // de forma oculta pelo gerador ao processar a fusão de duas cartas.
+    // Cada fusão sorteia 1 filtro aleatório deste banco, sobrepondo ao
+    // buildRandomFusionFilter existente para maior variação visual.
+    // =========================================================
+    const FUSION_INTERNAL_FILTER_DB = [
+        { name: 'NEURAL_DECAY',       filter: 'hue-rotate(15deg) saturate(320%) contrast(190%) brightness(85%)' },
+        { name: 'CHROMATIC_BREACH',   filter: 'invert(18%) saturate(480%) hue-rotate(142deg) contrast(210%)' },
+        { name: 'SIGNAL_COLLAPSE',    filter: 'brightness(55%) contrast(300%) saturate(150%) hue-rotate(220deg)' },
+        { name: 'QUANTUM_SMEAR',      filter: 'hue-rotate(88deg) saturate(550%) contrast(175%) brightness(78%)' },
+        { name: 'VOID_FRACTURE',      filter: 'invert(35%) hue-rotate(260deg) saturate(700%) contrast(230%)' },
+        { name: 'MAGMA_CORE',         filter: 'hue-rotate(22deg) saturate(600%) contrast(195%) brightness(72%)' },
+        { name: 'CRYO_PULSE',         filter: 'hue-rotate(195deg) saturate(420%) contrast(160%) brightness(92%)' },
+        { name: 'ENTROPY_WAVE',       filter: 'grayscale(40%) contrast(280%) brightness(80%) saturate(300%)' },
+        { name: 'PLASMA_LEAK',        filter: 'hue-rotate(50deg) saturate(700%) contrast(185%) invert(8%)' },
+        { name: 'NEON_CORRUPTION',    filter: 'hue-rotate(110deg) saturate(800%) contrast(200%) brightness(68%)' },
+        { name: 'ACID_PROTOCOL',      filter: 'hue-rotate(78deg) saturate(500%) contrast(220%) brightness(82%)' },
+        { name: 'STATIC_BLEED',       filter: 'contrast(350%) saturate(120%) brightness(70%) hue-rotate(180deg)' },
+        { name: 'DECAY_MATRIX',       filter: 'sepia(80%) hue-rotate(340deg) saturate(450%) contrast(195%)' },
+        { name: 'OVERCLOCKED_RED',    filter: 'hue-rotate(358deg) saturate(650%) contrast(210%) brightness(75%)' },
+        { name: 'TEMPORAL_GLITCH',    filter: 'invert(22%) hue-rotate(300deg) saturate(580%) contrast(240%)' },
+        { name: 'CARBON_MELTDOWN',    filter: 'grayscale(70%) contrast(320%) brightness(60%) saturate(200%)' },
+        { name: 'SHARD_PULSE',        filter: 'hue-rotate(170deg) saturate(380%) contrast(165%) invert(12%)' },
+        { name: 'GHOST_PROTOCOL',     filter: 'saturate(50%) brightness(150%) contrast(250%) hue-rotate(210deg)' },
+        { name: 'OMEGA_BREACH',       filter: 'hue-rotate(330deg) saturate(750%) contrast(220%) brightness(65%)' },
+        { name: 'SILICON_BURN',       filter: 'sepia(100%) hue-rotate(10deg) saturate(500%) contrast(180%)' },
+        { name: 'VOLTAGE_SPIKE',      filter: 'brightness(120%) contrast(230%) saturate(400%) hue-rotate(160deg)' },
+        { name: 'DIGITAL_RUST',       filter: 'sepia(60%) hue-rotate(355deg) saturate(350%) contrast(155%)' },
+        { name: 'FLUX_OVERLOAD',      filter: 'hue-rotate(60deg) saturate(900%) contrast(195%) brightness(70%)' },
+        { name: 'MEMORY_LEAK',        filter: 'invert(28%) saturate(600%) hue-rotate(130deg) contrast(215%)' },
+        { name: 'DARK_SYNTHESIS',     filter: 'brightness(45%) contrast(310%) saturate(700%) hue-rotate(295deg)' },
+        { name: 'GLITCH_LAYER',       filter: 'saturate(1000%) hue-rotate(200deg) contrast(250%) brightness(60%)' },
+        { name: 'NEON_PULSE',         filter: 'hue-rotate(120deg) saturate(850%) contrast(180%) brightness(88%)' },
+        { name: 'CIRCUIT_MELT',       filter: 'hue-rotate(40deg) saturate(600%) contrast(200%) invert(15%)' },
+        { name: 'PHANTOM_BURN',       filter: 'hue-rotate(280deg) saturate(700%) brightness(58%) contrast(260%)' },
+        { name: 'CORE_RESONANCE',     filter: 'hue-rotate(155deg) saturate(450%) contrast(190%) brightness(80%)' }
+    ];
+
+    /**
+     * Retorna um filtro de fusão interno aleatório do banco de 30 modificadores exclusivos.
+     * Chamado de forma oculta durante o processamento visual da fusão.
+     */
+    function _getRandomFusionInternalFilter() {
+        const idx = Math.floor(Math.random() * FUSION_INTERNAL_FILTER_DB.length);
+        return FUSION_INTERNAL_FILTER_DB[idx];
+    }
+
+
 
 
     let dropFilters = {
@@ -2988,6 +3097,62 @@ async function logoutSession() {
         if (modal) modal.classList.remove('active');
     }
 
+
+    // =========================================================
+    // [FIX CAIXA DE PRESENTE] triggerFireworks — animação de fogos de artifício
+    // Injetada via JS puro (divs de partículas) ao fazer Claim de presente.
+    // Dispara partículas coloridas que sobem e explodem na tela, sem bibliotecas.
+    // =========================================================
+    function triggerFireworks() {
+        const COLORS = ['#ff007f', '#00ffff', '#ffaa00', '#00ff66', '#ff6600', '#ff00ff', '#ffffff'];
+        const PARTICLE_COUNT = 60;
+        const BURST_COUNT = 4;
+
+        for (let b = 0; b < BURST_COUNT; b++) {
+            setTimeout(() => {
+                const bx = 15 + Math.random() * 70; // % da viewport
+                const by = 15 + Math.random() * 50;
+                for (let i = 0; i < PARTICLE_COUNT; i++) {
+                    const particle = document.createElement('div');
+                    const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                    const angle = (Math.random() * 360) * (Math.PI / 180);
+                    const speed = 40 + Math.random() * 120; // px
+                    const size  = 3 + Math.random() * 5;
+                    const dur   = 600 + Math.random() * 800; // ms
+
+                    particle.style.cssText = [
+                        'position:fixed',
+                        'z-index:99999',
+                        'pointer-events:none',
+                        'border-radius:50%',
+                        'background:' + color,
+                        'width:' + size + 'px',
+                        'height:' + size + 'px',
+                        'left:' + bx + 'vw',
+                        'top:' + by + 'vh',
+                        'box-shadow:0 0 ' + (size * 2) + 'px ' + color,
+                        'transition:transform ' + dur + 'ms ease-out, opacity ' + dur + 'ms ease-out'
+                    ].join(';');
+                    document.body.appendChild(particle);
+
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            const tx = Math.cos(angle) * speed;
+                            const ty = Math.sin(angle) * speed + (Math.random() * 60); // gravidade simulada
+                            particle.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(0.1)';
+                            particle.style.opacity = '0';
+                            setTimeout(() => { if (particle.parentNode) particle.parentNode.removeChild(particle); }, dur + 50);
+                        });
+                    });
+                }
+            }, b * 280);
+        }
+
+        // Flash de tela breve para dramatizar
+        triggerAncestralFlash('#ff007f');
+        setTimeout(() => triggerAncestralFlash('#00ffff'), 350);
+    }
+
     async function claimReceivedGift(presenteId) {
         const { error } = await sb.rpc('resgatar_presente', {
             p_destinatario_id: currentUser.id,
@@ -2999,6 +3164,7 @@ async function logoutSession() {
             return;
         }
         playSynthSound('success');
+        triggerFireworks(); // [FIX CAIXA DE PRESENTE] dispara fogos de artifício
         speakPhrase("Presente Recebido. Novo Lootbox detectado.", "New Lootbox Detected. Gift received.");
         showCyberAlert('✓ LOOTBOX ABERTA', 'Card adicionado ao seu cofre.', 'success');
 
@@ -4514,13 +4680,34 @@ async function logoutSession() {
                 }
                 // "nenhuma" → mantém só o filtro de cor, sem distorção extra
 
-                // 3) Marca d'água sutil indicando que é resultado de fusão
+                // 3) [FIX FUSÃO] Aplica filtro interno oculto do banco FUSION_INTERNAL_FILTER_DB
+                // sobre o canvas final — camada adicional de modificação exclusiva da fusão
+                // que não aparece em nenhum menu de seleção do usuário.
+                try {
+                    const internalFilter = (typeof _getRandomFusionInternalFilter === 'function')
+                        ? _getRandomFusionInternalFilter()
+                        : null;
+                    if (internalFilter && internalFilter.filter && internalFilter.filter !== 'none') {
+                        const tmpFusion = document.createElement('canvas');
+                        tmpFusion.width = SIZE; tmpFusion.height = SIZE;
+                        const tFCtx = tmpFusion.getContext('2d');
+                        tFCtx.filter = internalFilter.filter;
+                        tFCtx.drawImage(canvas, 0, 0, SIZE, SIZE);
+                        tFCtx.filter = 'none';
+                        ctx.clearRect(0, 0, SIZE, SIZE);
+                        ctx.drawImage(tmpFusion, 0, 0, SIZE, SIZE);
+                    }
+                } catch(e) { /* ignora silenciosamente se o banco não estiver disponível */ }
+
+                // 4) Marca d'água sutil indicando que é resultado de fusão
                 ctx.fillStyle = "rgba(0,0,0,0.55)";
                 ctx.fillRect(16, SIZE - 40, 150, 28);
                 ctx.fillStyle = "#ff00ff";
                 ctx.font = "bold 13px 'Space Mono'";
                 ctx.fillText("FUSION_OUTPUT", 24, SIZE - 21);
 
+                // [DEV CHANGER] Se modo GIF forçado, aplica filtros dinâmicos sobre o canvas final
+                if (typeof _applyDevGifFilters === 'function') { _applyDevGifFilters(canvas, SIZE); }
                 resolve(canvas.toDataURL());
             };
             img.onerror = () => resolve(baseImgSrc); // fallback: usa imagem original sem efeito
@@ -4658,11 +4845,13 @@ async function logoutSession() {
         // consome itens já na entrada da fusão — agora aguarda cada baixa no Supabase
         for (const m of modificadores) { await consumeInventoryItem(m.itemId); }
     
-        const roll = Math.random();
+        // [DEV CHANGER] Se o modo de GIF forçado estiver ativo, garante sucesso absoluto
+        const roll = _devForceGifMode ? (pb + 0.01) : Math.random(); // pb+0.01 garante que cai no ramo de sucesso
     
         // ── FASE 1: animação visual do painel de alquimia ──────────────
         const alchPanel = document.getElementById('alchemyPanel');
         alchPanel.classList.add('alchemy-fusing');
+        _injectDevChangerIfAbsent(); // [DEV] injeta botão se ainda não existir
         playSynthSound('click');
         speakPhrase("Iniciando fusão. Aguarde a estabilização.", "Initiating fusion sequence. Stand by.");
     
@@ -4917,6 +5106,138 @@ async function logoutSession() {
         }, 1200);
     }
 
+
+    // =========================================================
+    // [FIX VITRINE] renderShowcaseInventory — renderiza a vitrine pública
+    // de forma isolada, limpando e repopulando o grid a partir do array
+    // de assets já carregado (savedAssets para o dono, ou o array passado
+    // para terceiros). Garante limpeza do container, ordenação por poder
+    // decrescente e leitura estável das propriedades do card.
+    // Corrige o STATE DESYNC em que cards com exposed:true não apareciam
+    // por o container não ser limpo antes de repopular.
+    // =========================================================
+    function renderShowcaseInventory(assetsArray, displayEquipped, isOwner) {
+        const showcaseGrid = document.getElementById('showcaseGrid');
+        if (!showcaseGrid) return;
+
+        // Limpa SEMPRE antes de repopular — evita duplicação/desync
+        showcaseGrid.innerHTML = '';
+
+        const RARITY_POWER = { ancestral: 4, legendary: 3, epic: 2, common: 1 };
+        // Filtra apenas os expostos (exposed === true), independente de quem é o dono
+        const exposed = (assetsArray || []).filter(a => a && a.exposed === true && !a.isPurged);
+        // Ordena por poder decrescente (ancestral > legendary > epic > common)
+        exposed.sort((a, b) => (RARITY_POWER[b.rarityType] || 0) - (RARITY_POWER[a.rarityType] || 0));
+
+        if (exposed.length === 0) {
+            showcaseGrid.innerHTML = '<div class="empty-vault-notice" style="grid-column:1/-1;">Nenhum ativo exposto na vitrine.</div>';
+        } else {
+            exposed.forEach((a) => {
+                const card = document.createElement('div');
+                card.className = 'album-card rare-' + (a.rarityType || 'common');
+                const rarityColor = a.rarityType === 'ancestral' ? '#ff007f'
+                    : a.rarityType === 'legendary' ? '#00ffff'
+                    : a.rarityType === 'epic' ? '#ffaa00'
+                    : '#aaaaaa';
+                const rarityLabel = currentLang === 'PT'
+                    ? (a.rarityName || a.rarityNameEN || a.rarityType || 'COMUM')
+                    : (a.rarityNameEN || a.rarityName || a.rarityType || 'COMMON');
+                card.innerHTML = '<div class="album-preview-wrapper"><img src="' + (a.imgSrc || '') + '" draggable="false" loading="lazy"></div>'
+                    + '<div class="album-meta">'
+                    + '<div class="album-id">' + (a.id || '—') + '</div>'
+                    + '<div class="album-rarity" style="color:' + rarityColor + '">' + rarityLabel + '</div>'
+                    + '</div>';
+                card.querySelector('.album-preview-wrapper').addEventListener('click', function() { openInspectModal(a); });
+                showcaseGrid.appendChild(card);
+            });
+        }
+        // Reaplica o efeito de estante após repopular (o innerHTML acima não destrói as classes do grid)
+        if (displayEquipped) applyEquippedShelfEffect(displayEquipped);
+    }
+
+
+    // =========================================================
+    // [DEV CHANGER] FORÇAR GIF DE MOVIMENTO — botão discreto de desenvolvedor
+    // Quando ativo, anula chances de erro nas fusões e força 100% dos
+    // resultados a saírem com filtros dinâmicos glitch_layer e neon_pulse.
+    // ACESSO: injetado discretamente no painel de fusão padrão.
+    // =========================================================
+    let _devForceGifMode = false;
+
+    function toggleDevForceGif() {
+        _devForceGifMode = !_devForceGifMode;
+        const btn = document.getElementById('devForceGifBtn');
+        if (btn) {
+            btn.innerText = _devForceGifMode ? '⚡ GIF MODE: ON' : '⚡ FORÇAR GIF DE MOVIMENTO';
+            btn.style.borderColor = _devForceGifMode ? '#00ff66' : '#333344';
+            btn.style.color = _devForceGifMode ? '#00ff66' : '#555566';
+            btn.style.boxShadow = _devForceGifMode ? '0 0 8px #00ff6655' : 'none';
+        }
+        if (_devForceGifMode) {
+            console.warn('[DEV] FORÇAR GIF MODE ATIVADO — fusões retornam 100% com glitch_layer + neon_pulse');
+        } else {
+            console.info('[DEV] FORÇAR GIF MODE desativado — probabilidades normais restauradas');
+        }
+    }
+
+    /**
+     * Injeta o botão de dev no painel de fusão após ele ser exibido.
+     * Chamado após alchemyPanel.style.display = 'block' ou equivalente.
+     */
+    function _injectDevChangerIfAbsent() {
+        const panel = document.getElementById('alchemyPanel');
+        if (!panel) return;
+        if (document.getElementById('devForceGifBtn')) return; // já injetado
+        const devBtn = document.createElement('button');
+        devBtn.id = 'devForceGifBtn';
+        devBtn.className = 'btn-action';
+        devBtn.style.cssText = [
+            'border-color:#333344', 'color:#555566',
+            'font-size:0.45rem', 'letter-spacing:1px',
+            'padding:4px 10px', 'margin-top:8px',
+            'opacity:0.6', 'transition:all 0.2s'
+        ].join(';');
+        devBtn.innerText = '⚡ FORÇAR GIF DE MOVIMENTO';
+        devBtn.title = '[DEV] Força 100% de resultados em movimento com glitch_layer + neon_pulse';
+        devBtn.addEventListener('click', function(e) { e.stopPropagation(); toggleDevForceGif(); });
+        // Insere no final do panel, de forma discreta
+        panel.appendChild(devBtn);
+    }
+
+    /**
+     * Aplica os filtros dinâmicos forçados (glitch_layer + neon_pulse) quando
+     * _devForceGifMode está ativo. Substitui o filtro natural da fusão.
+     */
+    function _applyDevGifFilters(canvas, SIZE) {
+        if (!_devForceGifMode) return canvas;
+        const ctx2 = canvas.getContext('2d');
+        // Camada glitch_layer
+        const tmp1 = document.createElement('canvas');
+        tmp1.width = SIZE; tmp1.height = SIZE;
+        const c1 = tmp1.getContext('2d');
+        c1.filter = 'saturate(1000%) hue-rotate(200deg) contrast(250%) brightness(60%)'; // GLITCH_LAYER
+        c1.drawImage(canvas, 0, 0, SIZE, SIZE);
+        c1.filter = 'none';
+        ctx2.clearRect(0, 0, SIZE, SIZE);
+        ctx2.drawImage(tmp1, 0, 0);
+        // Camada neon_pulse sobreposta com blend
+        const tmp2 = document.createElement('canvas');
+        tmp2.width = SIZE; tmp2.height = SIZE;
+        const c2 = tmp2.getContext('2d');
+        c2.filter = 'hue-rotate(120deg) saturate(850%) contrast(180%) brightness(88%)'; // NEON_PULSE
+        c2.globalAlpha = 0.35;
+        c2.drawImage(canvas, 0, 0, SIZE, SIZE);
+        c2.filter = 'none';
+        ctx2.globalAlpha = 0.65;
+        ctx2.drawImage(tmp2, 0, 0);
+        ctx2.globalAlpha = 1.0;
+        // Marca DEV watermark
+        ctx2.fillStyle = 'rgba(0,255,102,0.7)';
+        ctx2.font = 'bold 10px Space Mono';
+        ctx2.fillText('[DEV:GIF_FORCE]', 10, SIZE - 8);
+        return canvas;
+    }
+
     async function viewTargetUserCollection(username, code, bio, avatar, banner, isOwner) {
         selectedProfileUser = username;
 
@@ -5017,30 +5338,10 @@ async function logoutSession() {
         // Ordenação: da carta mais rara/poderosa para a menos rara
         const RARITY_POWER = { ancestral: 4, legendary: 3, epic: 2, common: 1 };
         exposedAssets.sort((a, b) => (RARITY_POWER[b.rarityType] || 0) - (RARITY_POWER[a.rarityType] || 0));
-        const showcaseGrid = document.getElementById('showcaseGrid');
-        if (showcaseGrid) {
-            showcaseGrid.innerHTML = '';
-            if (exposedAssets.length === 0) {
-                showcaseGrid.innerHTML = '<div class="empty-vault-notice" style="grid-column:1/-1;">Nenhum ativo exposto na vitrine.</div>';
-            } else {
-                exposedAssets.forEach((a) => {
-                    const card = document.createElement('div');
-                    card.className = `album-card rare-${a.rarityType}`;
-                    card.innerHTML = `
-                        <div class="album-preview-wrapper"><img src="${a.imgSrc}" draggable="false"></div>
-                        <div class="album-meta">
-                            <div class="album-id">${a.id}</div>
-                            <div class="album-rarity" style="color:${a.rarityType==='ancestral'?'#ff007f':a.rarityType==='legendary'?'#00ffff':a.rarityType==='epic'?'#ffaa00':'#aaaaaa'}">${currentLang === 'PT' ? a.rarityName : a.rarityNameEN}</div>
-                        </div>
-                    `;
-                    card.querySelector('.album-preview-wrapper').addEventListener('click', () => openInspectModal(a));
-                    showcaseGrid.appendChild(card);
-                });
-            }
-            // Reaplica a estante (o innerHTML='' acima não mexe nas classes do
-            // próprio grid, mas reforça o estado certo logo após popular os cards).
-            applyEquippedShelfEffect(displayEquipped);
-        }
+        // [FIX VITRINE] Usa a função centralizada renderShowcaseInventory
+        // que garante limpeza do container, ordenação por poder e leitura
+        // estável das propriedades — corrige o state desync da vitrine.
+        renderShowcaseInventory(sourceAssets, displayEquipped, isOwner);
 
         const showcaseRankArea = document.getElementById('showcaseRankArea');
         if (showcaseRankArea) computeCollectionLevel(sourceAssets, showcaseRankArea);
@@ -5405,7 +5706,12 @@ async function logoutSession() {
         if (wrapper && box && !wrapper.contains(e.target)) { box.style.display = 'none'; }
     });
 
+    // [FIX ANTI-CRASH] viewExternalProfile blindado com safeNavigationRouter
     async function viewExternalProfile(username) {
+        if (!username || typeof username !== 'string') {
+            console.warn('[safeNavigationRouter] viewExternalProfile: username inválido', username);
+            return;
+        }
         try {
             closeInspectModal();
         } catch(e) {}
@@ -5892,7 +6198,7 @@ async function logoutSession() {
     // Retoma contratos: ver renderBootScreen() / restoreCurrentSession(),
     // chamado lá no momento certo (depois da sessão confirmada), não aqui.
 // =========================================================
-// DROP STATION — PARTE 2/4: CARDS / COFRE (SUPABASE)
+// dr0p_station — PARTE 2/4: CARDS / COFRE (SUPABASE)
 // SUBSTITUI no script.js original:
 //   - função claimAssetLogic
 //   - função toggleExposeAsset
@@ -6219,7 +6525,7 @@ async function toggleExposeAsset(index) {
     );
 }
 // =========================================================
-// DROP STATION — PARTE 3/4: INVENTÁRIO / ITENS (SUPABASE)
+// dr0p_station — PARTE 3/4: INVENTÁRIO / ITENS (SUPABASE)
 // SUBSTITUI no script.js original:
 //   - função getUserInventory
 //   - função consumeInventoryItem (agora assíncrona!)
@@ -6401,7 +6707,7 @@ async function deleteInventoryItem(item) {
 
 
 // =========================================================
-// DROP STATION — PARTE 5/4: FOLLOW REAL + MERCADO REAL (SUPABASE)
+// dr0p_station — PARTE 5/4: FOLLOW REAL + MERCADO REAL (SUPABASE)
 // Requer rodar antes: schema_passo5_followers_e_mercado.sql
 // (cria public.followers + function buy_market_card)
 //
