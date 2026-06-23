@@ -5483,6 +5483,75 @@
     .set-price-input { font-size: 0.75rem; }
 }
 
+/* ── STORIES TITLE MAIOR ── */
+.stories-title {
+    font-size: 0.9rem !important;
+    letter-spacing: 3px !important;
+}
+@media (max-width: 600px) {
+    .stories-title { font-size: 0.78rem !important; }
+}
+
+/* ── TEXTOS BASE MAIORES ── */
+body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
+.btn-navigation .btn-sub-nav, .filter-btn, .ticket-sub,
+.ticket-cost, .deck-footer, .live-pricing label,
+.daily-missions-title, .terminal-faq-box {
+    font-size: 0.72rem;
+}
+.price-card label { font-size: 0.68rem !important; }
+.price-value { font-size: 0.95rem !important; }
+.btn-navigation span:first-child { font-size: 0.72rem !important; }
+.btn-sub-nav { font-size: 0.62rem !important; }
+
+/* ── BOTÃO RESGATAR ATIVO — novo efeito scan-line neon ── */
+.download-trigger-outline {
+    position: relative;
+    overflow: hidden;
+    background: transparent !important;
+    border: 1px solid #00ff66 !important;
+    color: #00ff66 !important;
+    font-size: 0.72rem !important;
+    letter-spacing: 3px !important;
+    padding: 12px 20px !important;
+    transition: color 0.2s, background 0.2s !important;
+    animation: none !important;
+}
+.download-trigger-outline::before {
+    content: '';
+    position: absolute;
+    top: -100%;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(180deg, transparent 0%, rgba(0,255,102,0.15) 50%, transparent 100%);
+    animation: scanDown 2s linear infinite;
+}
+.download-trigger-outline::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 1px solid #00ff6644;
+    box-shadow: inset 0 0 20px rgba(0,255,102,0.08);
+    pointer-events: none;
+}
+.download-trigger-outline:hover {
+    background: rgba(0,255,102,0.08) !important;
+    box-shadow: 0 0 20px rgba(0,255,102,0.3), inset 0 0 20px rgba(0,255,102,0.05) !important;
+}
+.download-trigger-outline:disabled {
+    opacity: 0.35 !important;
+    cursor: not-allowed !important;
+}
+.download-trigger-outline:disabled::before { animation: none; }
+@keyframes scanDown {
+    0%   { top: -100%; }
+    100% { top: 100%; }
+}
+.dl-icon { display: flex; align-items: center; opacity: 0.85; }
+.dl-label { font-weight: 700; font-size: 0.72rem; letter-spacing: 2px; }
+.dl-sub { font-size: 0.52rem; color: #00ff6677; letter-spacing: 1px; }
+
 /* ── COMPLEMENTARES FALTANTES ── */
 .wallet-dash-header {
     display: flex;
