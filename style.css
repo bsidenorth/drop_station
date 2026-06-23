@@ -5181,3 +5181,331 @@
         animation: none;
     }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   CLASSES FALTANTES — adicionadas para corrigir layout mobile
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── BOTÃO DOWNLOAD OUTLINE (engine) ── */
+.download-trigger-outline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: 1px solid #00ff66;
+    color: #00ff66;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 1px;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    width: 100%;
+    justify-content: center;
+    margin-top: 8px;
+}
+.download-trigger-outline:hover {
+    background: #00ff6622;
+}
+.download-trigger-outline:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.dl-icon { display: flex; align-items: center; }
+.dl-label { font-weight: 700; }
+.dl-sub { font-size: 0.55rem; color: #00ff6699; }
+
+/* ── VAULT HEADER ── */
+.vault-header {
+    padding: 16px 0 12px 0;
+}
+.vault-header h2 {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 1rem;
+    color: #fff;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+}
+.vault-header p {
+    font-size: 0.6rem;
+    color: #888899;
+}
+.vault-header-compact {
+    padding: 10px 0 8px 0;
+}
+
+/* ── LOJA NAV BTN ── */
+.btn-loja-nav {
+    border-color: #ffaa00;
+    color: #ffaa00;
+}
+
+/* ── LOJA SCREEN COMPACT ── */
+.loja-screen-compact {
+    width: 100%;
+    min-height: 200px;
+}
+
+/* ── GLOBAL CHAT MESSAGES EXPANDED ── */
+.global-chat-messages-expanded {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    max-height: 320px;
+}
+
+/* ── EMOTE PANEL (chat) ── */
+.gc-emote-panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 8px;
+    background: #0a0a12;
+    border-top: 1px solid #1c1c28;
+}
+.gc-emote-btn {
+    background: transparent;
+    border: 1px solid #1c1c28;
+    border-radius: 4px;
+    padding: 4px 6px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: border-color 0.15s;
+}
+.gc-emote-btn:hover { border-color: #00ff66; }
+.gc-emote-glyph { pointer-events: none; }
+
+/* ── WALLET DASHBOARD ── */
+.wallet-dashboard-card {
+    background: #07070f;
+    border: 1px solid #1c1c28;
+    padding: 18px;
+    max-width: 480px;
+    width: 100%;
+    margin: 0 auto;
+}
+.wallet-balance-hero {
+    text-align: center;
+    margin-bottom: 16px;
+}
+.wallet-balance-label {
+    font-size: 0.55rem;
+    color: #888899;
+    letter-spacing: 2px;
+}
+.wallet-balance-amount {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 2rem;
+    color: #00ffff;
+}
+.wallet-chart-wrap {
+    margin: 12px 0;
+    position: relative;
+}
+.wallet-chart-label {
+    font-size: 0.5rem;
+    color: #555566;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+}
+.wallet-chart-axis-hint {
+    font-size: 0.45rem;
+    color: #333344;
+    text-align: right;
+}
+.wallet-history-label {
+    font-size: 0.55rem;
+    color: #888899;
+    letter-spacing: 1px;
+    margin: 10px 0 6px;
+}
+.wallet-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 160px;
+    overflow-y: auto;
+}
+.wallet-reload-btn {
+    width: 100%;
+    margin-top: 12px;
+    border-color: #00ffff;
+    color: #00ffff;
+}
+.wstat-label { font-size: 0.5rem; color: #555566; letter-spacing: 1px; }
+.wstat-value { font-size: 0.85rem; font-weight: bold; color: #fff; }
+.wstat-pos   { color: #00ff66; }
+.wstat-neg   { color: #ff0044; }
+
+/* ── RELIC TABS ── */
+.relic-tab-bar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+.relic-tab {
+    background: transparent;
+    border: 1px solid #1c1c28;
+    color: #888899;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 1px;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+.relic-tab.active, .relic-tab:hover {
+    border-color: #00ff66;
+    color: #00ff66;
+}
+.relic-modal-compact .modal-card {
+    max-width: 520px;
+}
+
+/* ── SET PRICE MODAL ── */
+.set-price-card {
+    background: #07070f;
+    border: 1px solid #1c1c28;
+    padding: 16px;
+}
+.set-price-card-id {
+    font-size: 0.55rem;
+    color: #555566;
+    margin-bottom: 8px;
+}
+.set-price-input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 10px 0;
+}
+.set-price-input {
+    flex: 1;
+    background: #000;
+    border: 1px solid #00ffff;
+    color: #fff;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.85rem;
+    padding: 8px;
+}
+.set-price-suffix {
+    font-size: 0.65rem;
+    color: #00ffff;
+}
+.set-price-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+.set-price-confirm { flex: 1; }
+.set-price-cancel  { flex: 1; border-color: #ff0044; color: #ff0044; }
+
+/* ── TRANSFER BUMPS ── */
+.transfer-bumps-card {
+    background: #07070f;
+    border: 1px solid #1c1c28;
+    padding: 16px;
+}
+
+/* ── SEND GIFT MODAL ── */
+.send-gift-card {
+    background: #07070f;
+    border: 1px solid #ff00ff;
+    padding: 16px;
+}
+.gift-target-status {
+    font-size: 0.6rem;
+    min-height: 16px;
+    margin-top: 4px;
+}
+
+/* ── RECEIVED GIFTS CARD ── */
+.received-gifts-card {
+    max-width: 480px;
+}
+
+/* ── METHOD BTN (auth) ── */
+.method-btn {
+    background: transparent;
+    border: 1px solid #1c1c28;
+    color: #888899;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+.method-btn.active, .method-btn:hover {
+    border-color: #00ff66;
+    color: #00ff66;
+}
+
+/* ── REGISTER ONLY (auth fields hidden until register) ── */
+.register-only { display: none; }
+
+/* ── CHAT EXPANDED (messages screen) ── */
+.chat-container-expanded {
+    display: flex;
+    height: 100%;
+    min-height: 400px;
+    gap: 0;
+}
+.chat-sidebar-expanded {
+    width: 220px;
+    border-right: 1px solid #1c1c28;
+    overflow-y: auto;
+    flex-shrink: 0;
+}
+.chat-messages-expanded {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── BTN RELICS ── */
+.btn-relics {
+    border-color: #ffaa00;
+    color: #ffaa00;
+}
+
+@media (max-width: 600px) {
+    .wallet-dashboard-card { padding: 12px; }
+    .wallet-balance-amount { font-size: 1.5rem; }
+    .chat-sidebar-expanded { width: 120px; }
+    .relic-tab { font-size: 0.5rem; padding: 4px 7px; }
+    .set-price-input { font-size: 0.75rem; }
+}
+
+/* ── COMPLEMENTARES FALTANTES ── */
+.wallet-dash-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    gap: 10px;
+}
+.chat-window-expanded {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.relic-slots-grid-compact {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+}
+.set-price-term-header {
+    font-size: 0.55rem;
+    color: #555566;
+    letter-spacing: 2px;
+    margin-bottom: 6px;
+}
