@@ -3488,6 +3488,14 @@ async function logoutSession() {
             btn.onclick = () => { closeInspectModal(); initiateTradeContact(ownerName, cardAsset.id); };
             zone.appendChild(btn);
         }
+        // ── BUCKET high-res-assets: permite ao dono original re-baixar o
+        // ativo em HD a partir do modal de inspect, a qualquer momento. ──
+        if (cardAsset.creator === currentUser.username && !cardAsset.isPurged) {
+            const hdBtn = document.createElement('button'); hdBtn.className = 'btn-action'; hdBtn.style.borderColor = '#00ff66';
+            hdBtn.innerText = '📥 DOWNLOAD HD';
+            hdBtn.onclick = () => executeDoubleAssetDownload(cardAsset);
+            zone.appendChild(hdBtn);
+        }
 
         // ── PROVENIÊNCIA: exibe hash, timestamp e botão Web3 ──────────
         const prov = cardAsset.provenance;
@@ -6528,6 +6536,75 @@ function markCardPurgedLocally(card, reason) {
     card.exposed = false; card.forSale = false; card.isListed = false;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// DOWNLOAD SEGURO — BUCKET PRIVADO high-res-assets (Supabase)
+// Gera uma Signed URL de 60s e dispara o download automaticamente.
+// Convenção de nome no bucket: display_id do card sem o '#' + extensão.
+// Ex: card #449201 → arquivo 449201.png
+// Chame com: executeDoubleAssetDownload(asset)
+// ═══════════════════════════════════════════════════════════════
+async function executeDoubleAssetDownload(asset) {
+    if (!asset) return;
+
+    // Só o criador original pode baixar o HD
+    if (asset.creator !== currentUser.username) {
+        showCyberAlert('ACESSO NEGADO', 'Apenas o autor da mintagem pode descarregar o ativo em alta resolução.', 'error');
+        return;
+    }
+
+    // Nome do arquivo no bucket: display_id sem '#' + extensão
+    // Ajuste a extensão (.png / .jpg / .webp) conforme o que você fez upload
+    const rawId = (asset.id || asset.displayId || '').toString().replace('#', '');
+    const nomeDoArquivo = `${rawId}.png`;
+
+    showCyberAlert('COMPILANDO ATIVO...', 'Gerando link seguro de alta resolução. Aguarde.', 'info');
+
+    try {
+        // Gera Signed URL — expira em 60 segundos
+        const { data, error } = await sb
+            .storage
+            .from('high-res-assets')
+            .createSignedUrl(nomeDoArquivo, 60);
+
+        if (error || !data?.signedUrl) {
+            console.error('[HD Download]', error);
+            showCyberAlert(
+                'ERRO DE ACESSO',
+                'Não foi possível gerar o link seguro. Verifique se o arquivo existe no bucket.',
+                'error'
+            );
+            return;
+        }
+
+        // Faz fetch do blob para forçar download direto (sem abrir nova aba)
+        const resp = await fetch(data.signedUrl);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const blob = await resp.blob();
+        const objectUrl = URL.createObjectURL(blob);
+
+        const baseName = `dr0p_${rawId}_${asset.rarityType || 'card'}_1000px`;
+        const ext = blob.type.includes('jpeg') ? 'jpg'
+                  : blob.type.includes('webp') ? 'webp'
+                  : 'png';
+
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = `${baseName}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+
+        showCyberAlert('✓ DOWNLOAD INICIADO', `Ativo HD <b>${baseName}.${ext}</b> enviado para o seu dispositivo.`, 'success');
+
+    } catch (err) {
+        console.error('[HD Download] Falha:', err);
+        showCyberAlert('FALHA NO DOWNLOAD', 'Erro ao baixar o ativo. Tente novamente.', 'error');
+    }
+}
+
 // =========================================================
 // CLAIM: resgata o card que acabou de "rolar" pro cofre do usuário
 // =========================================================
@@ -6608,6 +6685,10 @@ async function claimAssetLogic() {
         pushFeedCard(assetSnapshot);
 
         showCyberAlert('PROCESSO_CONCLUÍDO:', currentLang === 'PT' ? 'Consolidado no seu cofre seguro!' : 'Consolidated into your secure vault!', 'success');
+
+        // ── BUCKET high-res-assets: dispara o download do ativo em alta
+        // resolução automaticamente após o card ser salvo no cofre. ──
+        await executeDoubleAssetDownload(assetSnapshot);
 
     } catch (e) {
         console.error(e);
