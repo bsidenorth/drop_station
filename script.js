@@ -1,384 +1,41 @@
-// =========================================================
-// dr0p_station — PARTE 1/4: AUTH (SUPABASE)
-// SUBSTITUI no script.js original:
-//   - bloco "PERSISTÊNCIA DA SESSÃO ATIVA" (saveCurrentSession / restoreCurrentSession)
-//   - bloco "REGISTRY CENTRALIZADO DE UTILIZADORES" (REGISTRY_KEY, SEED_USERS,
-//     loadRegistry, saveRegistry, registryGet, registrySet, initRegistry IIFE)
-//   - função handleAuthSubmit
-//   - função logoutSession
-// MANTÉM como está: switchAuthMode, sanitizeInput, validateUsername,
-//   RESERVED_USERNAMES, navigateTo, handleProfileNavClick
-// SUBSTITUI TAMBÉM: validatePassword (regras de força mais rígidas)
-// =========================================================
+const baseName = `dr0p_${(asset.id || '').replace('#','')}_${asset.rarityType}`;
 
-const sb = window.supabaseClient;
+        // [FIX DOWNLOAD DUPLO] Dispara os dois arquivos em sequência:
+        // 1) .png estático (imagem base)  2) .gif animado (gerado via canvas)
+        async function triggerDownload(href, filename) {
+            const a = document.createElement('a');
+            a.href = href;
+            a.download = filename;
+            a.click();
+        }
 
-// ── CONSTANTES GLOBAIS: SISTEMA DE FRAGMENTOS DE SUCATA ──────────────
-const FRAGMENTS_PER_CORRUPTED_CARD = 5;
-const FRAGMENTS_PER_FURNACE_FAIL   = 8;
-const FRAGMENTS_TO_REDEEM_TICKET   = 30;
-const FRAGMENTS_TO_REDEEM_ITEM     = 15;
-
-// BUGFIX CRÍTICO: authMode nunca era declarada (só recebia valor dentro de
-// switchAuthMode, sem let/var/const). handleAuthSubmit LÊ authMode logo no
-// início — se a pessoa clicasse em "Acessar Sistema" antes de switchAuthMode
-// ter rodado pelo menos uma vez (ex: token de e-mail confirmado, refresh,
-// alguma ordem de carregamento específica do navegador), authMode ainda não
-// existia e o acesso lançava "ReferenceError: authMode is not defined" —
-// fora do try/catch original, então o clique não fazia NADA visível. Valor
-// inicial 'login' porque a aba "Conectar" já vem ativa por padrão no HTML.
-let authMode = 'login';
-
-let currentUser = {
-    loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
-    bio: "Explorador da rede dr0p_station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
-    followers: 12, following: 4, followedByMe: false,
-    inventory: [], // populado na Parte 3 (inventário)
-    cosmetics: [], // ids dos cosméticos da Loja (molduras/fundos/adereços/estantes/emoticons) já comprados — persistido em profiles.cosmetics
-    // Slots de equipamento ativo (um item por slot, exceto a moldura que tem coluna própria avatar_frame).
-    // Persistido como objeto único em profiles.equipped_cosmetics (jsonb).
-    equippedCosmetics: { background: null, prop: null, shelf: null, emoticon: null }
-};
-
-// =========================================================
-// SEGURANÇA: REGRAS DE FORÇA DA SENHA
-// (substitui o validatePassword original, que só exigia 6 chars)
-// =========================================================
-function validatePassword(raw) {
-    if (!raw || raw.length < 8) return { ok: false, msg: 'Chave deve ter no mínimo 8 caracteres.' };
-    if (raw.length > 128) return { ok: false, msg: 'Chave demasiado longa (máx. 128 chars).' };
-    if (!/[a-z]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 letra minúscula.' };
-    if (!/[A-Z]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 letra maiúscula.' };
-    if (!/[0-9]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 número.' };
-    const COMMON_WEAK = ['12345678', 'password', 'senha123', 'qwerty123', '11111111', 'abc12345', 'Password1'];
-    if (COMMON_WEAK.some(w => w.toLowerCase() === raw.toLowerCase())) {
-        return { ok: false, msg: 'Chave demasiado comum/fraca. Escolhe outra.' };
-    }
-    return { ok: true };
-}
-
-// =========================================================
-// SEGURANÇA: ANTI-BRUTEFORCE NO LOGIN (client-side)
-// Trava tentativas após N falhas seguidas. Isso é só uma camada
-// de UX/atrito — a proteção real fica no painel Supabase:
-// Authentication → Settings → habilite "Leaked password protection",
-// reduza o rate limit de signInWithPassword e ative captcha (hCaptcha/Turnstile).
-// =========================================================
-const LOGIN_LOCK_KEY = 'dr0p_login_attempts';
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_MS = 30000; // 30s
-
-function getLoginAttemptState() {
-    try { return JSON.parse(sessionStorage.getItem(LOGIN_LOCK_KEY)) || { count: 0, lockedUntil: 0 }; }
-    catch (e) { return { count: 0, lockedUntil: 0 }; }
-}
-function setLoginAttemptState(state) {
-    try { sessionStorage.setItem(LOGIN_LOCK_KEY, JSON.stringify(state)); } catch (e) {}
-}
-function registerFailedLogin() {
-    const state = getLoginAttemptState();
-    state.count += 1;
-    if (state.count >= MAX_LOGIN_ATTEMPTS) state.lockedUntil = Date.now() + LOCKOUT_MS;
-    setLoginAttemptState(state);
-}
-function clearLoginAttempts() {
-    setLoginAttemptState({ count: 0, lockedUntil: 0 });
-}
-function secondsLoginLocked() {
-    const state = getLoginAttemptState();
-    if (state.lockedUntil && Date.now() < state.lockedUntil) {
-        return Math.ceil((state.lockedUntil - Date.now()) / 1000);
-    }
-    return 0;
-}
-
-// =========================================================
-// PERFIL (tabela public.profiles)
-// ⚠️ A coluna `email` tem o SELECT revogado para anon/authenticated
-// no schema.sql (privacidade). Por isso TODAS as leituras abaixo usam
-// uma lista explícita de colunas públicas — nunca select('*') nem
-// select('email'). A resolução de e-mail para login passa pela
-// function security definer `email_by_username` (ver fetchEmailByUsername).
-// =========================================================
-const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, banner, status, following, fusion_count, cosmetics, equipped_cosmetics, fragments, created_at, updated_at';
-
-async function fetchProfile(userId) {
-    const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('id', userId).single();
-    if (error) { console.error('fetchProfile:', error.message); return null; }
-    return data;
-}
-
-async function createProfile(userId, username, email) {
-    // Trava por id: se já existe um profile pra esse usuário do Auth
-    // (re-tentativa de registro, F5 no meio do fluxo, double-click no botão,
-    // etc.), retorna o que já existe em vez de inserir uma linha nova.
-    const existing = await fetchProfile(userId);
-    if (existing) return existing;
-
-    const payload = {
-        id: userId,
-        username,
-        email,
-        bumps: 100,
-        code: "#" + Math.floor(1000 + Math.random() * 9000),
-        bio: "Membro verificado.",
-        avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg",
-        avatar_frame: "frame-style-1",
-        banner: ""
-    };
-    // BUGFIX: trocado de .upsert(...) para .insert(...) puro.
-    // upsert(payload, { onConflict: 'id' }) gera um INSERT ... ON CONFLICT
-    // DO UPDATE no Postgres — e o caminho de UPDATE tenta reavaliar TODAS
-    // as colunas do payload, incluindo `email`. Só que o GRANT UPDATE em
-    // profiles (ver schema.sql) não inclui a coluna email (só leitura/escrita
-    // restrita por design). Resultado: o upsert falhava com "permission
-    // denied for column email" sempre que caía no ramo de conflito — e como
-    // o fetchProfile() logo acima já garante que não existe linha duplicada,
-    // esse ramo de conflito nunca deveria ser necessário mesmo. Um insert
-    // puro evita o problema by design.
-    const { data, error } = await sb.from('profiles')
-        .insert(payload)
-        .select(PUBLIC_PROFILE_COLUMNS)
-        .single();
-    if (error) { console.error('createProfile:', error.message); return null; }
-
-    await seedStarterInventory(userId);
-    return data;
-}
-
-// =========================================================
-// LOGIN: resolve o e-mail real a partir do @username/alias
-// (necessário pois o Supabase Auth autentica por e-mail, não por alias)
-// Usa a function `email_by_username` (security definer) em vez de
-// select direto, já que a coluna email não é legível pela API normal.
-// =========================================================
-async function fetchEmailByUsername(username) {
-    // BUGFIX CRÍTICO (login travado / "Nó de rede inexistente ou assinatura
-    // incorreta" em TODA conta existente): validateUsername() SEMPRE devolve
-    // o alias com "@" na frente (ver `value: clean.startsWith('@') ? clean : '@' + clean`),
-    // e createProfile() grava esse mesmo valor (com "@") na coluna profiles.username.
-    // Ou seja, no banco o username é literalmente "@fulano".
-    // Esta function ANTES removia o "@" antes de consultar
-    // (`username.replace(/^@/, '')`), então a query rodava como
-    // `lower(username) = lower('fulano')` contra uma coluna que guarda
-    // "@fulano" — NUNCA dava match. Resultado: email_by_username sempre
-    // retornava null, fetchEmailByUsername sempre retornava null, e o login
-    // caía direto no ramo de "username não encontrado" — para QUALQUER
-    // conta, mesmo com a senha certa, porque o e-mail nunca chegava a ser
-    // resolvido e signInWithPassword nunca era chamado. Não existe (nem
-    // nunca existiu) nenhuma checagem de "assinatura de nó" — é só o texto
-    // do alerta. O fix correto é não normalizar o "@" aqui, já que o valor
-    // já chega exatamente no mesmo formato gravado no banco (validateUsername
-    // já fez essa normalização lá atrás, em handleAuthSubmit).
-    const { data, error } = await sb.rpc('email_by_username', { p_username: username });
-    if (error) { console.error('fetchEmailByUsername:', error.message); return null; }
-    return data || null;
-}
-
-// =========================================================
-// PERFIL DE TERCEIROS: leitura/escrita por username
-// (substitui registryGet/registrySet, que liam/escreviam o
-// "registry" inteiro no localStorage; agora cada operação é
-// uma query direta à tabela `profiles` no Supabase)
-// =========================================================
-async function fetchProfileByUsername(username) {
-    const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('username', username).maybeSingle();
-    if (error) { console.error('fetchProfileByUsername:', error.message); return null; }
-    return data;
-}
-
-// `fieldsCamel` usa as MESMAS chaves do objeto em memória (ex: { bumps: 120, bio: '...' }).
-// Funciona tanto para o currentUser (passa currentUser.id) como para outro usuário
-// (passa o id obtido via fetchProfileByUsername).
-const PROFILE_FIELD_TO_COLUMN = {
-    bumps: 'bumps', bio: 'bio', avatar: 'avatar', avatarFrame: 'avatar_frame', banner: 'banner',
-    status: 'status', following: 'following', code: 'code', username: 'username',
-    fusion_count: 'fusion_count', cosmetics: 'cosmetics', equippedCosmetics: 'equipped_cosmetics', fragments: 'fragments'
-};
-async function updateProfileInSupabase(userId, fieldsCamel) {
-    if (!userId) { console.warn('updateProfileInSupabase: userId ausente, ignorando update remoto.'); return false; }
-    const updatePayload = {};
-    Object.keys(fieldsCamel).forEach(key => {
-        const col = PROFILE_FIELD_TO_COLUMN[key];
-        if (col) updatePayload[col] = fieldsCamel[key];
-    });
-    if (Object.keys(updatePayload).length === 0) return false;
-
-    const { error } = await sb.from('profiles').update(updatePayload).eq('id', userId);
-    if (error) { console.error('updateProfileInSupabase:', error.message); return false; }
-    return true;
-}
-
-function applyProfileToCurrentUser(profile) {
-    currentUser = {
-        loggedIn: true,
-        id: profile.id,
-        username: profile.username,
-        bumps: profile.bumps,
-        code: profile.code,
-        bio: profile.bio,
-        avatar: profile.avatar,
-        avatarFrame: profile.avatar_frame || 'frame-style-1',
-        banner: profile.banner,
-        status: profile.status || 'online',
-        followingList: profile.following || [],
-        following: (profile.following || []).length,
-        followers: 0, // calculado em tempo real onde for exibido (Parte futura)
-        followedByMe: false,
-        inventory: [], // populado na Parte 3
-        cosmetics: Array.isArray(profile.cosmetics) ? profile.cosmetics : [],
-        fragments: typeof profile.fragments === 'number' ? profile.fragments : 0,
-        equippedCosmetics: (profile.equipped_cosmetics && typeof profile.equipped_cosmetics === 'object' && !Array.isArray(profile.equipped_cosmetics))
-            ? { background: null, prop: null, shelf: null, emoticon: null, ...profile.equipped_cosmetics }
-            : { background: null, prop: null, shelf: null, emoticon: null }
-    };
-
-    const navText = document.getElementById('nav-btn-text');
-    if (navText) navText.innerText = currentUser.username.toUpperCase();
-    const vaultBtn = document.getElementById('navVaultBtn'); if (vaultBtn) vaultBtn.style.display = 'flex';
-    const marketBtn = document.getElementById('navMarketBtn'); if (marketBtn) marketBtn.style.display = 'flex';
-    const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'flex';
-    const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'flex';
-    const contractsBtn = document.getElementById('navContractsBtn'); if (contractsBtn) contractsBtn.style.display = 'flex';
-    const lojaBtn = document.getElementById('navLojaBtn'); if (lojaBtn) lojaBtn.style.display = 'flex';
-    const broadcastBtn = document.getElementById('navBroadcastBtn'); if (broadcastBtn) broadcastBtn.style.display = 'flex';
-    const walletBtn = document.getElementById('navWalletBtn'); if (walletBtn) { walletBtn.style.display = 'flex'; }
-    const walletBadge = document.getElementById('wallet-balance-badge'); if (walletBadge) walletBadge.innerText = `${currentUser.bumps} B$`;
-    // [ESCOPO 3] Broadcast btn movido para dentro do chat — gcBroadcastBtn
-    const gcBroadcastBtn = document.getElementById('gcBroadcastBtn'); if (gcBroadcastBtn) gcBroadcastBtn.style.display = 'flex';
-}
-
-function resetCurrentUserToAnon() {
-    currentUser = {
-        loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
-        bio: "Explorador da rede dr0p_station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
-        followers: 12, following: 4, followedByMe: false, inventory: [],
-        cosmetics: [], equippedCosmetics: { background: null, prop: null, shelf: null, emoticon: null }, fragments: 0
-    };
-    messageThreads = {};
-    activeThreadUser = null;
-    savedAssets = [];
-
-    const navText = document.getElementById('nav-btn-text'); if (navText) navText.innerText = "ACESSAR TERMINAL";
-    const vaultBtn = document.getElementById('navVaultBtn'); if (vaultBtn) vaultBtn.style.display = 'none';
-    const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'none';
-    const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'none';
-    const cBtn = document.getElementById('navContractsBtn'); if (cBtn) cBtn.style.display = 'none';
-    const lojaBtn = document.getElementById('navLojaBtn'); if (lojaBtn) lojaBtn.style.display = 'none';
-    const broadcastBtn = document.getElementById('navBroadcastBtn'); if (broadcastBtn) broadcastBtn.style.display = 'none';
-    const walletBtn2 = document.getElementById('navWalletBtn'); if (walletBtn2) walletBtn2.style.display = 'none';
-    const gcBroadcastBtn2 = document.getElementById('gcBroadcastBtn'); if (gcBroadcastBtn2) gcBroadcastBtn2.style.display = 'none';
-}
-
-// =========================================================
-// SESSÃO: restaura login ao recarregar a página (F5)
-// =========================================================
-async function restoreCurrentSession() {
-    const { data: { session } } = await sb.auth.getSession();
-    if (!session) { renderBootScreen(); return false; }
-
-    const profile = await fetchProfile(session.user.id);
-    if (!profile) { renderBootScreen(); return false; }
-
-    applyProfileToCurrentUser(profile);
-    savedAssets = await loadCardsFromSupabase(currentUser.id);
-    currentUser.inventory = await loadInventoryFromSupabase(currentUser.id);
-
-    renderBootScreen();
-    return true;
-}
-
-// Renderiza a tela inicial depois que sabemos, com certeza, se há sessão ativa
-// ou não — evita o "precisa de F5" causado por renderizar antes da sessão
-// do Supabase ser confirmada.
-function renderBootScreen() {
-    if (currentUser.loggedIn) {
-        showContractsBtnAndResume();
-    }
-    navigateTo('engine');
-}
-
-// Única fonte de verdade pro boot e pra troca de sessão entre abas.
-// INITIAL_SESSION dispara uma vez, já com a sessão (ou null) resolvida pelo
-// Supabase — é o gatilho certo pra só então carregar UI/missões/cofre,
-// em vez de tentar ler dados antes da sessão estar confirmada.
-let _bootResolved = false;
-sb.auth.onAuthStateChange((event) => {
-    if (event === 'INITIAL_SESSION' && !_bootResolved) {
-        _bootResolved = true;
-        restoreCurrentSession();
-    } else if (event === 'SIGNED_OUT') {
-        resetCurrentUserToAnon();
-        navigateTo('engine');
-    }
-});
-
-// REALTIME GLOBAL: a chamada de initGlobalRealtime() roda lá no FINAL deste
-// arquivo (depois de globalFeed/ledgerCache/etc. já estarem declarados) —
-// ver bloco "BOOT: REALTIME GLOBAL" no fim do script.js. Chamá-la aqui em
-// cima lançava ReferenceError (TDZ: as variáveis que a function usa ainda
-// não tinham sido declaradas nesse ponto da execução), o que travava TODO
-// o resto do script — nenhum clique/listener depois desse ponto rodava.
-
-// =========================================================
-// LOGIN / REGISTRO
-// =========================================================
-async function handleAuthSubmit(event) {
-    event.preventDefault();
-    const errorEl = document.getElementById('authErrorMsg');
-    errorEl.style.display = 'none';
-    const submitBtn = document.getElementById('authSubmitBtn');
-
-    // TUDO dentro do try/catch agora — incluindo validações de username/senha
-    // e a checagem de bloqueio por tentativas falhas. Antes essas checagens
-    // rodavam ANTES do try, então qualquer erro inesperado ali (ex: acesso a
-    // sessionStorage bloqueado pelo navegador) travava o clique inteiro sem
-    // nenhuma mensagem visível — exatamente o sintoma relatado. Agora, se
-    // algo desse tipo acontecer, cai no catch e mostra "Falha de comunicação
-    // com a rede" em vez de não fazer nada.
-    try {
-        const rawUser = document.getElementById('authUsername').value;
-        const rawPass = document.getElementById('authPassword').value;
-
-        if (authMode === 'login') {
-            const lockedSecs = secondsLoginLocked();
-            if (lockedSecs > 0) {
-                errorEl.innerText = `Muitas tentativas falhas. Aguarda ${lockedSecs}s antes de tentar novamente.`;
-                errorEl.style.display = 'block';
-                return;
+        // — PNG estático —
+        if (asset.imgSrc && asset.imgSrc.startsWith('data:')) {
+            await triggerDownload(asset.imgSrc, `${baseName}_hd.png`);
+        } else if (asset.imgSrc) {
+            try {
+                const resp = await fetch(asset.imgSrc);
+                const blob = await resp.blob();
+                const pngUrl = URL.createObjectURL(blob);
+                await triggerDownload(pngUrl, `${baseName}_hd.png`);
+                setTimeout(() => URL.revokeObjectURL(pngUrl), 5000);
+            } catch(e) {
+                window.open(asset.imgSrc, '_blank');
             }
         }
 
-        const userCheck = validateUsername(rawUser);
-        if (!userCheck.ok) { errorEl.innerText = userCheck.msg; errorEl.style.display = 'block'; return; }
-        const formattedUser = userCheck.value;
-
-        const passCheck = validatePassword(rawPass);
-        if (!passCheck.ok) { errorEl.innerText = passCheck.msg; errorEl.style.display = 'block'; return; }
-
-        submitBtn.disabled = true;
-        if (authMode === 'register') {
-            const rawEmail = (document.getElementById('authEmail').value || '').trim();
-            const confirmPass = document.getElementById('authConfirmPassword').value;
-            const day = document.getElementById('authBirthDay').value;
-            const month = document.getElementById('authBirthMonth').value;
-            const year = document.getElementById('authBirthYear').value;
-            const termsOk = document.getElementById('authTerms').checked;
-
-            const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!rawEmail || !EMAIL_RE.test(rawEmail)) {
-                errorEl.innerText = 'Informa um e-mail válido para vincular ao terminal.';
-                errorEl.style.display = 'block';
-                return;
+        // — GIF/WebM animado — (gerado via _generateAnimatedWebP)
+        try {
+            const animUrl = await _generateAnimatedWebP(asset.imgSrc, asset.rarityType);
+            if (animUrl) {
+                // Pequeno delay para o browser não bloquear os dois downloads simultâneos
+                setTimeout(() => triggerDownload(animUrl, `${baseName}_anim.webm`), 400);
+                setTimeout(() => URL.revokeObjectURL(animUrl), 10000);
             }
-            if (rawPass !== confirmPass) {
-                errorEl.innerText = 'As chaves (senha e confirmação) não coincidem.';
-                errorEl.style.display = 'block';
-                return;
-            }
-            if (!day || !month || !year) {
-                errorEl.innerText = 'Selecione sua data de nascimento completa.';
-                errorEl.style.display = 'block';
+        } catch(e) {
+            console.warn('[DOWNLOAD DUPLO] Falha ao gerar animado:', e);
+        }
+    }                errorEl.style.display = 'block';
                 return;
             }
             const age = calculateAge(parseInt(day, 10), parseInt(month, 10), parseInt(year, 10));
