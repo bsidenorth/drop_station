@@ -1864,7 +1864,7 @@ async function logoutSession() {
         cardObj.qr_code_hash   = `${cardObj.provenance.hash}-${suffix}`;
         // URL pública de inspeção direta do card
         const cardDisplayId = encodeURIComponent(cardObj.id || cardObj.qr_code_hash);
-        cardObj.qr_payload_url = `https://dr0p-station.vercel.app/inspect?card=${cardDisplayId}&hash=${encodeURIComponent(cardObj.qr_code_hash)}`;
+        cardObj.qr_payload_url = `${location.origin}${location.pathname}?card=${cardDisplayId}&hash=${encodeURIComponent(cardObj.qr_code_hash)}`;
         return cardObj;
     }
 
@@ -3495,21 +3495,25 @@ async function logoutSession() {
             ? `<div class="inspect-provenance-box" style="
                     margin-top:12px; padding:8px 10px; border:1px solid ${rarityColor}33;
                     background:rgba(0,0,0,0.5); font-family:'Space Mono',monospace;
-                    font-size:0.48rem; letter-spacing:1px; line-height:1.9; color:#666688;">
-                    <div style="color:${rarityColor}; margin-bottom:4px; font-size:0.5rem; font-weight:bold;">// PROVENIÊNCIA INTERNA</div>
-                    <div>HASH &nbsp;&nbsp;: <span style="color:#fff;">${prov.hash}</span></div>
-                    <div>EMITIDO: <span style="color:#fff;">${new Date(prov.timestamp).toLocaleString('pt-BR')}</span></div>
-                    <div>ORIGEM &nbsp;: <span style="color:#fff;">${prov.origin}</span></div>
-                    ${prov.parentIds ? `<div>LINHAGEM: <span style="color:#ffaa00;">${prov.parentIds.join(' + ')}</span></div>` : ''}
-                    ${cardAsset.isTokenized
-                        ? `<div style="color:#00ff66; margin-top:4px;">✓ TOKENIZADO EM NFT</div>`
-                        : (ownerName === currentUser.username
-                            ? `<button class="btn-action inspect-web3-btn" style="margin-top:8px; border-color:#9933ff; color:#9933ff; font-size:0.5rem; padding:5px 12px; width:auto;"
-                                onclick="showTokenizeModal(${JSON.stringify(cardAsset.id).replace(/"/g,'&quot;')})">
-                                ⬡ TOKENIZAR CARD (Web3)
-                               </button>`
-                            : '')
-                    }
+                    font-size:0.48rem; letter-spacing:1px; line-height:1.9; color:#666688;
+                    display:flex; gap:10px; align-items:flex-start;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="color:${rarityColor}; margin-bottom:4px; font-size:0.5rem; font-weight:bold;">// PROVENIÊNCIA INTERNA</div>
+                        <div>HASH &nbsp;&nbsp;: <span style="color:#fff;">${prov.hash}</span></div>
+                        <div>EMITIDO: <span style="color:#fff;">${new Date(prov.timestamp).toLocaleString('pt-BR')}</span></div>
+                        <div>ORIGEM &nbsp;: <span style="color:#fff;">${prov.origin}</span></div>
+                        ${prov.parentIds ? `<div>LINHAGEM: <span style="color:#ffaa00;">${prov.parentIds.join(' + ')}</span></div>` : ''}
+                        ${cardAsset.isTokenized
+                            ? `<div style="color:#00ff66; margin-top:4px;">✓ TOKENIZADO EM NFT</div>`
+                            : (ownerName === currentUser.username
+                                ? `<button class="btn-action inspect-web3-btn" style="margin-top:8px; border-color:#9933ff; color:#9933ff; font-size:0.5rem; padding:5px 12px; width:auto;"
+                                    onclick="showTokenizeModal(${JSON.stringify(cardAsset.id).replace(/"/g,'&quot;')})">
+                                    ⬡ TOKENIZAR CARD (Web3)
+                                   </button>`
+                                : '')
+                        }
+                    </div>
+                    <div id="inspectQrCanvas" style="flex-shrink:0;"></div>
                </div>`
             : `<div style="font-size:0.45rem; color:#333344; margin-top:10px; font-family:'Space Mono',monospace;">
                     // sem proveniência registrada (card legado)
@@ -3520,11 +3524,10 @@ async function logoutSession() {
         provDiv.innerHTML = provHtml;
         metaBox.appendChild(provDiv);
 
-        // ── QR CODE DINÂMICO: regenera o canvas a cada abertura, refletindo
-        // o estado atual (fusion_count / qr_code_hash) do card ──
+        // ── QR CODE DINÂMICO: agora renderizado dentro do caixote de proveniência ──
         if (prov) renderQRCode(cardAsset, 'inspectQrCanvas');
         const qrBox = document.getElementById('inspectQrBox');
-        if (qrBox) qrBox.style.display = prov ? 'flex' : 'none';
+        if (qrBox) qrBox.style.display = 'none';
 
         document.getElementById('inspectModal').style.display = 'flex';
     }
@@ -8717,3 +8720,45 @@ function _applyLojaTabFilter(tab) {
 
 
 initAirBroadcastAndChatRealtime();
+
+
+// ═══════════════════════════════════════════════════════════════
+// DEEP LINK via QR CODE — abre o modal de inspect diretamente
+// quando a URL contém ?card=ID&hash=HASH (gerado pelo QR do card)
+// ═══════════════════════════════════════════════════════════════
+(function handleQrDeepLink() {
+    const params = new URLSearchParams(window.location.search);
+    const cardId = params.get('card');
+    const cardHash = params.get('hash');
+    if (!cardId) return;
+
+    // Aguarda o app inicializar (Supabase + feed carregado) antes de abrir o modal
+    function tryOpenCard(attempts) {
+        if (attempts <= 0) return;
+
+        // Tenta encontrar o card em todas as fontes disponíveis
+        const allCards = [
+            ...(typeof globalFeed !== 'undefined' ? globalFeed : []),
+            ...(typeof marketAssets !== 'undefined' ? marketAssets : []),
+            ...(typeof savedAssets !== 'undefined' ? savedAssets : [])
+        ];
+
+        const decoded = decodeURIComponent(cardId);
+        const found = allCards.find(c =>
+            String(c.id) === decoded ||
+            (c.qr_code_hash && c.qr_code_hash === decodeURIComponent(cardHash || ''))
+        );
+
+        if (found) {
+            openInspectModal(found);
+            // Limpa o parâmetro da URL sem recarregar a página
+            const cleanUrl = window.location.pathname;
+            window.history.replaceState({}, '', cleanUrl);
+        } else {
+            setTimeout(() => tryOpenCard(attempts - 1), 800);
+        }
+    }
+
+    // Espera 1.5s para o feed carregar do Supabase, depois tenta por até 8s
+    setTimeout(() => tryOpenCard(10), 1500);
+})();

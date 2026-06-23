@@ -5578,3 +5578,30 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
     letter-spacing: 2px;
     margin-bottom: 6px;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   CORREÇÕES: story-node maior + ledger maior
+   ═══════════════════════════════════════════════════════════ */
+
+/* Avatar maior no feed MUTAÇÕES_REDE */
+.story-node {
+    width: 88px !important;
+}
+.story-avatar-wrapper {
+    width: 72px !important;
+    height: 72px !important;
+}
+
+/* Meta (username + ID) maior embaixo do avatar */
+.story-meta {
+    font-size: 0.58rem !important;
+    max-width: 88px !important;
+}
+
+/* Ledger de transações do mercado — timestamp e texto maiores */
+.ledger-ts {
+    font-size: 0.55rem !important;
+}
+.ledger-text {
+    font-size: 0.65rem !important;
+}
