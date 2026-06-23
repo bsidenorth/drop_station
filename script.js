@@ -1,41 +1,2391 @@
-const baseName = `dr0p_${(asset.id || '').replace('#','')}_${asset.rarityType}`;
+    }
 
-        // [FIX DOWNLOAD DUPLO] Dispara os dois arquivos em sequência:
-        // 1) .png estático (imagem base)  2) .gif animado (gerado via canvas)
-        async function triggerDownload(href, filename) {
-            const a = document.createElement('a');
-            a.href = href;
-            a.download = filename;
-            a.click();
-        }
+    async function registerFusionForBadges() {
+        if (!currentUser.id) return;
+        const newCount = (currentUser.fusionCount || 0) + 1;
+        currentUser.fusionCount = newCount;
+        await updateProfileInSupabase(currentUser.id, { fusion_count: newCount });
+    }
 
-        // — PNG estático —
-        if (asset.imgSrc && asset.imgSrc.startsWith('data:')) {
-            await triggerDownload(asset.imgSrc, `${baseName}_hd.png`);
-        } else if (asset.imgSrc) {
-            try {
-                const resp = await fetch(asset.imgSrc);
-                const blob = await resp.blob();
-                const pngUrl = URL.createObjectURL(blob);
-                await triggerDownload(pngUrl, `${baseName}_hd.png`);
-                setTimeout(() => URL.revokeObjectURL(pngUrl), 5000);
-            } catch(e) {
-                window.open(asset.imgSrc, '_blank');
-            }
-        }
+    // =========================================================
+    // EVENTO DE SISTEMA — SOBRECARGA NA REDE (boost temporário de Épicos)
+    // =========================================================
+    let networkOverloadActive = false;
+    const NETWORK_OVERLOAD_EPIC_MULTIPLIER = 2.5;
+    const NETWORK_OVERLOAD_DURATION_MS = 5 * 60 * 1000;
+    const NETWORK_OVERLOAD_CHECK_INTERVAL_MS = 90 * 1000; // checa a cada 90s
+    const NETWORK_OVERLOAD_CHANCE_PER_CHECK = 0.12; // 12% de chance por checagem
 
-        // — GIF/WebM animado — (gerado via _generateAnimatedWebP)
+    function triggerNetworkOverload() {
+        if (networkOverloadActive) return;
+        networkOverloadActive = true;
+        const indicator = document.getElementById('overloadIndicator');
+        if (indicator) indicator.style.display = 'inline-flex';
+
+        showCyberAlert(
+            '⚠️ ALERTA_DE_REDE:',
+            'Sobrecarga na rede! Chance de dropar cards ÉPICOS aumentada por 5 minutos!',
+            'warn'
+        );
+        playTerminalSound('overload');
+
+        setTimeout(() => {
+            networkOverloadActive = false;
+            if (indicator) indicator.style.display = 'none';
+            showCyberAlert('LOG_ERRO:', 'Sobrecarga de rede estabilizada. Probabilidades normalizadas.', 'warn');
+        }, NETWORK_OVERLOAD_DURATION_MS);
+    }
+
+    function startNetworkOverloadLoop() {
+        setInterval(() => {
+            if (networkOverloadActive) return;
+            if (Math.random() < NETWORK_OVERLOAD_CHANCE_PER_CHECK) triggerNetworkOverload();
+        }, NETWORK_OVERLOAD_CHECK_INTERVAL_MS);
+    }
+    startNetworkOverloadLoop();
+
+    // =========================================================
+    // FX — CURTO-CIRCUITO NA LOGO + ESTALO ELÉTRICO SINTETIZADO
+    // =========================================================
+    function playElectricZap() {
         try {
-            const animUrl = await _generateAnimatedWebP(asset.imgSrc, asset.rarityType);
-            if (animUrl) {
-                // Pequeno delay para o browser não bloquear os dois downloads simultâneos
-                setTimeout(() => triggerDownload(animUrl, `${baseName}_anim.webm`), 400);
-                setTimeout(() => URL.revokeObjectURL(animUrl), 10000);
-            }
-        } catch(e) {
-            console.warn('[DOWNLOAD DUPLO] Falha ao gerar animado:', e);
+            initAudio();
+            const bufferSize = audioCtx.sampleRate * 0.18;
+            const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = noiseBuffer;
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'highpass'; filter.frequency.setValueAtTime(1800, audioCtx.currentTime);
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+
+            noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+            noise.start();
+
+            const osc = audioCtx.createOscillator();
+            osc.type = 'square'; osc.frequency.setValueAtTime(90, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.12);
+            const oGain = audioCtx.createGain();
+            oGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            oGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.14);
+            osc.connect(oGain); oGain.connect(audioCtx.destination);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.14);
+        } catch(e) {}
+    }
+
+    // =========================================================
+    // FX — FLASH DE TELA ANCESTRAL (rosa se sucesso, vermelho se quebrar)
+    // =========================================================
+    function triggerAncestralFlash(color) {
+        const flash = document.createElement('div');
+        flash.style.cssText = `
+            position:fixed; inset:0; z-index:99999;
+            background:${color};
+            opacity:0; pointer-events:none;
+            transition: opacity 0.08s ease;
+        `;
+        document.body.appendChild(flash);
+        // Pulsa 3 vezes
+        let count = 0;
+        const pulse = () => {
+            flash.style.opacity = '0.35';
+            setTimeout(() => {
+                flash.style.opacity = '0';
+                count++;
+                if (count < 3) setTimeout(pulse, 160);
+                else setTimeout(() => flash.remove(), 200);
+            }, 100);
+        };
+        setTimeout(pulse, 20);
+    }
+
+    // =========================================================
+    // WEB3 — Modal Simulado de Tokenização (Pré-Mint)
+    // Nenhuma transação real acontece aqui. O objetivo é mostrar
+    // ao usuário o fluxo e educá-lo sobre custos de gas, mantendo
+    // controle e custo do lado dele. O card já tem isTokenized:false
+    // como placeholder para integração futura com MetaMask/ERC-721.
+    // =========================================================
+    function showTokenizeModal(cardId) {
+        closeInspectModal();
+        const card = savedAssets.find(a => a.id === cardId);
+        if (!card) return;
+
+        const prov = card.provenance;
+        const rarityColor = card.rarityType === 'ancestral' ? '#ff007f'
+            : card.rarityType === 'legendary' ? '#00ffff'
+            : card.rarityType === 'epic'      ? '#ffaa00'
+            : '#aaaaaa';
+
+        // Injeta modal de tokenização como overlay temporário
+        const overlay = document.createElement('div');
+        overlay.id = 'tokenizeOverlay';
+        overlay.style.cssText = `
+            position:fixed; inset:0; z-index:10000;
+            background:rgba(2,2,8,0.97);
+            display:flex; align-items:center; justify-content:center;
+            padding:20px;
+        `;
+        overlay.innerHTML = `
+            <div style="max-width:480px; width:100%; background:#070712; border:1px solid #9933ff;
+                        padding:28px; font-family:'Space Mono',monospace; position:relative;">
+                <!-- Header -->
+                <div style="color:#9933ff; font-size:0.65rem; letter-spacing:3px; margin-bottom:4px;">⬡ TOKENIZAÇÃO WEB3 // SIMULAÇÃO</div>
+                <div style="color:#fff; font-family:'Archivo Black',sans-serif; font-size:1rem; margin-bottom:16px;">
+                    Transformar em NFT
+                </div>
+
+                <!-- Info do card -->
+                <div style="background:#0d0020; border:1px solid #9933ff33; padding:12px; margin-bottom:16px; font-size:0.52rem; line-height:2; color:#aaaacc;">
+                    <div>CARD &nbsp;&nbsp;&nbsp;: <span style="color:${rarityColor};">${card.id}</span></div>
+                    <div>RARIDADE: <span style="color:${rarityColor};">${card.rarityNameEN}</span></div>
+                    ${prov ? `<div>HASH &nbsp;&nbsp;&nbsp;: <span style="color:#fff;">${prov.hash}</span></div>
+                    <div>EMITIDO : <span style="color:#fff;">${new Date(prov.timestamp).toLocaleString('pt-BR')}</span></div>` : ''}
+                </div>
+
+                <!-- Explicação do fluxo -->
+                <div style="font-size:0.53rem; color:#888899; line-height:1.8; margin-bottom:18px;">
+                    <p style="margin:0 0 8px;">Para transformar este card num <b style="color:#9933ff;">NFT ERC-721</b> na blockchain, você precisará:</p>
+                    <div style="padding-left:8px; border-left:2px solid #9933ff44;">
+                        <div>① Conectar sua carteira (ex: <b style="color:#fff;">MetaMask</b>)</div>
+                        <div>② Aprovar o contrato do dr0p_station</div>
+                        <div>③ Pagar o <b style="color:#ffaa00;">gas fee</b> em ETH (custo variável da rede)</div>
+                        <div>④ Aguardar a confirmação on-chain (~30s)</div>
+                    </div>
+                    <p style="margin:10px 0 0; color:#555566; font-size:0.48rem;">O controle e o custo são <b style="color:#fff;">inteiramente seus</b>. O dr0p_station nunca cobra taxas de mint — apenas o gás da rede Ethereum.</p>
+                </div>
+
+                <!-- Aviso de simulação -->
+                <div style="background:#1a0033; border:1px dashed #9933ff55; padding:8px 12px; margin-bottom:18px; font-size:0.48rem; color:#9933ff88; text-align:center;">
+                    ⚠ MODO SIMULAÇÃO — Nenhuma transação real será executada.
+                    <br>A integração com MetaMask será ativada em breve.
+                </div>
+
+                <!-- Botões -->
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="btn-action" style="border-color:#9933ff; color:#9933ff; flex:1;"
+                        onclick="simulateMintAttempt('${cardId}')">
+                        🦊 SIMULAR MINT COM METAMASK
+                    </button>
+                    <button class="btn-action" style="border-color:#333344; color:#555566;"
+                        onclick="document.getElementById('tokenizeOverlay').remove()">
+                        CANCELAR
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+
+    /** Simula o fluxo de mint — não faz nenhuma transação real. */
+    function simulateMintAttempt(cardId) {
+        const overlay = document.getElementById('tokenizeOverlay');
+        if (overlay) overlay.remove();
+
+        // Abre o modal de inspect novamente com confirmação simulada
+        showCyberAlert(
+            '⬡ METAMASK // SIMULAÇÃO',
+            `<div style="font-family:'Space Mono',monospace; font-size:0.55rem; line-height:2; text-align:left;">
+                <div style="color:#9933ff; margin-bottom:8px;">> CONECTANDO CARTEIRA...</div>
+                <div>> CARTEIRA: 0x71C7...4F3a <span style="color:#00ff66;">✓ CONECTADA</span></div>
+                <div>> REDE: Ethereum Mainnet</div>
+                <div>> GAS ESTIMADO: ~0.0018 ETH (~$4.20)</div>
+                <div style="color:#ffaa00; margin-top:8px;">> AGUARDANDO ASSINATURA...</div>
+                <div style="color:#555566; font-size:0.45rem; margin-top:10px;">
+                    [ Integração real será ativada na próxima fase do projeto. ]<br>
+                    Teu card <b>${cardId}</b> já tem hash e timestamp registrados e estará pronto para mint quando o contrato for implantado.
+                </div>
+            </div>`,
+            'success'
+        );
+    }
+
+    function triggerLogoGlitch() {
+        const logo = document.getElementById('appLogo');
+        if (!logo) return;
+        logo.classList.add('logo-shortcircuit');
+        playElectricZap();
+        setTimeout(() => logo.classList.remove('logo-shortcircuit'), 450);
+    }
+
+    function startLogoGlitchLoop() {
+        setInterval(() => {
+            // dispara aleatoriamente, em média a cada ~20-40s
+            if (Math.random() < 0.35) triggerLogoGlitch();
+        }, 12000);
+    }
+    startLogoGlitchLoop();
+
+    // =========================================================
+    // [ESCOPO 6] FILTROS AVANÇADOS DO DROP HUB — Free Roll / Premium Drop
+    // Permite o jogador restringir o pool de raridade, estilo visual e/ou
+    // modo (free/premium) antes de girar. Em vez de re-rolar até bater
+    // (caro e impreciso), os filtros restringem diretamente os arrays de
+    // candidatos usados por executeHardwareRoll — ver _applyDropFilters().
+    // =========================================================
+    // =========================================================
+    // [ESCOPO 6] BANCO DE DADOS DE FILTROS — 15+ VARIAÇÕES POR RARIDADE
+    // Cada raridade tem um pool de variações estéticas (sub-raças) que são
+    // embaralhadas aleatoriamente no momento da dropagem.
+    // =========================================================
+    const DROP_FILTER_DB = {
+        common: [
+            { name: 'CHROME DECAY',       filter: 'contrast(180%) saturate(30%) invert(10%)' },
+            { name: 'BINARY DEEP',        filter: 'saturate(400%) contrast(150%)' },
+            { name: 'RETRO GLITCH',       filter: 'invert(100%) hue-rotate(180deg)' },
+            { name: 'STATIC NOISE',       filter: 'contrast(200%) brightness(80%) saturate(0%)' },
+            { name: 'STEEL PULSE',        filter: 'sepia(60%) contrast(140%) brightness(110%)' },
+            { name: 'GHOST SIGNAL',       filter: 'opacity(80%) saturate(20%) brightness(140%)' },
+            { name: 'ACID WASH',          filter: 'hue-rotate(45deg) saturate(250%) contrast(120%)' },
+            { name: 'DARK MATTER',        filter: 'brightness(60%) contrast(180%) saturate(50%)' },
+            { name: 'FLUX STATIC',        filter: 'contrast(160%) saturate(60%) hue-rotate(200deg)' },
+            { name: 'VOID REMNANT',       filter: 'invert(30%) sepia(40%) contrast(130%)' },
+            { name: 'DATA SMEAR',         filter: 'blur(0.3px) contrast(170%) saturate(80%)' },
+            { name: 'PHANTOM_WIRE',       filter: 'hue-rotate(270deg) contrast(150%) brightness(90%)' },
+            { name: 'JUNK_PULSE',         filter: 'sepia(100%) brightness(120%) saturate(200%)' },
+            { name: 'PALE_SIGNAL',        filter: 'saturate(10%) brightness(130%) contrast(120%)' },
+            { name: 'CARBON_DRIFT',       filter: 'grayscale(80%) contrast(160%) brightness(95%)' }
+        ],
+        epic: [
+            { name: 'GOTHIC APOCALYPSE',  filter: 'grayscale(100%) brightness(120%) contrast(200%)' },
+            { name: 'VIRTUAL OVERDRIVE',  filter: 'sepia(80%) hue-rotate(320deg) saturate(300%)' },
+            { name: 'NEON PULSE',         filter: 'hue-rotate(60deg) saturate(180%) invert(5%)' },
+            { name: 'PLASMA BURN',        filter: 'hue-rotate(15deg) saturate(350%) contrast(160%)' },
+            { name: 'ULTRAVIOLET',        filter: 'hue-rotate(240deg) saturate(400%) brightness(85%)' },
+            { name: 'GLITCH_LAYER',       filter: 'saturate(500%) hue-rotate(120deg) contrast(180%)' },
+            { name: 'TOXIC_GLITCH',       filter: 'hue-rotate(90deg) saturate(600%) contrast(200%) brightness(80%)' },
+            { name: 'SOLAR_FLARE',        filter: 'hue-rotate(30deg) saturate(450%) brightness(110%) contrast(150%)' },
+            { name: 'SHOCK_WAVE',         filter: 'contrast(220%) saturate(280%) hue-rotate(165deg)' },
+            { name: 'PROTOCOL_9',         filter: 'invert(20%) saturate(350%) hue-rotate(75deg) contrast(190%)' },
+            { name: 'CIRCUIT_BURN',       filter: 'sepia(60%) hue-rotate(280deg) saturate(400%) contrast(170%)' },
+            { name: 'DARK_SURGE',         filter: 'brightness(70%) saturate(500%) hue-rotate(200deg)' },
+            { name: 'EMERALD_STATIC',     filter: 'hue-rotate(100deg) saturate(300%) contrast(140%) brightness(95%)' },
+            { name: 'CRIMSON_BYTE',       filter: 'hue-rotate(345deg) saturate(450%) contrast(175%)' },
+            { name: 'HYPERION_DRIFT',     filter: 'saturate(600%) contrast(160%) hue-rotate(50deg) brightness(90%)' }
+        ],
+        legendary: [
+            { name: 'ROSE PHANTOM',       filter: 'hue-rotate(60deg) saturate(180%) invert(5%)' },
+            { name: 'CYBER_VOID',         filter: 'hue-rotate(185deg) saturate(500%) contrast(200%) brightness(75%)' },
+            { name: 'OBSIDIAN_CORE',      filter: 'brightness(50%) contrast(250%) saturate(200%) hue-rotate(220deg)' },
+            { name: 'AQUA_GENESIS',       filter: 'hue-rotate(175deg) saturate(400%) contrast(160%) brightness(90%)' },
+            { name: 'SILVER_PROTOCOL',    filter: 'saturate(0%) brightness(140%) contrast(200%) invert(10%)' },
+            { name: 'GOLDEN_BREACH',      filter: 'sepia(100%) hue-rotate(20deg) saturate(350%) contrast(160%)' },
+            { name: 'ELECTRIC_DEITY',     filter: 'hue-rotate(195deg) saturate(600%) brightness(85%) contrast(190%)' },
+            { name: 'TEMPEST_CORE',       filter: 'hue-rotate(210deg) saturate(450%) brightness(70%) contrast(220%)' },
+            { name: 'STARFALL_DRIFT',     filter: 'brightness(80%) saturate(300%) hue-rotate(240deg) contrast(180%)' },
+            { name: 'VOID_CIRCUIT',       filter: 'invert(15%) hue-rotate(190deg) saturate(550%) contrast(210%)' },
+            { name: 'NEON_FROST',         filter: 'hue-rotate(168deg) saturate(500%) brightness(95%) contrast(170%)' },
+            { name: 'AURORA_SIGNAL',      filter: 'hue-rotate(150deg) saturate(400%) brightness(85%) contrast(160%)' },
+            { name: 'PHANTOM_CIRCUIT',    filter: 'invert(10%) hue-rotate(200deg) saturate(480%) contrast(195%)' },
+            { name: 'DEEP_NETWORK',       filter: 'brightness(65%) saturate(550%) hue-rotate(205deg) contrast(230%)' },
+            { name: 'CHROME_DEITY',       filter: 'saturate(20%) contrast(280%) brightness(85%) hue-rotate(190deg)' }
+        ],
+        ancestral: [
+            { name: 'ROSA PHANTASMA',     filter: 'hue-rotate(300deg) saturate(400%) contrast(130%) brightness(90%)' },
+            { name: 'ROSE_PHANTASMA_MkII',filter: 'hue-rotate(320deg) saturate(600%) contrast(180%) brightness(80%)' },
+            { name: 'BLOOD_PROTOCOL',     filter: 'hue-rotate(350deg) saturate(700%) contrast(200%) brightness(70%)' },
+            { name: 'VOID_MONARCH',       filter: 'invert(30%) hue-rotate(280deg) saturate(800%) contrast(220%) brightness(65%)' },
+            { name: 'DARK_ANCESTRAL',     filter: 'brightness(45%) saturate(900%) hue-rotate(310deg) contrast(250%)' },
+            { name: 'CRIMSON_GOD',        filter: 'hue-rotate(340deg) saturate(750%) brightness(75%) contrast(210%)' },
+            { name: 'SILICON_DEITY',      filter: 'sepia(100%) hue-rotate(330deg) saturate(600%) contrast(190%)' },
+            { name: 'OMEGA_FLUX',         filter: 'invert(20%) saturate(800%) hue-rotate(305deg) contrast(230%) brightness(70%)' },
+            { name: 'PHANTOM_SOUL',       filter: 'hue-rotate(295deg) saturate(700%) brightness(60%) contrast(240%)' },
+            { name: 'TOXIC_GLITCH_MkII',  filter: 'hue-rotate(285deg) saturate(900%) contrast(260%) brightness(55%)' },
+            { name: 'VOID_GENESIS',       filter: 'brightness(50%) saturate(1000%) hue-rotate(315deg) contrast(270%)' },
+            { name: 'INFERNO_CORE',       filter: 'hue-rotate(355deg) saturate(800%) contrast(220%) brightness(65%)' },
+            { name: 'ABYSS_PROTOCOL',     filter: 'invert(25%) hue-rotate(300deg) saturate(750%) brightness(60%)' },
+            { name: 'SPECTRAL_MONARCH',   filter: 'hue-rotate(275deg) saturate(850%) contrast(240%) brightness(70%)' },
+            { name: 'NEURAL_PHANTOM',     filter: 'invert(15%) saturate(950%) hue-rotate(290deg) contrast(260%) brightness(62%)' }
+        ]
+    };
+
+    // Helpers para selecionar variações aleatórias do banco de filtros
+    function _getRandomDropVariant(rarityKey) {
+        const pool = DROP_FILTER_DB[rarityKey] || DROP_FILTER_DB.common;
+        const idx = Math.floor(Math.random() * pool.length);
+        return pool[idx];
+    }
+
+    const DROP_VISUAL_STYLES = DROP_FILTER_DB.common.map(v => v.name)
+        .concat(DROP_FILTER_DB.epic.map(v => v.name))
+        .concat(DROP_FILTER_DB.legendary.map(v => v.name));
+
+    // =========================================================
+    // [FIX FUSÃO] BANCO INTERNO DE FILTROS DE FUSÃO (30 MODIFICADORES EXCLUSIVOS)
+    // Estes filtros NÃO aparecem em nenhum menu de seleção — são aplicados
+    // de forma oculta pelo gerador ao processar a fusão de duas cartas.
+    // Cada fusão sorteia 1 filtro aleatório deste banco, sobrepondo ao
+    // buildRandomFusionFilter existente para maior variação visual.
+    // =========================================================
+    const FUSION_INTERNAL_FILTER_DB = [
+        { name: 'NEURAL_DECAY',       filter: 'hue-rotate(15deg) saturate(320%) contrast(190%) brightness(85%)' },
+        { name: 'CHROMATIC_BREACH',   filter: 'invert(18%) saturate(480%) hue-rotate(142deg) contrast(210%)' },
+        { name: 'SIGNAL_COLLAPSE',    filter: 'brightness(55%) contrast(300%) saturate(150%) hue-rotate(220deg)' },
+        { name: 'QUANTUM_SMEAR',      filter: 'hue-rotate(88deg) saturate(550%) contrast(175%) brightness(78%)' },
+        { name: 'VOID_FRACTURE',      filter: 'invert(35%) hue-rotate(260deg) saturate(700%) contrast(230%)' },
+        { name: 'MAGMA_CORE',         filter: 'hue-rotate(22deg) saturate(600%) contrast(195%) brightness(72%)' },
+        { name: 'CRYO_PULSE',         filter: 'hue-rotate(195deg) saturate(420%) contrast(160%) brightness(92%)' },
+        { name: 'ENTROPY_WAVE',       filter: 'grayscale(40%) contrast(280%) brightness(80%) saturate(300%)' },
+        { name: 'PLASMA_LEAK',        filter: 'hue-rotate(50deg) saturate(700%) contrast(185%) invert(8%)' },
+        { name: 'NEON_CORRUPTION',    filter: 'hue-rotate(110deg) saturate(800%) contrast(200%) brightness(68%)' },
+        { name: 'ACID_PROTOCOL',      filter: 'hue-rotate(78deg) saturate(500%) contrast(220%) brightness(82%)' },
+        { name: 'STATIC_BLEED',       filter: 'contrast(350%) saturate(120%) brightness(70%) hue-rotate(180deg)' },
+        { name: 'DECAY_MATRIX',       filter: 'sepia(80%) hue-rotate(340deg) saturate(450%) contrast(195%)' },
+        { name: 'OVERCLOCKED_RED',    filter: 'hue-rotate(358deg) saturate(650%) contrast(210%) brightness(75%)' },
+        { name: 'TEMPORAL_GLITCH',    filter: 'invert(22%) hue-rotate(300deg) saturate(580%) contrast(240%)' },
+        { name: 'CARBON_MELTDOWN',    filter: 'grayscale(70%) contrast(320%) brightness(60%) saturate(200%)' },
+        { name: 'SHARD_PULSE',        filter: 'hue-rotate(170deg) saturate(380%) contrast(165%) invert(12%)' },
+        { name: 'GHOST_PROTOCOL',     filter: 'saturate(50%) brightness(150%) contrast(250%) hue-rotate(210deg)' },
+        { name: 'OMEGA_BREACH',       filter: 'hue-rotate(330deg) saturate(750%) contrast(220%) brightness(65%)' },
+        { name: 'SILICON_BURN',       filter: 'sepia(100%) hue-rotate(10deg) saturate(500%) contrast(180%)' },
+        { name: 'VOLTAGE_SPIKE',      filter: 'brightness(120%) contrast(230%) saturate(400%) hue-rotate(160deg)' },
+        { name: 'DIGITAL_RUST',       filter: 'sepia(60%) hue-rotate(355deg) saturate(350%) contrast(155%)' },
+        { name: 'FLUX_OVERLOAD',      filter: 'hue-rotate(60deg) saturate(900%) contrast(195%) brightness(70%)' },
+        { name: 'MEMORY_LEAK',        filter: 'invert(28%) saturate(600%) hue-rotate(130deg) contrast(215%)' },
+        { name: 'DARK_SYNTHESIS',     filter: 'brightness(45%) contrast(310%) saturate(700%) hue-rotate(295deg)' },
+        { name: 'GLITCH_LAYER',       filter: 'saturate(1000%) hue-rotate(200deg) contrast(250%) brightness(60%)' },
+        { name: 'NEON_PULSE',         filter: 'hue-rotate(120deg) saturate(850%) contrast(180%) brightness(88%)' },
+        { name: 'CIRCUIT_MELT',       filter: 'hue-rotate(40deg) saturate(600%) contrast(200%) invert(15%)' },
+        { name: 'PHANTOM_BURN',       filter: 'hue-rotate(280deg) saturate(700%) brightness(58%) contrast(260%)' },
+        { name: 'CORE_RESONANCE',     filter: 'hue-rotate(155deg) saturate(450%) contrast(190%) brightness(80%)' }
+    ];
+
+    /**
+     * Retorna um filtro de fusão interno aleatório do banco de 30 modificadores exclusivos.
+     * Chamado de forma oculta durante o processamento visual da fusão.
+     */
+    function _getRandomFusionInternalFilter() {
+        const idx = Math.floor(Math.random() * FUSION_INTERNAL_FILTER_DB.length);
+        return FUSION_INTERNAL_FILTER_DB[idx];
+    }
+
+
+
+
+    let dropFilters = {
+        rarity: 'all',   // all | common | epic | legendary | ancestral
+        style: 'all',    // all | <nome do estilo>
+        mode: 'all'      // all | free | premium
+    };
+
+    function toggleDropFiltersPanel() {
+        const panel = document.getElementById('dropFiltersPanel');
+        if (!panel) return;
+        panel.style.display = panel.style.display === 'none' || !panel.style.display ? 'flex' : 'none';
+    }
+
+    function _updateDropFilterActiveCount() {
+        const count = (dropFilters.rarity !== 'all' ? 1 : 0) + (dropFilters.style !== 'all' ? 1 : 0) + (dropFilters.mode !== 'all' ? 1 : 0);
+        const badge = document.getElementById('dropFilterActiveCount');
+        if (!badge) return;
+        badge.style.display = count > 0 ? 'inline-block' : 'none';
+        badge.innerText = String(count);
+    }
+
+    function setDropRarityFilter(rarity) {
+        dropFilters.rarity = rarity;
+        document.querySelectorAll('#dropRarityFilterTags .drop-filter-tag').forEach(tag => {
+            tag.classList.toggle('active', tag.dataset.rarity === rarity);
+        });
+        _updateDropFilterActiveCount();
+        _applyDropModeVisibility();
+    }
+
+    function setDropStyleFilter(style) {
+        dropFilters.style = style;
+        document.querySelectorAll('#dropStyleFilterTags .drop-filter-tag').forEach(tag => {
+            tag.classList.toggle('active', tag.dataset.style === style);
+        });
+        _updateDropFilterActiveCount();
+    }
+
+    function setDropPoolFilter(mode) {
+        dropFilters.mode = mode;
+        document.querySelectorAll('.drop-filter-tags .drop-filter-tag[data-mode]').forEach(tag => {
+            tag.classList.toggle('active', tag.dataset.mode === mode);
+        });
+        _updateDropFilterActiveCount();
+        _applyDropModeVisibility();
+    }
+
+    // Esconde visualmente o ticket Free/Premium que não combina com o
+    // filtro de MODO selecionado — evita clique acidental no pool errado.
+    function _applyDropModeVisibility() {
+        const btnFree = document.getElementById('btnFree');
+        const btnPremium = document.getElementById('btnPremium');
+        if (btnFree) btnFree.style.display = (dropFilters.mode === 'premium') ? 'none' : 'flex';
+        if (btnPremium) btnPremium.style.display = (dropFilters.mode === 'free') ? 'none' : 'flex';
+    }
+
+    function renderDropStyleFilters() {
+        const container = document.getElementById('dropStyleFilterTags');
+        if (!container) return;
+        const tags = ['<button type="button" class="drop-filter-tag active" data-style="all" onclick="setDropStyleFilter(\'all\')">TODOS</button>']
+            .concat(DROP_VISUAL_STYLES.map(s =>
+                `<button type="button" class="drop-filter-tag" data-style="${s}" onclick="setDropStyleFilter('${s}')">${s}</button>`
+            ));
+        container.innerHTML = tags.join('');
+    }
+
+    // Aplica o filtro de RARIDADE ao roll: se o resultado natural não bate
+    // com o filtro selecionado, força o resultado dentro do subconjunto
+    // permitido em vez de simplesmente descartar o drop. Retorna a
+    // raridade final a ser usada por executeHardwareRoll.
+    function _resolveFilteredRarity(naturalRarityKey, rarityRoll) {
+        if (dropFilters.rarity === 'all') return naturalRarityKey;
+        return dropFilters.rarity; // filtro de raridade força o resultado nessa faixa
+    }
+
+    function _resolveFilteredStyleIndex(naturalIndex) {
+        if (dropFilters.style === 'all') return naturalIndex;
+        const idx = DROP_VISUAL_STYLES.indexOf(dropFilters.style);
+        return idx === -1 ? naturalIndex : idx;
+    }
+
+    function executeHardwareRoll(isPremium) {
+        if (isRolling) return;
+        // PREMIUM_DROP_PASS: bloqueia imediatamente se deslogado
+        if (isPremium && !currentUser.loggedIn) {
+            showCyberAlert('ACESSO_NEGADO:', currentLang === 'PT'
+                ? 'O PREMIUM_DROP_PASS requer autenticação de rede. Faça login para continuar.'
+                : 'PREMIUM_DROP_PASS requires network authentication. Login to proceed.', 'error');
+            return;
         }
-    }                errorEl.style.display = 'block';
+        if (isPremium && currentUser.bumps < 50) { openDepositModal(); return; }
+        if (isPremium) currentUser.bumps -= 50;
+
+        isRolling = true; 
+        activeAssetData = null;
+        downloadBtn.style.display = "none"; 
+        clearInterval(decayInterval);
+        
+        document.getElementById('status-text').innerText = currentLang === 'PT' ? "MINTANDO_DADOS..." : "MINTING_DATA...";
+        targetContainer.className = "target-box rolling"; 
+        stabilityWrapper.style.display = "block";
+
+        document.getElementById('btnFree').classList.add('disabled');
+        document.getElementById('btnPremium').classList.add('disabled');
+
+        const generatedId = "#" + Math.floor(100000 + Math.random() * 900000);
+        metaId.innerText = generatedId;
+
+        let tickTimes = 0;
+        let tickInterval = setInterval(() => { 
+            if(tickTimes < 10) { 
+                playSynthSound('roll'); 
+                tickTimes++; 
+            } 
+        }, 100);
+
+        setTimeout(() => {
+            clearInterval(tickInterval);
+            targetContainer.classList.remove("rolling");
+            document.getElementById('btnFree').classList.remove('disabled');
+            document.getElementById('btnPremium').classList.remove('disabled');
+
+            if (preloadedCanvases.length === 0) { isRolling = false; return; }
+            const sourceBuffer = preloadedCanvases[Math.floor(Math.random() * preloadedCanvases.length)];
+            const bakedBuffer = document.createElement('canvas'); bakedBuffer.width = 600; bakedBuffer.height = 600;
+            const bCtx = bakedBuffer.getContext('2d');
+
+            let watermarkColor = "#ffffff"; 
+            let rarityKey = "common"; 
+            let rarityName = "COMUM"; 
+            let rarityNameEN = "COMMON";
+            let claimCost = 0;
+            let filterStyle = "none"; 
+            let styleName = "CYBER PUNK";
+            let styleNameEN = "CYBER PUNK";
+
+            let randRarity = Math.random();
+            if (!isPremium && randRarity < 0.15) { shatterAsset(); isRolling = false; return; }
+
+            const visualStylesPT = DROP_VISUAL_STYLES;
+            const visualStylesEN = DROP_VISUAL_STYLES;
+            // visualFilters is now resolved per-rarity from DROP_FILTER_DB
+            // styleIndex is kept for backward compat but overridden below
+            let styleIndex = _resolveFilteredStyleIndex(Math.floor(Math.random() * 6));
+
+            // TAXAS EXACTAS: 1% ANCESTRAL, 1% LEGENDARY, 14% EPIC, 84% COMMON
+            let rarityRoll = Math.random();
+            const epicThreshold = networkOverloadActive
+                ? Math.min(0.02 + 0.14 * NETWORK_OVERLOAD_EPIC_MULTIPLIER, 0.6)
+                : 0.16;
+            if (rarityRoll < 0.01) {
+                rarityKey = "ancestral";
+            } else if (rarityRoll < 0.02) {
+                rarityKey = "legendary";
+            } else if (rarityRoll < epicThreshold) {
+                rarityKey = "epic";
+            } else {
+                rarityKey = "common";
+            }
+
+            // [ESCOPO 6] Filtro de RARIDADE_ALVO ativo — força o resultado
+            // pra dentro da raridade escolhida pelo jogador, em vez do roll
+            // natural acima (que continua rodando, só não decide o resultado
+            // final se houver filtro).
+            rarityKey = _resolveFilteredRarity(rarityKey, rarityRoll);
+
+            rarityName   = rarityKey === "ancestral" ? "ANCESTRAL" : rarityKey === "legendary" ? "LENDÁRIO" : rarityKey === "epic" ? "ÉPICO" : "COMUM";
+            rarityNameEN = rarityKey === "ancestral" ? "ANCESTRAL" : rarityKey === "legendary" ? "LEGENDARY" : rarityKey === "epic" ? "EPIC" : "COMMON";
+            watermarkColor = rarityKey === "ancestral" ? "#ff007f" : rarityKey === "legendary" ? "#00ffff" : rarityKey === "epic" ? "#ffaa00" : "#ffffff";
+
+            // Flash de tela Ancestral: rosa se sucesso
+            if (rarityKey === "ancestral") {
+                triggerAncestralFlash('#ff007f');
+            }
+
+            // Atualiza a cotação global do mercado em tempo real a cada drop
+            updateMarketQuotes(rarityKey);
+
+            if (rarityKey === "ancestral") {
+                const variant = _getRandomDropVariant('ancestral');
+                filterStyle = variant.filter;
+                styleName   = variant.name;
+                styleNameEN = variant.name;
+                if(!isPremium) claimCost = 50;
+            } else if (rarityKey !== "common") {
+                const variant = _getRandomDropVariant(rarityKey);
+                filterStyle = variant.filter;
+                styleName = variant.name;
+                styleNameEN = variant.name;
+                if(!isPremium) claimCost = 50;
+            } else {
+                const variant = _getRandomDropVariant('common');
+                filterStyle = variant.filter;
+                styleName = variant.name;
+                styleNameEN = variant.name;
+            }
+
+            targetContainer.className = "target-box";
+            targetContainer.classList.add(`card-${rarityKey}`);
+
+            metaRarity.innerText = currentLang === 'PT' ? rarityName : rarityNameEN; 
+            metaRarity.style.color = watermarkColor;
+            metaStyle.innerText = currentLang === 'PT' ? styleName : styleNameEN; 
+            metaOwner.innerText = currentUser.loggedIn ? currentUser.username : "RECRUTA";
+
+            bCtx.filter = filterStyle; bCtx.drawImage(sourceBuffer, 0, 0, 600, 600); bCtx.filter = "none";
+            bCtx.fillStyle = "rgba(0, 0, 0, 0.75)"; bCtx.fillRect(20, bakedBuffer.height - 52, 160, 36);
+            bCtx.fillStyle = watermarkColor; bCtx.font = "bold 24px 'Space Mono'"; bCtx.fillText(generatedId, 30, bakedBuffer.height - 26);
+
+            lastMintedBuffer = bakedBuffer;
+            activeAssetData = { 
+                id: generatedId, rarityType: rarityKey, rarityName: rarityName, rarityNameEN: rarityNameEN,
+                styleName: styleName, styleNameEN: styleNameEN, creator: currentUser.loggedIn ? currentUser.username : "OG DROP", 
+                registered: currentUser.loggedIn, exposed: false, forSale: false, price: 0, imgSrc: bakedBuffer.toDataURL(), costToClaim: claimCost 
+            };
+
+            // BUGFIX (feed global com lixo/efêmero): este card ainda NÃO foi
+            // resgatado (pode shatterar em 10s se não for reivindicado — ver
+            // shatterAsset()). Publicar isso no feed PÚBLICO/real
+            // (eventos_globais) faria a rede inteira ver mutações que nunca
+            // chegaram a existir de fato, e exigiria desfazer via DELETE em
+            // tempo real se a pessoa não resgatasse a tempo. Agora só entram
+            // no feed global cards REAIS e definitivos: resgatados
+            // (claimAssetLogic → pushFeedCard) ou fundidos com sucesso
+            // (pushFeedCard no resultado da fusão). A pré-visualização local
+            // do drop continua funcionando normalmente — só não é mais
+            // transmitida pra rede antes de ser consolidada.
+
+            downloadBtn.style.display = "block";
+            downloadBtn.innerText = claimCost > 0 ? 
+                (currentLang === 'PT' ? `RESGATAR (CUSTO: 50 B$)` : `CLAIM (COST: 50 B$)`) : 
+                (currentLang === 'PT' ? "ENVIAR AO COFRE VIRTUAL" : "SEND TO SECURE VAULT");
+            
+            document.getElementById('status-text').innerText = currentLang === 'PT' ? "MUTAÇÃO_ESTÁVEL" : "MUTATION_STABLE";
+            
+            playSynthSound('success'); 
+            speakPhrase("Mutação bem sucedida! Resgate o ativo.", "Mutation successful! Claim the asset.");
+
+            // [ESCOPO 6] BUGFIX: o cronômetro de shatter (startStabilityDecay)
+            // estava correndo SEMPRE, inclusive em rolls Premium — então um
+            // PREMIUM_DROP_PASS, que deveria ser "100% SECURE // GARANTIA DE
+            // COMPILAÇÃO" / entrega garantida e imediata, ainda corria risco
+            // de ser destruído se o jogador demorasse mais de 10s pra clicar
+            // em resgatar. Agora Premium pula o cronômetro por completo:
+            // mostra o badge de resgate garantido e nunca chama shatterAsset().
+            const premiumBadge = document.getElementById('premiumInstantBadge');
+            if (isPremium) {
+                stabilityWrapper.style.display = "none";
+                if (premiumBadge) premiumBadge.style.display = "block";
+            } else {
+                if (premiumBadge) premiumBadge.style.display = "none";
+                startStabilityDecay();
+            }
+            isRolling = false;
+        }, 1200);
+    }
+
+    function startStabilityDecay() {
+        let timeLeft = 10.0; clearInterval(decayInterval);
+        decayInterval = setInterval(() => {
+            timeLeft -= 0.1;
+            if (timeLeft <= 0) { 
+                clearInterval(decayInterval); 
+                shatterAsset(); 
+                return;
+            }
+            stabilityBar.style.width = `${(timeLeft / 10) * 100}%`;
+            stabilityLabel.innerText = currentLang === 'PT' ? 
+                `EXPIRA EM: ${timeLeft.toFixed(1)}s [CONSOLIDE ANTES DO COLLAPSE]` : 
+                `EXPIRES IN: ${timeLeft.toFixed(1)}s [CONSOLIDATE BEFORE COLLAPSE]`;
+        }, 100);
+    }
+
+    function shatterAsset() {
+        playSynthSound('shatter');
+        speakPhrase("Mutação destruída.", "Mutation destroyed.");
+        // Não precisa mais limpar `globalFeed` aqui — o drop nunca chegou a
+        // ser publicado nele (ver nota no fim de claimAssetLogic's preview,
+        // acima), já que só cards efetivamente resgatados/fundidos entram
+        // no feed público agora.
+
+        downloadBtn.style.display = "none";
+        targetContainer.className = "target-box shattering";
+        const premiumBadgeEl = document.getElementById('premiumInstantBadge');
+        if (premiumBadgeEl) premiumBadgeEl.style.display = "none";
+        
+        stabilityLabel.innerText = currentLang === 'PT' ? "MUTAÇÃO CORROMPIDA // COLLAPSE" : "MUTATION CORRUPTED // COLLAPSE"; 
+        document.getElementById('status-text').innerText = currentLang === 'PT' ? "SISTEMA_AUTODESTRUIDO" : "SYSTEM_SELF_DESTRUCTED";
+        
+        lastMintedBuffer = null; 
+        activeAssetData = null;
+        setTimeout(() => { targetContainer.classList.remove("shattering"); }, 800);
+    }
+
+    // claimAssetLogic agora vem da Parte 2 (Supabase), no final do arquivo.
+
+    function buildStoriesMarquee() {
+        const container = document.getElementById('storiesContainer');
+        if(!container) return;
+        container.innerHTML = '';
+
+        // BUGFIX (perfis fantasmas): enquanto o Supabase ainda não respondeu
+        // a primeira leitura de `eventos_globais`, mostramos um aviso de
+        // terminal em vez de qualquer card inventado/estático.
+        if (globalFeedLoading) {
+            container.innerHTML = '<div class="feed-loading-notice">[ CARREGANDO DADOS CENTRAIS DO NÓ // SINCRONIZANDO COM A REDE... ]</div>';
+            return;
+        }
+
+        if (globalFeed.length === 0) {
+            container.innerHTML = '<div class="feed-loading-notice">[ REDE SEM DROPS AINDA // NENHUM EVENTO REGISTRADO ]</div>';
+            return;
+        }
+        
+        const displayItems = globalFeed.length > 4 ? [...globalFeed, ...globalFeed] : globalFeed;
+
+        displayItems.forEach((a) => {
+            const node = document.createElement('div');
+            // [FIX MUTAÇÕES] Cards purged recebem classe visual própria no feed;
+            // ao clicar, abrem o Inspect com o carimbo DETONADA normalmente.
+            node.className = a.isPurged ? 'story-node story-node--purged' : 'story-node';
+            node.addEventListener('click', () => openInspectModal(a));
+            node.innerHTML = a.isPurged
+                ? `<div class="story-avatar-wrapper rare-${a.rarityType} purged-feed-wrapper"><img src="${a.imgSrc}" style="filter:grayscale(0.7) brightness(0.6);"></div>
+                   <div class="story-meta" style="color:#ff0033;">${a.creator}<br><b>${a.id}</b><br><span style="font-size:0.55rem;letter-spacing:0.08em;">// DETONADA //</span></div>`
+                : `<div class="story-avatar-wrapper rare-${a.rarityType}"><img src="${a.imgSrc}"></div>
+                   <div class="story-meta">${a.creator}<br><b>${a.id}</b></div>`;
+            container.appendChild(node);
+        });
+
+        // Reaplica o drag-to-scroll sempre que o feed é repintado (re-render
+        // troca o innerHTML, mas o container #storiesContainer em si nunca é
+        // recriado — o guard `dataset.dragInit` em initStoriesDragScroll
+        // evita re-ligar os listeners do zero a cada chamada).
+        initStoriesDragScroll();
+    }
+
+    // =========================================================
+    // DRAG-TO-SCROLL no feed MUTAÇÕES_REDE (clique-e-arrasta)
+    // =========================================================
+    // Permite ao usuário pausar o marquee automático e "puxar" os cards
+    // manualmente pra frente/trás (mouse + touch), igual a um carrossel
+    // nativo. Resolve junto o bug do onClick abrindo o card ERRADO: como
+    // o marquee desloca a posição dos cards continuamente, sem essa
+    // distinção um simples toque-e-arraste (comum em touch, ao tentar
+    // rolar o feed) acabava soltando o dedo sobre um card DIFERENTE
+    // daquele que estava embaixo do dedo no início do gesto — e o
+    // navegador disparava `click` nesse card errado, abrindo o modal
+    // de inspeção do item errado. A correção mede a distância arrastada
+    // e, se ultrapassar um pequeno limiar, intercepta e cancela o
+    // `click` (fase de captura, antes de chegar no listener do
+    // story-node) — só permite o `click` passar quando foi de fato um
+    // toque/clique parado, garantindo que o card aberto é sempre
+    // exatamente o que o usuário pretendia.
+    function initStoriesDragScroll() {
+        const container = document.getElementById('storiesContainer');
+        if (!container || container.dataset.dragInit) return;
+        container.dataset.dragInit = '1';
+
+        const DRAG_THRESHOLD_PX = 4;
+        let isDown = false;
+        let dragged = false;
+        let startX = 0;
+        let startOffset = 0;
+        let resumeTimer = null;
+
+        function getCurrentTranslateX(el) {
+            const t = window.getComputedStyle(el).transform;
+            if (!t || t === 'none') return 0;
+            const m = t.match(/matrix.*\((.+)\)/);
+            if (!m) return 0;
+            const parts = m[1].split(',').map(parseFloat);
+            return parts.length === 16 ? parts[12] : parts[4]; // matrix3d vs matrix
+        }
+
+        function pointerDown(clientX) {
+            clearTimeout(resumeTimer);
+            isDown = true;
+            dragged = false;
+            startX = clientX;
+            startOffset = getCurrentTranslateX(container);
+            // Pausa o marquee automático (mesma classe usada pelo hover —
+            // ver pauseMarquee) e "congela" os cards na posição atual antes
+            // de assumir o controle manual via transform inline.
+            container.classList.remove('animated');
+            container.style.transition = 'none';
+            container.style.transform = `translate3d(${startOffset}px, 0, 0)`;
+            container.style.cursor = 'grabbing';
+        }
+
+        function pointerMove(clientX) {
+            if (!isDown) return;
+            const delta = clientX - startX;
+            if (Math.abs(delta) > DRAG_THRESHOLD_PX) dragged = true;
+            container.style.transform = `translate3d(${startOffset + delta}px, 0, 0)`;
+        }
+
+        function pointerUp() {
+            if (!isDown) return;
+            isDown = false;
+            container.style.cursor = '';
+            // Não houve arraste de verdade (foi um clique parado): libera o
+            // `click` normalmente — o listener do container abaixo só
+            // intercepta quando `dragged` for true.
+            // Retoma o marquee automático sozinho após uma pausa de
+            // inatividade, pra ele não ficar travado pra sempre em telas
+            // touch (que não disparam mouseleave/resumeMarquee).
+            resumeTimer = setTimeout(() => { resumeMarquee(); }, 2500);
+        }
+
+        container.addEventListener('mousedown', (e) => { pointerDown(e.clientX); e.preventDefault(); });
+        window.addEventListener('mousemove', (e) => pointerMove(e.clientX));
+        window.addEventListener('mouseup', pointerUp);
+
+        container.addEventListener('touchstart', (e) => pointerDown(e.touches[0].clientX), { passive: true });
+        container.addEventListener('touchmove', (e) => pointerMove(e.touches[0].clientX), { passive: true });
+        container.addEventListener('touchend', pointerUp);
+
+        // Fase de CAPTURA: roda antes do listener de click de cada
+        // story-node, então consegue suprimir o clique-fantasma pós-drag
+        // sem precisar tocar/alterar o listener individual de cada card.
+        container.addEventListener('click', (e) => {
+            if (dragged) {
+                e.stopPropagation();
+                e.preventDefault();
+                dragged = false;
+            }
+        }, true);
+    }
+
+    function renderVaultGrid() {
+        const grid = document.getElementById('albumGrid'); if(!grid) return;
+        const freshGrid = grid.cloneNode(false);
+        grid.parentNode.replaceChild(freshGrid, grid);
+        const g = document.getElementById('albumGrid');
+
+        document.getElementById('vault-count-badge').innerText = `${savedAssets.length} ATIVOS`;
+
+        // [FIX COFRE LIMPO] Cards purged (is_purged: true) não aparecem no cofre.
+        // Eles existem apenas como registro histórico: passam pelo feed MUTAÇÕES_REDE
+        // com design purged e abrem o Inspect com o carimbo DETONADA ao serem clicados.
+        const nonPurged = savedAssets.filter(a => !a.isPurged);
+        const filtered = vaultFilter === 'all' ? nonPurged : nonPurged.filter(a => a.rarityType === vaultFilter);
+        const pageItems = filtered.slice(vaultPage * PAGE_SIZE, (vaultPage + 1) * PAGE_SIZE);
+
+        if(filtered.length === 0) { g.innerHTML = '<div class="empty-vault-notice">NENHUM ATIVO NESTA CATEGORIA.</div>'; renderPagination('vaultPagination',0,0,()=>{}); return; }
+
+        pageItems.forEach((a) => {
+            const index = savedAssets.indexOf(a);
+            const card = document.createElement('div');
+            // [FIX COFRE LIMPO] Cards purged nunca chegam aqui (filtrados acima).
+            // A classe is-purged e o carimbo DETONADA existem apenas no Inspect Modal
+            // e no feed MUTAÇÕES_REDE.
+            card.className = `album-card rare-${a.rarityType}`;
+            applyCardMotionAttrs(card, a);
+            card.dataset.vaultIndex = index;
+            const custodyBadge = a.isListed ? `<div style="position:absolute;top:-5px;left:-5px;background:#ff0044;color:#fff;font-size:0.5rem;padding:2px 6px;font-weight:bold;z-index:5;box-shadow:0 0 8px #ff0044;">🔒 EM CUSTÓDIA</div>` : '';
+
+            // Badge Web3: indicador discreto se card tem proveniência
+            const prov = a.provenance;
+            const web3Badge = prov && !a.isTokenized
+                ? `<div class="card-provenance-strip" title="Hash: ${prov.hash} | ${new Date(prov.timestamp).toLocaleString('pt-BR')}">
+                       <span class="provenance-hash">${prov.hash}</span>
+                       <span class="provenance-dot">⬡</span>
+                   </div>`
+                : prov && a.isTokenized
+                ? `<div class="card-provenance-strip tokenized-strip" title="NFT Tokenizado">
+                       <span class="provenance-hash">${prov.hash}</span>
+                       <span class="provenance-dot" style="color:#00ff66;">✓ NFT</span>
+                   </div>`
+                : '';
+            card.innerHTML = `
+                ${custodyBadge}
+                <div class="album-preview-wrapper"><img src="${a.imgSrc}" draggable="false"></div>
+                ${a.forSale ? `<div class="market-badge">${a.price} B$</div>` : ''}
+                <div class="album-meta">
+                    <div class="album-id">${a.id}</div>
+                    <div class="album-rarity" style="color:${a.rarityType==='ancestral'?'#ff007f':a.rarityType==='legendary'?'#00ffff':a.rarityType==='epic'?'#ffaa00':'#aaaaaa'}">${currentLang === 'PT' ? a.rarityName : a.rarityNameEN}</div>
+                </div>
+                ${web3Badge}
+                <div class="card-actions">
+                    ${a.isPurged ? `<div style="font-size:0.5rem;color:#ff0033;text-align:center;padding:6px 0;">// ATIVO DETONADO — SOMENTE INSPEÇÃO //</div>` : `
+                    <button class="btn-action btn-expose" data-action="expose" data-idx="${index}">${a.exposed ? '⭐ SAIR DA VITRINE' : '📁 EXPOR NA VITRINE'}</button>
+                    ${a.forSale
+                        ? `<button class="btn-action btn-sell" data-action="unlist" data-idx="${index}" style="border-color:#ff0044;color:#ff0044;">✕ REMOVER VENDA</button>`
+                        : `<button class="btn-action btn-sell" data-action="sell" data-idx="${index}" style="border-color:${a.exposed?'#555':'#ffaa00'};color:${a.exposed?'#555':'#ffaa00'};${a.exposed?'cursor:not-allowed;opacity:0.5;':''}" ${a.exposed?'disabled title="Retire da vitrine antes de vender"':''}>💵 VENDER ATIVO</button>`
+                    }
+                    <button class="btn-action btn-gift" data-action="gift" data-idx="${index}" style="border-color:${(a.exposed||a.forSale)?'#555':'#ff00ff'};color:${(a.exposed||a.forSale)?'#555':'#ff00ff'};${(a.exposed||a.forSale)?'cursor:not-allowed;opacity:0.5;':''}" ${(a.exposed||a.forSale)?'disabled title="Card indisponível para presente (exposto ou listado)"':''}>🎁 PRESENTEAR</button>
+                    `}
+                    <button class="btn-action btn-dl"     data-action="download" data-idx="${index}">Obter Item 📥</button>
+                </div>
+            `;
+            card.querySelector('.album-preview-wrapper').addEventListener('click', () => {
+                openInspectModal(savedAssets[parseInt(card.dataset.vaultIndex, 10)]);
+            });
+            card.querySelector('.card-actions').addEventListener('click', (e) => {
+                const btn = e.target.closest('[data-action]');
+                if (!btn) return;
+                const idx = parseInt(btn.dataset.idx, 10);
+                const action = btn.dataset.action;
+                if (action === 'expose')    toggleExposeAsset(idx);
+                else if (action === 'sell')   marketListPrompt(idx);
+                else if (action === 'unlist') unlistVaultCard(idx);
+                else if (action === 'gift')   giftAssetPrompt(idx);
+                else if (action === 'download') downloadVaultAsset(idx);
+            });
+            g.appendChild(card);
+        });
+
+        renderPagination('vaultPagination', filtered.length, vaultPage, (p) => { vaultPage = p; renderVaultGrid(); });
+    }
+
+    // toggleExposeAsset agora vem da Parte 2 (Supabase), no final do arquivo.
+
+    async function marketListPrompt(index) {
+        if (savedAssets[index].isPurged) {
+            showCyberAlert('CARD_DETONADO', 'Cards detonados (purged) não podem ser listados.', 'error');
+            return;
+        }
+        if (savedAssets[index].isListed) {
+            playSynthSound('shatter');
+            showCyberAlert('🔒 ATIVO BLOQUEADO EM CUSTÓDIA NO MERCADO', 'Este card já está em custódia no mercado. Remove o anúncio primeiro.', 'error');
+            return;
+        }
+        const asset = savedAssets[index];
+        const suggested = asset.price > 0 ? asset.price : (asset.rarityType === 'ancestral' ? 5000 : asset.rarityType === 'legendary' ? 1500 : asset.rarityType === 'epic' ? 500 : 100);
+
+        // Remove painel anterior se existir
+        const oldPanel = document.getElementById('inlinePricePanel');
+        if (oldPanel) oldPanel.remove();
+
+        const card = document.querySelector(`[data-vault-index="${index}"]`);
+        if (!card) return;
+
+        const panel = document.createElement('div');
+        panel.id = 'inlinePricePanel';
+        panel.className = 'inline-price-panel';
+        panel.innerHTML = `
+            <div class="ipp-title">set_price ${asset.id} [${asset.rarityType.toUpperCase()}]</div>
+            <div class="ipp-prompt-row">
+                <span class="ipp-prefix">&gt;</span>
+                <input id="ippInput" class="ipp-input" type="number" min="1" max="999999" value="${suggested}" placeholder="valor...">
+                <span class="ipp-unit">B$</span>
+            </div>
+            <div class="ipp-actions">
+                <button class="ipp-confirm-btn" onclick="confirmMarketList(${index})">LISTAR</button>
+                <button class="ipp-cancel-btn" onclick="document.getElementById('inlinePricePanel').remove()">CANCELAR</button>
+            </div>
+        `;
+
+        card.appendChild(panel);
+        setTimeout(() => panel.classList.add('ipp-visible'), 10);
+        document.getElementById('ippInput').focus();
+    }
+
+    async function confirmMarketList(index) {
+        const input = document.getElementById('ippInput');
+        if (!input) return;
+        const parsed = parseInt(input.value);
+        if (isNaN(parsed) || parsed <= 0) { showCyberAlert('ERRO DE INPUT', 'Valor de venda inválido. Insere um número positivo.', 'error'); return; }
+
+        const panel = document.getElementById('inlinePricePanel');
+        if (panel) panel.remove();
+
+        const ok = await listCardOnMarket(savedAssets[index], parsed);
+        if (!ok) {
+            showCyberAlert('ERRO_DE_REDE', 'Falha ao listar o card no mercado. Tenta novamente.', 'error');
+            return;
+        }
+
+        pushLedger(`${currentUser.username} listou o card ${savedAssets[index].id} [${savedAssets[index].rarityNameEN}] por ${parsed} B$`);
+        renderVaultGrid();
+    }
+
+    // [ESCOPO 5] Remove venda diretamente do cofre (sem prompt, 1 clique)
+    async function unlistVaultCard(index) {
+        const asset = savedAssets[index];
+        if (!asset) return;
+        const ok = await unlistCardFromMarket(asset);
+        if (!ok) { showCyberAlert('ERRO_DE_REDE', 'Falha ao remover o anúncio. Tenta novamente.', 'error'); return; }
+        asset.forSale = false; asset.isListed = false; asset.price = 0;
+        playSynthSound('success');
+        showCyberAlert('✓ ANÚNCIO REMOVIDO', `Card <b>${asset.id}</b> retirado do mercado e devolvido ao cofre.`, 'success');
+        renderVaultGrid();
+    }
+
+
+    async function giftAssetPrompt(index) {
+        const giftedCard = savedAssets[index];
+        if (!giftedCard) return;
+
+        // [ESCOPO 2] Cards expostos na Vitrine ou já listados para troca
+        // são intocáveis — nem presente, nem venda, até serem retirados.
+        if (giftedCard.exposed) {
+            showCyberAlert('CARD_BLOQUEADO', 'Este card está exposto na Vitrine do Perfil. Remova-o da vitrine antes de presentear.', 'warn');
+            return;
+        }
+        if (giftedCard.forSale || giftedCard.isListed) {
+            showCyberAlert('CARD_BLOQUEADO', 'Este card está listado no mercado. Remova o anúncio antes de presentear.', 'warn');
+            return;
+        }
+        if (giftedCard.isPurged) {
+            showCyberAlert('CARD_DETONADO', 'Cards detonados (purged) não podem ser transferidos.', 'error');
+            return;
+        }
+
+        const rawInput = prompt("Digite o @username exato do destinatário da rede (Ex: @cyber_k1ng):");
+        if (!rawInput) return;
+
+        // Validação rígida: @ obrigatório, 3-20 chars após o @, só
+        // letras/números/underscore (mesmo padrão de validateUsername).
+        const targetUser = rawInput.trim();
+        const STRICT_USERNAME_RE = /^@[a-zA-Z0-9_]{3,20}$/;
+        if (!STRICT_USERNAME_RE.test(targetUser)) {
+            showCyberAlert('FORMATO INVÁLIDO', 'Use @ seguido de 3 a 20 letras, números ou _ (ex: @cyber_k1ng).', 'error');
+            return;
+        }
+        if (targetUser.toLowerCase() === currentUser.username.toLowerCase()) {
+            showCyberAlert('OPERAÇÃO INVÁLIDA', 'Não é possível presentear a si mesmo.', 'error');
+            return;
+        }
+
+        const targetProfile = await fetchProfileByUsername(targetUser);
+        if (!targetProfile) {
+            showCyberAlert('ERRO_REDE', 'Esse nó de usuário não existe ou está desconectado.', 'error'); return;
+        }
+        if (!giftedCard._dbId) {
+            showCyberAlert('ERRO', 'Card sem registro remoto válido. Recarregue o cofre e tente novamente.', 'error'); return;
+        }
+
+        // ── RPC ATÔMICA enviar_presente: valida posse + bloqueios, troca o
+        // dono (id_usuario) e grava o registro em `presentes` numa única
+        // transação no servidor. Substitui o fluxo antigo (insert de cópia
+        // + delete do original), que não era atômico e podia duplicar o
+        // card caso o delete falhasse depois do insert ter sido bem-sucedido.
+        const { data: presenteId, error } = await sb.rpc('enviar_presente', {
+            p_remetente_id: currentUser.id,
+            p_remetente_username: currentUser.username,
+            p_destinatario_id: targetProfile.id,
+            p_destinatario_username: targetProfile.username,
+            p_card_id: giftedCard._dbId,
+            p_card_display_id: giftedCard.id,
+            p_mensagem: null
+        });
+
+        if (error) {
+            console.error('enviar_presente:', error.message);
+            showCyberAlert('ERRO_DE_REDE', 'Falha ao transferir o card. Tenta novamente.', 'error');
+            return;
+        }
+
+        savedAssets.splice(index, 1);
+
+        // Efeito sonoro de presente
+        playSynthSound('success');
+        setTimeout(() => playSynthSound('success'), 200);
+
+        // TTS — aviso de presente enviado
+        speakPhrase("Presente enviado com sucesso. Lootbox entregue.", "New Lootbox Detected. Gift delivered successfully.");
+
+        // Alerta cyber customizado
+        showCyberAlert(
+            '🎁 LOOTBOX ENTREGUE',
+            `Card <b>${giftedCard.id}</b> [${giftedCard.rarityNameEN}] foi transferido para <b>${targetUser}</b>.<br><small style="color:#666;">O destinatário receberá o alerta ao abrir o cofre.</small>`,
+            'success'
+        );
+
+        pushLedger(`${currentUser.username} presenteou ${targetUser} com o card ${giftedCard.id} [${giftedCard.rarityNameEN}]`);
+        renderVaultGrid();
+    }
+
+    // =========================================================
+    // [ESCOPO 1] CAIXA DE PRESENTE FLUTUANTE — receiver-side
+    // Consulta a tabela `presentes` por linhas pendentes destinadas ao
+    // usuário logado. Se houver alguma, mostra o FAB com badge luminoso
+    // e ativa o efeito de glitch de tela. Chamado no login e refrescado
+    // por Realtime (ver initGiftRealtime).
+    // =========================================================
+    let pendingGiftsCache = [];
+
+    async function refreshPendingGifts() {
+        if (!currentUser.loggedIn || !currentUser.id) {
+            _setGiftFabState([]);
+            return;
+        }
+        const { data, error } = await sb.from('presentes')
+            .select('id, remetente_id, remetente_username, card_id, card_display_id, card_snapshot, mensagem, created_at')
+            .eq('destinatario_id', currentUser.id)
+            .eq('status', 'pendente')
+            .order('created_at', { ascending: false });
+        if (error) { console.error('refreshPendingGifts:', error.message); return; }
+        pendingGiftsCache = data || [];
+        _setGiftFabState(pendingGiftsCache);
+    }
+
+    function _setGiftFabState(gifts) {
+        const fab = document.getElementById('giftFab');
+        const badge = document.getElementById('giftFabBadge');
+        const glitch = document.getElementById('giftScreenGlitch');
+        if (!fab || !badge || !glitch) return;
+        if (gifts.length > 0) {
+            fab.classList.add('has-gifts');
+            glitch.classList.add('active');
+            badge.innerText = gifts.length > 99 ? '99+' : String(gifts.length);
+        } else {
+            fab.classList.remove('has-gifts');
+            glitch.classList.remove('active');
+            badge.innerText = '0';
+        }
+    }
+
+    function openReceivedGiftsModal() {
+        const modal = document.getElementById('receivedGiftsModal');
+        const grid = document.getElementById('receivedGiftsGrid');
+        if (!modal || !grid) return;
+        if (pendingGiftsCache.length === 0) {
+            grid.innerHTML = '<div class="empty-vault-notice">Nenhum presente pendente.</div>';
+        } else {
+            grid.innerHTML = pendingGiftsCache.map(g => {
+                const snap = g.card_snapshot || {};
+                const rarityColor = snap.rarity_type === 'legendary' ? '#00ffff' : snap.rarity_type === 'epic' ? '#ffaa00' : '#aaa';
+                return `
+                <div class="received-gift-item" style="display:flex; align-items:center; gap:10px; padding:10px; border:1px solid #2a1530; border-radius:6px; margin-bottom:8px; background:#0c0810;">
+                    ${snap.img_src ? `<img src="${snap.img_src}" style="width:48px;height:48px;object-fit:cover;border-radius:4px;border:1px solid ${rarityColor};">` : ''}
+                    <div style="flex:1;">
+                        <div style="font-size:0.62rem; color:${rarityColor};">${snap.display_id || g.card_display_id}</div>
+                        <div style="font-size:0.54rem; color:#888899;">de <b style="color:#ff00ff;">${g.remetente_username}</b></div>
+                    </div>
+                    <button class="btn-action" style="border-color:#00ff66; font-size:0.5rem; padding:6px 10px;" onclick="claimReceivedGift('${g.id}')">ABRIR</button>
+                </div>`;
+            }).join('');
+        }
+        modal.classList.add('active');
+    }
+
+    function closeReceivedGiftsModal() {
+        const modal = document.getElementById('receivedGiftsModal');
+        if (modal) modal.classList.remove('active');
+    }
+
+
+    // =========================================================
+    // [FIX CAIXA DE PRESENTE] triggerFireworks — animação de fogos de artifício
+    // Injetada via JS puro (divs de partículas) ao fazer Claim de presente.
+    // Dispara partículas coloridas que sobem e explodem na tela, sem bibliotecas.
+    // =========================================================
+    function triggerFireworks() {
+        const COLORS = ['#ff007f', '#00ffff', '#ffaa00', '#00ff66', '#ff6600', '#ff00ff', '#ffffff'];
+        const PARTICLE_COUNT = 60;
+        const BURST_COUNT = 4;
+
+        for (let b = 0; b < BURST_COUNT; b++) {
+            setTimeout(() => {
+                const bx = 15 + Math.random() * 70; // % da viewport
+                const by = 15 + Math.random() * 50;
+                for (let i = 0; i < PARTICLE_COUNT; i++) {
+                    const particle = document.createElement('div');
+                    const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+                    const angle = (Math.random() * 360) * (Math.PI / 180);
+                    const speed = 40 + Math.random() * 120; // px
+                    const size  = 3 + Math.random() * 5;
+                    const dur   = 600 + Math.random() * 800; // ms
+
+                    particle.style.cssText = [
+                        'position:fixed',
+                        'z-index:99999',
+                        'pointer-events:none',
+                        'border-radius:50%',
+                        'background:' + color,
+                        'width:' + size + 'px',
+                        'height:' + size + 'px',
+                        'left:' + bx + 'vw',
+                        'top:' + by + 'vh',
+                        'box-shadow:0 0 ' + (size * 2) + 'px ' + color,
+                        'transition:transform ' + dur + 'ms ease-out, opacity ' + dur + 'ms ease-out'
+                    ].join(';');
+                    document.body.appendChild(particle);
+
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            const tx = Math.cos(angle) * speed;
+                            const ty = Math.sin(angle) * speed + (Math.random() * 60); // gravidade simulada
+                            particle.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(0.1)';
+                            particle.style.opacity = '0';
+                            setTimeout(() => { if (particle.parentNode) particle.parentNode.removeChild(particle); }, dur + 50);
+                        });
+                    });
+                }
+            }, b * 280);
+        }
+
+        // Flash de tela breve para dramatizar
+        triggerAncestralFlash('#ff007f');
+        setTimeout(() => triggerAncestralFlash('#00ffff'), 350);
+    }
+
+    async function claimReceivedGift(presenteId) {
+        const { error } = await sb.rpc('resgatar_presente', {
+            p_destinatario_id: currentUser.id,
+            p_presente_id: presenteId
+        });
+        if (error) {
+            console.error('resgatar_presente:', error.message);
+            showCyberAlert('ERRO', 'Falha ao resgatar o presente. Tente novamente.', 'error');
+            return;
+        }
+        playSynthSound('success');
+        triggerFireworks(); // [FIX CAIXA DE PRESENTE] dispara fogos de artifício
+        speakPhrase("Presente Recebido. Novo Lootbox detectado.", "New Lootbox Detected. Gift received.");
+        showCyberAlert('✓ LOOTBOX ABERTA', 'Card adicionado ao seu cofre.', 'success');
+
+        // Recarrega cofre e a lista de presentes pendentes
+        savedAssets = await loadCardsFromSupabase(currentUser.id);
+        await refreshPendingGifts();
+        if (pendingGiftsCache.length === 0) closeReceivedGiftsModal();
+        else openReceivedGiftsModal();
+        renderVaultGrid();
+    }
+
+    // Realtime: assim que uma linha pendente é inserida em `presentes`
+    // para este usuário, atualiza o FAB sem precisar de refresh manual.
+    function initGiftRealtime() {
+        if (!currentUser.loggedIn || !currentUser.id) return;
+        sb.channel('presentes-' + currentUser.id)
+            .on('postgres_changes', {
+                event: '*', schema: 'public', table: 'presentes',
+                filter: `destinatario_id=eq.${currentUser.id}`
+            }, () => { refreshPendingGifts(); })
+            .subscribe();
+    }
+
+    // Dispara alerta + TTS quando um presente é detectado no cofre ao login
+    function checkIncomingGifts(prevAssets, newAssets) {
+        if (!prevAssets || !newAssets) return;
+        // Segunda camada de proteção: se não havia estado anterior nesta
+        // sessão (cofre vazio antes do login), não há base de comparação
+        // confiável — evita interpretar o cofre inicial do usuário como "presente".
+        if (prevAssets.length === 0) return;
+        const prevIds = new Set(prevAssets.map(a => a.id));
+        const incoming = newAssets.filter(a => !prevIds.has(a.id));
+        if (incoming.length === 0) return;
+        incoming.forEach(gift => {
+            setTimeout(() => {
+                playSynthSound('success');
+                speakPhrase("Presente Recebido. Novo Lootbox detectado.", "New Lootbox Detected. Gift received.");
+                showCyberAlert(
+                    '🎁 NEW LOOTBOX DETECTED',
+                    `Um presente chegou ao teu cofre!<br>Card <b>${gift.id}</b> — <span style="color:${gift.rarityType==='legendary'?'#00ffff':gift.rarityType==='epic'?'#ffaa00':'#aaa'}">${gift.rarityNameEN}</span>`,
+                    'success'
+                );
+            }, 800);
+        });
+    }
+
+    async function renderMarketGrid() {
+        const grid = document.getElementById('marketGrid'); if(!grid) return;
+        grid.innerHTML = '<div class="empty-vault-notice">CARREGANDO MERCADO...</div>';
+
+        // Fonte de verdade real: tabela `cards` (for_sale + is_listed = true).
+        marketAssets = await loadMarketFromSupabase();
+
+        document.getElementById('market-count-badge').innerText = `${marketAssets.length} CARDS`;
+
+        const filtered = marketFilter === 'all' ? marketAssets : marketAssets.filter(a => a.rarityType === marketFilter);
+        const pageItems = filtered.slice(marketPage * PAGE_SIZE, (marketPage + 1) * PAGE_SIZE);
+
+        grid.innerHTML = '';
+        if(filtered.length === 0) { grid.innerHTML = '<div class="empty-vault-notice">NENHUM ATIVO NESTA CATEGORIA.</div>'; renderPagination('marketPagination',0,0,()=>{}); return; }
+
+        pageItems.forEach((a) => {
+            const card = document.createElement('div');
+            card.className = `album-card rare-${a.rarityType}`;
+            card.innerHTML = `
+                <div class="album-preview-wrapper"><img src="${a.imgSrc}"></div>
+                <div class="album-meta">
+                    <div class="album-id">${a.id} <span style="font-size:0.6rem; color:#00ff66; cursor:pointer;" class="ext-profile">by ${a.creator}</span></div>
+                    <div class="album-price">${a.price} B$</div>
+                </div>
+                <div class="card-actions"></div>
+            `;
+            card.querySelector('.album-preview-wrapper').addEventListener('click', () => {
+                openInspectModal(marketAssets.find(m => m.id === a.id));
+            });
+            card.querySelector('.ext-profile').addEventListener('click', () => viewExternalProfile(a.creator));
+
+            const actionsZone = card.querySelector('.card-actions');
+            if (!currentUser.loggedIn) {
+                const loginBtn = document.createElement('button');
+                loginBtn.className = 'btn-action'; loginBtn.style.cssText = "border-color:#00ff66;";
+                loginBtn.innerText = "LOGIN PARA INTERAGIR";
+                loginBtn.addEventListener('click', () => navigateTo('auth'));
+                actionsZone.appendChild(loginBtn);
+            } else if (a.creator !== currentUser.username) {
+                const buyBtn = document.createElement('button');
+                buyBtn.className = 'btn-action'; buyBtn.style.cssText = "background:#ffaa00; color:#000;";
+                buyBtn.innerText = "COMPRAR DIRETO";
+                buyBtn.addEventListener('click', () => buyMarketAsset(a));
+
+                const tradeBtn = document.createElement('button');
+                tradeBtn.className = 'btn-action'; tradeBtn.style.borderColor = '#ff00ff';
+                tradeBtn.innerText = "FAZER PROPOSTA";
+                tradeBtn.addEventListener('click', () => initiateTradeContact(a.creator, a.id));
+
+                actionsZone.appendChild(buyBtn);
+                actionsZone.appendChild(tradeBtn);
+            } else {
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'btn-action'; removeBtn.style.borderColor = '#ff0044';
+                removeBtn.innerText = "REMOVER ANÚNCIO";
+                removeBtn.addEventListener('click', () => removeAssetFromMarket(a));
+                actionsZone.appendChild(removeBtn);
+            }
+            grid.appendChild(card);
+        });
+
+        renderPagination('marketPagination', filtered.length, marketPage, (p) => { marketPage = p; renderMarketGrid(); });
+    }
+
+    // `asset` aqui é um objeto vindo de marketAssets (já tem _dbId, pois veio
+    // de rowToCard via loadMarketFromSupabase).
+    async function buyMarketAsset(asset) {
+        if (!asset) return;
+        if (!currentUser.loggedIn) { navigateTo('auth'); return; }
+
+        if (currentUser.bumps < asset.price) {
+            playTerminalSound('error');
+            showCyberAlert('FUNDOS INSUFICIENTES', `Saldo actual: <b>${currentUser.bumps} B$</b><br>Custo do ativo: <b>${asset.price} B$</b><br><br>Carregue o saldo no teu perfil.`, 'warn');
+            return;
+        }
+
+        const sellerName = asset.creator;
+
+        // buyCardFromMarket faz a transação inteira de forma atômica no banco
+        // (débito do comprador, crédito do vendedor, transferência da linha
+        // do card) via a function security definer buy_market_card — não dá
+        // pra fazer isso com updates diretos porque a RLS de `cards` só
+        // libera update para o dono da linha.
+        const result = await buyCardFromMarket(asset._dbId);
+        if (!result.ok) return; // buyCardFromMarket já mostra o alerta de erro
+
+        // Reflete o card recém-adquirido no cofre local (currentUser já é o dono na linha do banco)
+        savedAssets.push(result.card);
+
+        // Ledger (Ponto 4)
+        pushLedger(`${currentUser.username} comprou o card ${asset.id} de ${sellerName} por ${asset.price} B$`);
+
+        // Regista notificação para comprador e vendedor
+        const dateStr = new Date().toLocaleString('pt-PT');
+        pushNotification(currentUser.username, `Comprou ${asset.id} por ${asset.price} B$ de ${sellerName} — ${dateStr}`);
+        pushNotification(sellerName, `Vendeu ${asset.id} por ${asset.price} B$ para ${currentUser.username} — ${dateStr}`);
+
+        // Alerta cyberpunk de sucesso
+        playSynthSound('success');
+        showCyberAlert(
+            '// TRANSFERÊNCIA DE ATIVOS CONCLUÍDA //',
+            `Card <b>${asset.id}</b> adicionado ao teu cofre.<br>
+             Débito: <b>-${asset.price} B$</b> &nbsp;|&nbsp; Saldo actual: <b>${currentUser.bumps} B$</b><br>
+             Vendedor <b>${sellerName}</b> recebeu <b>+${asset.price} B$</b>.`,
+            'success'
+        );
+
+        renderMarketGrid();
+    }
+
+    // `asset` aqui é um objeto vindo de marketAssets (já tem _dbId).
+    async function removeAssetFromMarket(asset) {
+        if (!asset) return;
+        const ok = await unlistCardFromMarket(asset);
+        if (!ok) {
+            showCyberAlert('ERRO_DE_REDE', 'Falha ao remover o anúncio. Tenta novamente.', 'error');
+            return;
+        }
+        // Espelha a mudança no objeto correspondente em savedAssets (cofre local),
+        // caso seja o mesmo card que o usuário tem carregado em memória.
+        const vaultItem = savedAssets.find(m => m.id === asset.id);
+        if (vaultItem) { vaultItem.forSale = false; vaultItem.exposed = false; vaultItem.isListed = false; }
+        renderMarketGrid();
+    }
+
+    async function openInspectModal(cardAsset) {
+        if(!cardAsset) return;
+        const ownerName = cardAsset.creator || cardAsset.owner;
+
+        // [RESTRUTURAÇÃO INSPECT] O nó de mídia recebe SOMENTE o caminho do
+        // arquivo (src) + a classe/atributo de movimento quando aplicável.
+        // Nenhuma bounding box dinâmica é aplicada aqui — dimensões/proporção
+        // ficam inteiramente a cargo do CSS estático do elemento, nunca de
+        // estilos inline calculados em JS, para não achatar a proporção do ativo.
+        const inspectImgEl = document.getElementById('inspectImg');
+        inspectImgEl.src = cardAsset.imgSrc;
+        applyCardMotionAttrs(inspectImgEl, cardAsset);
+        document.getElementById('inspectTitle').innerText = `INSPECT // ${cardAsset.id}`;
+
+        // [ESCOPO 4] CARIMBO DE EXCLUSÃO — exibe chamas pixel art + selo
+        // PURGED/DETONADA quando o card foi sacrificado/consumido em
+        // fusão, fornalha ou descarte. Os dois textos (EN+PT) aparecem
+        // juntos sempre — não depende do idioma ativo.
+        const purgedStamp = document.getElementById('purgedStamp');
+        const purgedFireLayer = document.getElementById('purgedFireLayer');
+        if (purgedStamp && purgedFireLayer) {
+            if (cardAsset.isPurged) {
+                purgedStamp.style.display = 'flex';
+                purgedFireLayer.classList.add('active');
+            } else {
+                purgedStamp.style.display = 'none';
+                purgedFireLayer.classList.remove('active');
+            }
+        }
+
+        // CRT glow baseado na raridade
+        const rarityColors = {
+            legendary: '#00ffff',
+            epic:      '#ffaa00',
+            ancestral: '#ff007f',
+            common:    '#aaaaaa'
+        };
+        const rarityColor = rarityColors[cardAsset.rarityType] || '#aaaaaa';
+
+        const glow = document.getElementById('holoGlow');
+        glow.style.display = 'block';
+        glow.style.background = `radial-gradient(circle, ${rarityColor}55 0%, transparent 70%)`;
+
+        // Aplica borda/glow CRT ao modal conforme raridade
+        const modalCard = document.querySelector('.modal-card');
+        if (modalCard) {
+            modalCard.style.borderColor = rarityColor;
+            modalCard.style.boxShadow = `0 0 30px ${rarityColor}55, inset 0 0 20px ${rarityColor}11, 0 0 2px ${rarityColor}`;
+        }
+
+        // Linhas decorativas CRT injetadas acima dos metadados
+        const crtLines = [
+            `> SYS // INTEGRIDADE: OPERACIONAL`,
+            `> NET // AUTENTICIDADE: VERIFICADA`,
+            `> ID  // CHAIN: CRIPTOGRAFADO`,
+            `> RNG // SEED: ${cardAsset.id}`,
+        ];
+
+        // BUGFIX (veracidade do nível): antes este número vinha de uma fórmula
+        // paralela (globalFeed.filter(creator).length * 5), que ficava estática/errada
+        // e não batia com o nível mostrado na Vitrine do perfil. Agora busca a coleção
+        // REAL do dono do card e usa a MESMA fórmula (scoreFromAssets) da Vitrine.
+        let ownerScore;
+        if (ownerName === currentUser.username) {
+            ownerScore = scoreFromAssets(savedAssets);
+        } else {
+            const ownerProfile = await fetchProfileByUsername(ownerName);
+            const ownerAssets = ownerProfile ? await loadCardsFromSupabase(ownerProfile.id) : [];
+            ownerScore = scoreFromAssets(ownerAssets);
+        }
+
+        const metaBox = document.getElementById('inspectMetaBox');
+        metaBox.innerHTML = `
+            <div class="inspect-crt-lines" style="
+                font-size:0.5rem; color:${rarityColor}88; margin-bottom:12px;
+                border:1px solid ${rarityColor}33; padding:6px 10px;
+                background: rgba(0,0,0,0.6);
+                font-family:'Space Mono',monospace; letter-spacing:1px;
+                line-height:1.8;
+            ">${crtLines.map(l => `<div>${l}</div>`).join('')}</div>
+            <div class="inspect-meta-grid">
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">CÓDIGO ID</span>
+                    <span class="inspect-meta-value">${cardAsset.id}</span>
+                </div>
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">ESTILO VISUAL</span>
+                    <span class="inspect-meta-value">${currentLang === 'PT' ? cardAsset.styleName : (cardAsset.styleNameEN || cardAsset.styleName)}</span>
+                </div>
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">RARIDADE</span>
+                    <span class="inspect-meta-value" style="color:${rarityColor}">${(currentLang === 'PT' ? cardAsset.rarityName : cardAsset.rarityNameEN).toUpperCase()}</span>
+                </div>
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">NÍVEL DO PROPRIETÁRIO</span>
+                    <span class="inspect-meta-value">LVL ${ownerScore || 1}</span>
+                </div>
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">DONO DA ASSINATURA</span>
+                    <span class="inspect-meta-value inspect-author" style="color:#00ff66; text-decoration:underline; cursor:pointer;">${ownerName}</span>
+                </div>
+                <div class="inspect-meta-block">
+                    <span class="inspect-meta-label">ESTADO NA REDE</span>
+                    <span class="inspect-meta-value">${cardAsset.registered ? 'CRIPTOGRAFADO EM WALLET' : 'FLUXO VOLÁTIL'}</span>
+                </div>
+            </div>
+        `;
+
+        metaBox.querySelector('.inspect-author').addEventListener('click', () => viewExternalProfile(ownerName));
+
+        const zone = document.getElementById('inspectActionZone'); zone.innerHTML = '';
+        if (cardAsset.registered && ownerName !== currentUser.username && !cardAsset.isPurged) {
+            const btn = document.createElement('button'); btn.className = 'btn-action'; btn.style.borderColor = '#ff00ff';
+            btn.innerText = `📝 FAZER PROPOSTA PARA ${ownerName}`;
+            btn.onclick = () => { closeInspectModal(); initiateTradeContact(ownerName, cardAsset.id); };
+            zone.appendChild(btn);
+        }
+
+        // ── PROVENIÊNCIA: exibe hash, timestamp e botão Web3 ──────────
+        const prov = cardAsset.provenance;
+        const provHtml = prov
+            ? `<div class="inspect-provenance-box" style="
+                    margin-top:12px; padding:8px 10px; border:1px solid ${rarityColor}33;
+                    background:rgba(0,0,0,0.5); font-family:'Space Mono',monospace;
+                    font-size:0.48rem; letter-spacing:1px; line-height:1.9; color:#666688;">
+                    <div style="color:${rarityColor}; margin-bottom:4px; font-size:0.5rem; font-weight:bold;">// PROVENIÊNCIA INTERNA</div>
+                    <div>HASH &nbsp;&nbsp;: <span style="color:#fff;">${prov.hash}</span></div>
+                    <div>EMITIDO: <span style="color:#fff;">${new Date(prov.timestamp).toLocaleString('pt-BR')}</span></div>
+                    <div>ORIGEM &nbsp;: <span style="color:#fff;">${prov.origin}</span></div>
+                    ${prov.parentIds ? `<div>LINHAGEM: <span style="color:#ffaa00;">${prov.parentIds.join(' + ')}</span></div>` : ''}
+                    ${cardAsset.isTokenized
+                        ? `<div style="color:#00ff66; margin-top:4px;">✓ TOKENIZADO EM NFT</div>`
+                        : (ownerName === currentUser.username
+                            ? `<button class="btn-action inspect-web3-btn" style="margin-top:8px; border-color:#9933ff; color:#9933ff; font-size:0.5rem; padding:5px 12px; width:auto;"
+                                onclick="showTokenizeModal(${JSON.stringify(cardAsset.id).replace(/"/g,'&quot;')})">
+                                ⬡ TOKENIZAR CARD (Web3)
+                               </button>`
+                            : '')
+                    }
+               </div>`
+            : `<div style="font-size:0.45rem; color:#333344; margin-top:10px; font-family:'Space Mono',monospace;">
+                    // sem proveniência registrada (card legado)
+               </div>`;
+
+        // Appenda a caixa de proveniência ao metaBox
+        const provDiv = document.createElement('div');
+        provDiv.innerHTML = provHtml;
+        metaBox.appendChild(provDiv);
+
+        // ── QR CODE DINÂMICO: regenera o canvas a cada abertura, refletindo
+        // o estado atual (fusion_count / qr_code_hash) do card ──
+        if (prov) renderQRCode(cardAsset, 'inspectQrCanvas');
+        const qrBox = document.getElementById('inspectQrBox');
+        if (qrBox) qrBox.style.display = prov ? 'flex' : 'none';
+
+        document.getElementById('inspectModal').style.display = 'flex';
+    }
+
+    function closeInspectModal() {
+        // Reseta borda do modal ao fechar
+        const modalCard = document.querySelector('.modal-card');
+        if (modalCard) {
+            modalCard.style.borderColor = '';
+            modalCard.style.boxShadow = '';
+        }
+        document.getElementById('inspectModal').style.display = 'none';
+    }
+
+    function rotateCard(e) {
+        const card = document.getElementById('card3D'); const box = card.getBoundingClientRect();
+        const x = e.clientX - box.left - (box.width/2); const y = e.clientY - box.top - (box.height/2);
+        card.style.transform = `rotateY(${x / 5}deg) rotateX(${-y / 5}deg) scale(1.08)`;
+    }
+    function resetCardRotation() { document.getElementById('card3D').style.transform = `rotateY(0deg) rotateX(0deg) scale(1)`; }
+
+    /* LÓGICA DE NEGOCIAÇÃO INTEGRADA, SISTEMA DE PROPOSTAS E EXIBIÇÃO DE AVATARES */
+    function getTradeKey(partnerUsername) {
+        // Chave única por par: garante isolamento entre conversas diferentes
+        return `trade_${currentUser.username}_${partnerUsername}`;
+    }
+
+    function saveThreadToStorage(partnerUsername) {
+        try {
+            const key = getTradeKey(partnerUsername);
+            localStorage.setItem(key, JSON.stringify(messageThreads[partnerUsername]));
+        } catch(e) {}
+    }
+
+    function loadThreadFromStorage(partnerUsername) {
+        try {
+            const key = getTradeKey(partnerUsername);
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : null;
+        } catch(e) { return null; }
+    }
+
+    // =========================================================
+    // [ESCOPO 5] LEDGER DE OFERTAS DE TROCA — tabela propostas_p2p
+    // BUGFIX CRÍTICO: a versão antiga guardava as propostas em
+    // localStorage (chave 'cyber_global_offers'), que é por NAVEGADOR,
+    // não por conta. Isso é a causa raiz do "histórico de propostas
+    // desaparecia": se o outro jogador estivesse num dispositivo
+    // diferente (o caso normal, já que são contas reais no Supabase),
+    // a oferta simplesmente nunca existia do lado dele — não é que o
+    // dado "sumia", é que nunca esteve lá. Substituído pela tabela real
+    // public.propostas_p2p (RLS: cada parte só vê as próprias propostas),
+    // que persiste no servidor e é visível para AMBOS os jogadores
+    // envolvidos, em qualquer dispositivo.
+    // =========================================================
+
+    // Cache local da contagem de pendentes para o badge — atualizado por
+    // refreshIncomingProposals() (polling leve) e Realtime.
+    let _incomingProposalsCache = [];
+
+    async function createOffer({ owner, receiver, assetId, targetAssetDbId, bumpsOffered, offeredAssetDbId, offeredAssetDisplayId }) {
+        if (!owner || !receiver || !currentUser.id) return null;
+
+        const targetProfile = await fetchProfileByUsername(receiver.startsWith('@') ? receiver : '@' + receiver.replace(/^@/, ''));
+        if (!targetProfile) {
+            console.error('createOffer: destinatário não encontrado', receiver);
+            return null;
+        }
+
+        // O card alvo da proposta é o card do DESTINATÁRIO que o remetente
+        // quer adquirir — vem de thread.targetAsset (ver submitCounterProposal).
+        const targetAssetDisplayId = assetId;
+
+        if (!targetAssetDbId) {
+            console.error('createOffer: card alvo sem _dbId, não é possível registrar a proposta.');
+            return null;
+        }
+
+        const { data, error } = await sb.from('propostas_p2p').insert({
+            remetente_id: currentUser.id,
+            remetente_username: currentUser.username,
+            destinatario_id: targetProfile.id,
+            destinatario_username: targetProfile.username,
+            card_id: targetAssetDbId,
+            card_display_id: targetAssetDisplayId,
+            bumps_ofertados: bumpsOffered || 0,
+            card_ofertado_id: offeredAssetDbId || null,
+            card_ofertado_display_id: offeredAssetDisplayId || null
+        }).select().single();
+
+        if (error) { console.error('createOffer:', error.message); return null; }
+        return { id: data.id, ...data };
+    }
+
+    async function updateOfferStatus(offerId, status) {
+        if (status === 'rejected') {
+            const { error } = await sb.from('propostas_p2p')
+                .update({ status: 'recusada', recusada_em: new Date().toISOString() })
+                .eq('id', offerId)
+                .eq('destinatario_id', currentUser.id)
+                .eq('status', 'pendente');
+            if (error) console.error('updateOfferStatus (recusar):', error.message);
+        }
+        // 'accepted' é tratado por acceptCurrentProposal via RPC aceitar_proposta_p2p
+        // (precisa ser atômico com a transferência real de cards/bumps).
+        await refreshIncomingProposals();
+        renderGlobalOffers('offersContainer');
+    }
+
+    // Carrega propostas onde o usuário logado é remetente OU destinatário,
+    // para renderizar o painel offersContainer (substitui loadGlobalOffers).
+    async function loadGlobalOffers() {
+        if (!currentUser.loggedIn || !currentUser.id) return [];
+        const { data, error } = await sb.from('propostas_p2p')
+            .select('id, remetente_username, destinatario_username, card_display_id, bumps_ofertados, card_ofertado_display_id, status, created_at')
+            .or(`remetente_id.eq.${currentUser.id},destinatario_id.eq.${currentUser.id}`)
+            .order('created_at', { ascending: false })
+            .limit(50);
+        if (error) { console.error('loadGlobalOffers:', error.message); return []; }
+        // Mapeia para o shape que renderGlobalOffers já espera (owner/receiver/assetId/bumpsOffered)
+        return (data || []).map(p => ({
+            id: p.id,
+            owner: p.remetente_username,
+            receiver: p.destinatario_username,
+            assetId: p.card_display_id,
+            bumpsOffered: p.bumps_ofertados,
+            status: p.status === 'pendente' ? 'pending' : p.status === 'concluida' ? 'accepted' : p.status === 'recusada' ? 'rejected' : p.status,
+            createdAt: new Date(p.created_at).getTime()
+        }));
+    }
+
+    // [ESCOPO 5] Badge de notificação — pendentes onde o usuário é destinatário
+    async function refreshIncomingProposals() {
+        if (!currentUser.loggedIn || !currentUser.id) { _setProposalBadgeState([]); return; }
+        const { data, error } = await sb.from('propostas_p2p')
+            .select('id, remetente_username, card_display_id, bumps_ofertados, created_at')
+            .eq('destinatario_id', currentUser.id)
+            .eq('status', 'pendente')
+            .order('created_at', { ascending: false });
+        if (error) { console.error('refreshIncomingProposals:', error.message); return; }
+        _incomingProposalsCache = data || [];
+        _setProposalBadgeState(_incomingProposalsCache);
+    }
+
+    function _setProposalBadgeState(pending) {
+        const dot = document.getElementById('newOfferAlertDot');
+        if (!dot) return;
+        dot.classList.toggle('active', pending.length > 0);
+        dot.style.display = pending.length > 0 ? 'block' : 'none';
+    }
+
+    // Realtime: nova linha em propostas_p2p destinada a este usuário acende
+    // o ponto de alerta imediatamente, sem precisar abrir a tela de Propostas.
+    function initProposalsRealtime() {
+        if (!currentUser.loggedIn || !currentUser.id) return;
+        sb.channel('propostas-' + currentUser.id)
+            .on('postgres_changes', {
+                event: '*', schema: 'public', table: 'propostas_p2p',
+                filter: `destinatario_id=eq.${currentUser.id}`
+            }, () => { refreshIncomingProposals(); })
+            .subscribe();
+    }
+
+    async function renderGlobalOffers(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        container.innerHTML = '<div style="font-size:0.6rem;color:#444;padding:8px 0;">Carregando propostas...</div>';
+        if (!currentUser.loggedIn) { container.innerHTML = ''; return; }
+
+        const offers = await loadGlobalOffers();
+        container.innerHTML = '';
+        const me = currentUser.username;
+
+        if (offers.length === 0) {
+            container.innerHTML = '<div style="font-size:0.6rem;color:#444;padding:8px 0;">Nenhuma proposta registrada ainda.</div>';
+            return;
+        }
+
+        offers.forEach(offer => {
+            const isReceiver = offer.receiver === me;
+            const isOwner = offer.owner === me;
+            if (!isReceiver && !isOwner) return;
+
+            const card = document.createElement('div');
+            card.className = 'offer-card';
+
+            if (isReceiver && offer.status === 'pending') {
+                card.innerHTML = `
+                    <span>Proposta de <b>${offer.owner}</b> — ${offer.bumpsOffered} B$ pelo ativo ${offer.assetId}</span>
+                    <span>
+                        <button class="btn-action accept-offer">Aceitar</button>
+                        <button class="btn-action decline-offer">Recusar</button>
+                    </span>
+                `;
+                card.querySelector('.accept-offer').addEventListener('click', () => acceptOfferFromList(offer));
+                card.querySelector('.decline-offer').addEventListener('click', () => updateOfferStatus(offer.id, 'rejected'));
+            } else {
+                const statusLabel = offer.status === 'pending' ? 'Pendente' : (offer.status === 'accepted' ? 'Aceita' : 'Recusada');
+                const directionLabel = isOwner ? `Proposta enviada a <b>${offer.receiver}</b>` : `Proposta de <b>${offer.owner}</b>`;
+                card.innerHTML = `<span>${directionLabel} — ${offer.bumpsOffered} B$ pelo ativo ${offer.assetId} — <b>${statusLabel}</b></span>`;
+            }
+
+            container.appendChild(card);
+        });
+
+        if (container.innerHTML === '') {
+            container.innerHTML = '<div style="font-size:0.6rem;color:#444;padding:8px 0;">Nenhuma proposta registrada ainda.</div>';
+        }
+    }
+
+    // Aceitar diretamente da lista de Propostas (fora de uma thread de chat
+    // aberta) — usa a mesma RPC atômica aceitar_proposta_p2p.
+    async function acceptOfferFromList(offer) {
+        const { error } = await sb.rpc('aceitar_proposta_p2p', {
+            p_destinatario_id: currentUser.id,
+            p_proposta_id: offer.id
+        });
+        if (error) {
+            console.error('aceitar_proposta_p2p:', error.message);
+            showCyberAlert('ERRO', 'Não foi possível concluir a proposta. Ela pode já ter expirado ou os itens não estarem mais disponíveis.', 'error');
+            return;
+        }
+        playSynthSound('success');
+        showCyberAlert('✓ PROPOSTA ACEITA', 'Itens e Bumps transferidos com sucesso.', 'success');
+        pushLedger(`${offer.owner} e ${offer.receiver} concluíram uma troca P2P: ${offer.bumpsOffered} B$ pelo ativo ${offer.assetId}`);
+
+        // Recarrega estado local afetado
+        savedAssets = await loadCardsFromSupabase(currentUser.id);
+        const freshProfile = await fetchProfile(currentUser.id);
+        if (freshProfile) currentUser.bumps = freshProfile.bumps;
+        renderVaultGrid();
+        await refreshIncomingProposals();
+        renderGlobalOffers('offersContainer');
+    }
+
+    function initiateTradeContact(seller, assetId) {
+        if (!currentUser.loggedIn) { navigateTo('auth'); return; }
+        
+        let assetData = marketAssets.find(m => m.id === assetId) || globalFeed.find(g => g.id === assetId);
+
+        if (!messageThreads[seller]) {
+            // Tenta restaurar thread guardada anteriormente para este par
+            const savedThread = loadThreadFromStorage(seller);
+            if (savedThread) {
+                messageThreads[seller] = savedThread;
+            } else {
+                messageThreads[seller] = {
+                    targetAsset: assetData || null,
+                    activeProposal: {
+                        offeredBumps: 0,
+                        offeredAsset: null,
+                        proposer: currentUser.username,
+                        status: "PENDING"
+                    },
+                    messages: []
+                };
+                messageThreads[seller].messages.push({ 
+                    sender: 'system', 
+                    text: `🔒 Linha segura estabelecida com ${seller} a respeito do Ativo ${assetId}. Use o terminal abaixo para estruturar sua proposta.` 
+                });
+                saveThreadToStorage(seller);
+            }
+        }
+        
+        activeThreadUser = seller; 
+        navigateTo('messages');
+    }
+
+    function renderChatThreads() {
+        const sidebar = document.getElementById('chatSidebarThreads'); if(!sidebar) return;
+        sidebar.innerHTML = '';
+        const keys = Object.keys(messageThreads);
+        document.getElementById('msg-count-badge').innerText = `${keys.length} CONVERSAS`;
+
+        if(keys.length === 0) { sidebar.innerHTML = '<div style="color:#445; font-size:0.6rem; padding:10px;">INBOX VAZIO</div>'; return; }
+        
+        keys.forEach(k => {
+            let thread = messageThreads[k];
+            let partnerAvatar = "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg";
+            let storedUser = localStorage.getItem(`user_${k}`);
+            if(storedUser) partnerAvatar = JSON.parse(storedUser).avatar;
+
+            const div = document.createElement('div'); 
+            div.className = `chat-thread-node ${activeThreadUser === k ? 'active' : ''}`;
+            div.onclick = () => { 
+                // Limpa a proposal box antes de trocar de chat para evitar estado cruzado
+                const proposalBox = document.getElementById('dealProposalBox');
+                if(proposalBox) { proposalBox.style.display = "none"; }
+                const assetBanner = document.getElementById('dealAssetBanner');
+                if(assetBanner) { assetBanner.style.display = "none"; }
+                
+                activeThreadUser = k; 
+                renderChatThreads(); 
+            }; 
+            
+            div.innerHTML = `
+                <img src="${partnerAvatar}" class="chat-thread-avatar">
+                <div class="chat-thread-info">
+                    <span class="chat-thread-name">${k}</span>
+                    <span style="color:#667; font-size:0.5rem; text-transform:uppercase;">Ativo: ${thread.targetAsset ? thread.targetAsset.id : 'Nenhum'}</span>
+                </div>
+            `;
+            sidebar.appendChild(div);
+        });
+        
+        renderChatWindow();
+    }
+
+    function renderChatWindow() {
+        const box = document.getElementById('chatMessagesBox'); if(!box) return;
+        // Limpa tudo antes de renderizar para evitar qualquer vazamento entre chats
+        box.innerHTML = '';
+
+        const assetBanner = document.getElementById('dealAssetBanner');
+        const proposalBox = document.getElementById('dealProposalBox');
+        const counterPanel = document.getElementById('counterPanelZone');
+
+        // Reset completo dos painéis (isolamento ao trocar de chat)
+        if (proposalBox) { proposalBox.style.display = "none"; proposalBox.querySelector && (document.getElementById('dealProposalDetails').innerHTML = ''); }
+        if (assetBanner) assetBanner.style.display = "none";
+        if (counterPanel) counterPanel.style.display = "none";
+
+        if (!activeThreadUser) {
+            box.innerHTML = '<div style="color:#445; font-size:0.7rem; text-align:center; margin-top:50px;">SELECIONE UM CANAL DO TERMINAL CRIPTOGRÁFICO</div>';
+            return;
+        }
+
+        // Lê sempre do localStorage com chave composta (fonte de verdade isolada por par)
+        const freshThread = loadThreadFromStorage(activeThreadUser);
+        if (freshThread) {
+            messageThreads[activeThreadUser] = freshThread;
+        }
+
+        if (!messageThreads[activeThreadUser]) {
+            box.innerHTML = '<div style="color:#445; font-size:0.7rem; text-align:center; margin-top:50px;">SELECIONE UM CANAL DO TERMINAL CRIPTOGRÁFICO</div>';
+            return;
+        }
+
+        let thread = messageThreads[activeThreadUser];
+
+        // 1. Renderiza Informações do Item Sendo Negociado (Topo)
+        if(thread.targetAsset) {
+            assetBanner.style.display = "flex";
+            document.getElementById('dealAssetImg').src = thread.targetAsset.imgSrc;
+            document.getElementById('dealAssetTitle').innerText = `${thread.targetAsset.id} (${thread.targetAsset.styleName})`;
+            document.getElementById('dealAssetOwner').innerText = `Proprietário: ${thread.targetAsset.creator}`;
+            document.getElementById('dealAssetPrice').innerText = `Preço de tabela: ${thread.targetAsset.price} B$`;
+        } else {
+            assetBanner.style.display = "none";
+        }
+
+        // 2. Renderiza o Estado da Proposta Ativa (lido exclusivamente do thread deste par)
+        let prop = thread.activeProposal;
+        if(prop && prop.status === "PENDING" && (prop.offeredBumps > 0 || prop.offeredAsset)) {
+            proposalBox.style.display = "flex";
+            let desc = `Ofertado por ${prop.proposer}: **${prop.offeredBumps} B$**`;
+            if(prop.offeredAsset) {
+                desc += ` + Figurinha [${prop.offeredAsset.id} - ${prop.offeredAsset.rarityName}]`;
+            }
+            document.getElementById('dealProposalDetails').innerText = desc;
+
+            const buttonsZone = document.getElementById('proposalActionButtonsZone');
+            if(prop.proposer === currentUser.username) {
+                buttonsZone.innerHTML = `<span style="color:#ffaa00; font-style:italic;">Sua oferta foi enviada. Aguardando decisão do operador oposto...</span>`;
+            } else {
+                buttonsZone.innerHTML = `
+                    <button class="btn-action" style="border-color:#00ff66; background:#04140a;" onclick="acceptCurrentProposal()">ACEITAR OFERTA</button>
+                    <button class="btn-action" style="border-color:#ff0044; background:#14040a;" onclick="rejectCurrentProposal()">RECUSAR OFERTA</button>
+                `;
+            }
+        } else if(prop && prop.status === "ACCEPTED") {
+            proposalBox.style.display = "flex";
+            document.getElementById('dealProposalDetails').innerHTML = `<span style="color:#00ff66; font-weight:bold;">✓ OPERAÇÃO CONCLUÍDA: A PROPOSTA FOI ACEITA E O ATIVO ENVIADO AO RESPECTIVO COFRE!</span>`;
+            document.getElementById('proposalActionButtonsZone').innerHTML = '';
+        } else if(prop && prop.status === "REJECTED") {
+            proposalBox.style.display = "flex";
+            document.getElementById('dealProposalDetails').innerHTML = `<span style="color:#ff0044; font-weight:bold;">✕ PROPOSTA RECUSADA. Monte uma contraproposta utilizando o painel inferior.</span>`;
+            document.getElementById('proposalActionButtonsZone').innerHTML = '';
+        } else {
+            proposalBox.style.display = "none";
+        }
+
+        // 3. Painel de Contrapropostas
+        if(prop && prop.status !== "ACCEPTED") {
+            counterPanel.style.display = "flex";
+            const selectElement = document.getElementById('counterAssetSelect');
+            selectElement.innerHTML = '<option value="">-- NENHUMA FIGURINHA SELECIONADA --</option>';
+            savedAssets.forEach((a) => {
+                if(thread.targetAsset && a.id === thread.targetAsset.id) return;
+                const opt = document.createElement('option');
+                opt.value = a.id;
+                opt.innerText = `${a.id} - Rarity: ${a.rarityName} (${a.styleName})`;
+                selectElement.appendChild(opt);
+            });
+        } else {
+            counterPanel.style.display = "none";
+        }
+
+        // 4. Histórico de Mensagens
+        thread.messages.forEach(m => {
+            const div = document.createElement('div');
+            div.className = `msg-bubble ${m.sender === currentUser.username ? 'sent' : 'received'}`;
+            div.innerText = m.text;
+            box.appendChild(div);
+        });
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function sendChatMessage() {
+        const input = document.getElementById('inputChatMsg'); const text = input.value.trim();
+        if(!text || !activeThreadUser) return;
+        messageThreads[activeThreadUser].messages.push({ sender: currentUser.username, text: text });
+        input.value = '';
+        saveThreadToStorage(activeThreadUser);
+        renderChatWindow();
+    }
+
+    /* SISTEMA COMPLETO DE CONTRA-PROPOSTAS E MERCADO P2P DIRECT */
+    async function submitCounterProposal() {
+        if(!activeThreadUser || !messageThreads[activeThreadUser]) return;
+        let thread = messageThreads[activeThreadUser];
+
+        if(thread.activeProposal && thread.activeProposal.status === "ACCEPTED") {
+            showCyberAlert('LOG_ERRO:', 'Este canal de negociação já foi finalizado com sucesso.', 'error'); return;
+        }
+
+        const bumpsOffered = parseInt(document.getElementById('counterBumpsInput').value) || 0;
+        const selectedAssetId = document.getElementById('counterAssetSelect').value;
+
+        if(bumpsOffered < 0) { showCyberAlert('LOG_ERRO:', 'Valor inválido de Bumps.', 'error'); return; }
+        if(bumpsOffered > currentUser.bumps) { showCyberAlert('ACESSO_NEGADO:', 'Você não possui saldo de Bumps suficiente em conta para cobrir esta proposta.', 'error'); return; }
+
+        if (!thread.targetAsset || !thread.targetAsset._dbId) {
+            showCyberAlert('LOG_ERRO:', 'Ativo alvo sem registro válido no servidor. Reabra a negociação a partir do mercado.', 'error'); return;
+        }
+
+        let assetObject = null;
+        if(selectedAssetId) {
+            assetObject = savedAssets.find(a => a.id === selectedAssetId);
+        }
+
+        // Sobrescreve proposta ativa com a contraproposta
+        thread.activeProposal = {
+            offeredBumps: bumpsOffered,
+            offeredAsset: assetObject ? {...assetObject} : null,
+            proposer: currentUser.username,
+            status: "PENDING"
+        };
+
+        // PROPOSTA GLOBAL — agora persistida em propostas_p2p (Supabase),
+        // visível para ambas as partes em qualquer dispositivo.
+        const offerRecord = await createOffer({
+            owner: currentUser.username,
+            receiver: activeThreadUser,
+            assetId: thread.targetAsset.id,
+            targetAssetDbId: thread.targetAsset._dbId,
+            bumpsOffered,
+            offeredAssetDbId: assetObject ? assetObject._dbId : null,
+            offeredAssetDisplayId: assetObject ? assetObject.id : null
+        });
+        thread.activeProposal.globalOfferId = offerRecord ? offerRecord.id : null;
+
+        if (!offerRecord) {
+            showCyberAlert('ERRO_DE_REDE', 'Falha ao registrar a proposta no servidor. Tente novamente.', 'error');
+            return;
+        }
+
+        // Adiciona registro estruturado na caixa de mensagens
+        let logMsg = `⚙️ CONTRAPROPOSTA ENVIADA POR ${currentUser.username}: Ofertou ${bumpsOffered} B$`;
+        if(assetObject) logMsg += ` + Figurinha [${assetObject.id}]`;
+        thread.messages.push({ sender: currentUser.username, text: logMsg });
+
+        // Ledger global (Ponto 4)
+        pushLedger(`${currentUser.username} enviou proposta a ${activeThreadUser}: ${bumpsOffered} B$${assetObject ? ' + ' + assetObject.id : ''}`);
+
+        document.getElementById('counterBumpsInput').value = '';
+        playSynthSound('success');
+        saveThreadToStorage(activeThreadUser);
+        renderChatWindow();
+    }
+
+    async function acceptCurrentProposal() {
+        if(!activeThreadUser || !messageThreads[activeThreadUser]) return;
+        let thread = messageThreads[activeThreadUser];
+        let prop = thread.activeProposal;
+
+        if(!thread.targetAsset) return;
+        if(!prop || !prop.globalOfferId) {
+            showCyberAlert('LOG_ERRO:', 'Esta proposta não tem um registro de servidor válido para ser concluída.', 'error');
+            return;
+        }
+
+        let sellerName = thread.targetAsset.creator;
+
+        // Só quem é dono do card alvo (destinatário da proposta) pode aceitar —
+        // a RPC aceitar_proposta_p2p valida isso novamente no servidor.
+        if (currentUser.username !== sellerName) {
+            showCyberAlert('ACESSO_NEGADO:', 'Apenas o dono do ativo alvo pode aceitar esta proposta.', 'error');
+            return;
+        }
+
+        // ── RPC ATÔMICA: transfere card alvo + card ofertado (se houver) +
+        // Bumps ofertados (se houver), tudo numa única transação no servidor,
+        // e grava a transição em historico_propostas_p2p. Substitui a
+        // simulação antiga que lia/escrevia em localStorage chaves
+        // "user_<nome>" — o que nunca refletia a conta real do outro
+        // jogador (ela está no Supabase, não no localStorage deste navegador).
+// =========================================================
+// dr0p_station — PARTE 1/4: AUTH (SUPABASE)
+// SUBSTITUI no script.js original:
+//   - bloco "PERSISTÊNCIA DA SESSÃO ATIVA" (saveCurrentSession / restoreCurrentSession)
+//   - bloco "REGISTRY CENTRALIZADO DE UTILIZADORES" (REGISTRY_KEY, SEED_USERS,
+//     loadRegistry, saveRegistry, registryGet, registrySet, initRegistry IIFE)
+//   - função handleAuthSubmit
+//   - função logoutSession
+// MANTÉM como está: switchAuthMode, sanitizeInput, validateUsername,
+//   RESERVED_USERNAMES, navigateTo, handleProfileNavClick
+// SUBSTITUI TAMBÉM: validatePassword (regras de força mais rígidas)
+// =========================================================
+
+const sb = window.supabaseClient;
+
+// ── CONSTANTES GLOBAIS: SISTEMA DE FRAGMENTOS DE SUCATA ──────────────
+const FRAGMENTS_PER_CORRUPTED_CARD = 5;
+const FRAGMENTS_PER_FURNACE_FAIL   = 8;
+const FRAGMENTS_TO_REDEEM_TICKET   = 30;
+const FRAGMENTS_TO_REDEEM_ITEM     = 15;
+
+// BUGFIX CRÍTICO: authMode nunca era declarada (só recebia valor dentro de
+// switchAuthMode, sem let/var/const). handleAuthSubmit LÊ authMode logo no
+// início — se a pessoa clicasse em "Acessar Sistema" antes de switchAuthMode
+// ter rodado pelo menos uma vez (ex: token de e-mail confirmado, refresh,
+// alguma ordem de carregamento específica do navegador), authMode ainda não
+// existia e o acesso lançava "ReferenceError: authMode is not defined" —
+// fora do try/catch original, então o clique não fazia NADA visível. Valor
+// inicial 'login' porque a aba "Conectar" já vem ativa por padrão no HTML.
+let authMode = 'login';
+
+let currentUser = {
+    loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
+    bio: "Explorador da rede dr0p_station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
+    followers: 12, following: 4, followedByMe: false,
+    inventory: [], // populado na Parte 3 (inventário)
+    cosmetics: [], // ids dos cosméticos da Loja (molduras/fundos/adereços/estantes/emoticons) já comprados — persistido em profiles.cosmetics
+    // Slots de equipamento ativo (um item por slot, exceto a moldura que tem coluna própria avatar_frame).
+    // Persistido como objeto único em profiles.equipped_cosmetics (jsonb).
+    equippedCosmetics: { background: null, prop: null, shelf: null, emoticon: null }
+};
+
+// =========================================================
+// SEGURANÇA: REGRAS DE FORÇA DA SENHA
+// (substitui o validatePassword original, que só exigia 6 chars)
+// =========================================================
+function validatePassword(raw) {
+    if (!raw || raw.length < 8) return { ok: false, msg: 'Chave deve ter no mínimo 8 caracteres.' };
+    if (raw.length > 128) return { ok: false, msg: 'Chave demasiado longa (máx. 128 chars).' };
+    if (!/[a-z]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 letra minúscula.' };
+    if (!/[A-Z]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 letra maiúscula.' };
+    if (!/[0-9]/.test(raw)) return { ok: false, msg: 'Chave deve conter ao menos 1 número.' };
+    const COMMON_WEAK = ['12345678', 'password', 'senha123', 'qwerty123', '11111111', 'abc12345', 'Password1'];
+    if (COMMON_WEAK.some(w => w.toLowerCase() === raw.toLowerCase())) {
+        return { ok: false, msg: 'Chave demasiado comum/fraca. Escolhe outra.' };
+    }
+    return { ok: true };
+}
+
+// =========================================================
+// SEGURANÇA: ANTI-BRUTEFORCE NO LOGIN (client-side)
+// Trava tentativas após N falhas seguidas. Isso é só uma camada
+// de UX/atrito — a proteção real fica no painel Supabase:
+// Authentication → Settings → habilite "Leaked password protection",
+// reduza o rate limit de signInWithPassword e ative captcha (hCaptcha/Turnstile).
+// =========================================================
+const LOGIN_LOCK_KEY = 'dr0p_login_attempts';
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_MS = 30000; // 30s
+
+function getLoginAttemptState() {
+    try { return JSON.parse(sessionStorage.getItem(LOGIN_LOCK_KEY)) || { count: 0, lockedUntil: 0 }; }
+    catch (e) { return { count: 0, lockedUntil: 0 }; }
+}
+function setLoginAttemptState(state) {
+    try { sessionStorage.setItem(LOGIN_LOCK_KEY, JSON.stringify(state)); } catch (e) {}
+}
+function registerFailedLogin() {
+    const state = getLoginAttemptState();
+    state.count += 1;
+    if (state.count >= MAX_LOGIN_ATTEMPTS) state.lockedUntil = Date.now() + LOCKOUT_MS;
+    setLoginAttemptState(state);
+}
+function clearLoginAttempts() {
+    setLoginAttemptState({ count: 0, lockedUntil: 0 });
+}
+function secondsLoginLocked() {
+    const state = getLoginAttemptState();
+    if (state.lockedUntil && Date.now() < state.lockedUntil) {
+        return Math.ceil((state.lockedUntil - Date.now()) / 1000);
+    }
+    return 0;
+}
+
+// =========================================================
+// PERFIL (tabela public.profiles)
+// ⚠️ A coluna `email` tem o SELECT revogado para anon/authenticated
+// no schema.sql (privacidade). Por isso TODAS as leituras abaixo usam
+// uma lista explícita de colunas públicas — nunca select('*') nem
+// select('email'). A resolução de e-mail para login passa pela
+// function security definer `email_by_username` (ver fetchEmailByUsername).
+// =========================================================
+const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, banner, status, following, fusion_count, cosmetics, equipped_cosmetics, fragments, created_at, updated_at';
+
+async function fetchProfile(userId) {
+    const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('id', userId).single();
+    if (error) { console.error('fetchProfile:', error.message); return null; }
+    return data;
+}
+
+async function createProfile(userId, username, email) {
+    // Trava por id: se já existe um profile pra esse usuário do Auth
+    // (re-tentativa de registro, F5 no meio do fluxo, double-click no botão,
+    // etc.), retorna o que já existe em vez de inserir uma linha nova.
+    const existing = await fetchProfile(userId);
+    if (existing) return existing;
+
+    const payload = {
+        id: userId,
+        username,
+        email,
+        bumps: 100,
+        code: "#" + Math.floor(1000 + Math.random() * 9000),
+        bio: "Membro verificado.",
+        avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg",
+        avatar_frame: "frame-style-1",
+        banner: ""
+    };
+    // BUGFIX: trocado de .upsert(...) para .insert(...) puro.
+    // upsert(payload, { onConflict: 'id' }) gera um INSERT ... ON CONFLICT
+    // DO UPDATE no Postgres — e o caminho de UPDATE tenta reavaliar TODAS
+    // as colunas do payload, incluindo `email`. Só que o GRANT UPDATE em
+    // profiles (ver schema.sql) não inclui a coluna email (só leitura/escrita
+    // restrita por design). Resultado: o upsert falhava com "permission
+    // denied for column email" sempre que caía no ramo de conflito — e como
+    // o fetchProfile() logo acima já garante que não existe linha duplicada,
+    // esse ramo de conflito nunca deveria ser necessário mesmo. Um insert
+    // puro evita o problema by design.
+    const { data, error } = await sb.from('profiles')
+        .insert(payload)
+        .select(PUBLIC_PROFILE_COLUMNS)
+        .single();
+    if (error) { console.error('createProfile:', error.message); return null; }
+
+    await seedStarterInventory(userId);
+    return data;
+}
+
+// =========================================================
+// LOGIN: resolve o e-mail real a partir do @username/alias
+// (necessário pois o Supabase Auth autentica por e-mail, não por alias)
+// Usa a function `email_by_username` (security definer) em vez de
+// select direto, já que a coluna email não é legível pela API normal.
+// =========================================================
+async function fetchEmailByUsername(username) {
+    // BUGFIX CRÍTICO (login travado / "Nó de rede inexistente ou assinatura
+    // incorreta" em TODA conta existente): validateUsername() SEMPRE devolve
+    // o alias com "@" na frente (ver `value: clean.startsWith('@') ? clean : '@' + clean`),
+    // e createProfile() grava esse mesmo valor (com "@") na coluna profiles.username.
+    // Ou seja, no banco o username é literalmente "@fulano".
+    // Esta function ANTES removia o "@" antes de consultar
+    // (`username.replace(/^@/, '')`), então a query rodava como
+    // `lower(username) = lower('fulano')` contra uma coluna que guarda
+    // "@fulano" — NUNCA dava match. Resultado: email_by_username sempre
+    // retornava null, fetchEmailByUsername sempre retornava null, e o login
+    // caía direto no ramo de "username não encontrado" — para QUALQUER
+    // conta, mesmo com a senha certa, porque o e-mail nunca chegava a ser
+    // resolvido e signInWithPassword nunca era chamado. Não existe (nem
+    // nunca existiu) nenhuma checagem de "assinatura de nó" — é só o texto
+    // do alerta. O fix correto é não normalizar o "@" aqui, já que o valor
+    // já chega exatamente no mesmo formato gravado no banco (validateUsername
+    // já fez essa normalização lá atrás, em handleAuthSubmit).
+    const { data, error } = await sb.rpc('email_by_username', { p_username: username });
+    if (error) { console.error('fetchEmailByUsername:', error.message); return null; }
+    return data || null;
+}
+
+// =========================================================
+// PERFIL DE TERCEIROS: leitura/escrita por username
+// (substitui registryGet/registrySet, que liam/escreviam o
+// "registry" inteiro no localStorage; agora cada operação é
+// uma query direta à tabela `profiles` no Supabase)
+// =========================================================
+async function fetchProfileByUsername(username) {
+    const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('username', username).maybeSingle();
+    if (error) { console.error('fetchProfileByUsername:', error.message); return null; }
+    return data;
+}
+
+// `fieldsCamel` usa as MESMAS chaves do objeto em memória (ex: { bumps: 120, bio: '...' }).
+// Funciona tanto para o currentUser (passa currentUser.id) como para outro usuário
+// (passa o id obtido via fetchProfileByUsername).
+const PROFILE_FIELD_TO_COLUMN = {
+    bumps: 'bumps', bio: 'bio', avatar: 'avatar', avatarFrame: 'avatar_frame', banner: 'banner',
+    status: 'status', following: 'following', code: 'code', username: 'username',
+    fusion_count: 'fusion_count', cosmetics: 'cosmetics', equippedCosmetics: 'equipped_cosmetics', fragments: 'fragments'
+};
+async function updateProfileInSupabase(userId, fieldsCamel) {
+    if (!userId) { console.warn('updateProfileInSupabase: userId ausente, ignorando update remoto.'); return false; }
+    const updatePayload = {};
+    Object.keys(fieldsCamel).forEach(key => {
+        const col = PROFILE_FIELD_TO_COLUMN[key];
+        if (col) updatePayload[col] = fieldsCamel[key];
+    });
+    if (Object.keys(updatePayload).length === 0) return false;
+
+    const { error } = await sb.from('profiles').update(updatePayload).eq('id', userId);
+    if (error) { console.error('updateProfileInSupabase:', error.message); return false; }
+    return true;
+}
+
+function applyProfileToCurrentUser(profile) {
+    currentUser = {
+        loggedIn: true,
+        id: profile.id,
+        username: profile.username,
+        bumps: profile.bumps,
+        code: profile.code,
+        bio: profile.bio,
+        avatar: profile.avatar,
+        avatarFrame: profile.avatar_frame || 'frame-style-1',
+        banner: profile.banner,
+        status: profile.status || 'online',
+        followingList: profile.following || [],
+        following: (profile.following || []).length,
+        followers: 0, // calculado em tempo real onde for exibido (Parte futura)
+        followedByMe: false,
+        inventory: [], // populado na Parte 3
+        cosmetics: Array.isArray(profile.cosmetics) ? profile.cosmetics : [],
+        fragments: typeof profile.fragments === 'number' ? profile.fragments : 0,
+        equippedCosmetics: (profile.equipped_cosmetics && typeof profile.equipped_cosmetics === 'object' && !Array.isArray(profile.equipped_cosmetics))
+            ? { background: null, prop: null, shelf: null, emoticon: null, ...profile.equipped_cosmetics }
+            : { background: null, prop: null, shelf: null, emoticon: null }
+    };
+
+    const navText = document.getElementById('nav-btn-text');
+    if (navText) navText.innerText = currentUser.username.toUpperCase();
+    const vaultBtn = document.getElementById('navVaultBtn'); if (vaultBtn) vaultBtn.style.display = 'flex';
+    const marketBtn = document.getElementById('navMarketBtn'); if (marketBtn) marketBtn.style.display = 'flex';
+    const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'flex';
+    const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'flex';
+    const contractsBtn = document.getElementById('navContractsBtn'); if (contractsBtn) contractsBtn.style.display = 'flex';
+    const lojaBtn = document.getElementById('navLojaBtn'); if (lojaBtn) lojaBtn.style.display = 'flex';
+    const broadcastBtn = document.getElementById('navBroadcastBtn'); if (broadcastBtn) broadcastBtn.style.display = 'flex';
+    const walletBtn = document.getElementById('navWalletBtn'); if (walletBtn) { walletBtn.style.display = 'flex'; }
+    const walletBadge = document.getElementById('wallet-balance-badge'); if (walletBadge) walletBadge.innerText = `${currentUser.bumps} B$`;
+    // [ESCOPO 3] Broadcast btn movido para dentro do chat — gcBroadcastBtn
+    const gcBroadcastBtn = document.getElementById('gcBroadcastBtn'); if (gcBroadcastBtn) gcBroadcastBtn.style.display = 'flex';
+}
+
+function resetCurrentUserToAnon() {
+    currentUser = {
+        loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
+        bio: "Explorador da rede dr0p_station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
+        followers: 12, following: 4, followedByMe: false, inventory: [],
+        cosmetics: [], equippedCosmetics: { background: null, prop: null, shelf: null, emoticon: null }, fragments: 0
+    };
+    messageThreads = {};
+    activeThreadUser = null;
+    savedAssets = [];
+
+    const navText = document.getElementById('nav-btn-text'); if (navText) navText.innerText = "ACESSAR TERMINAL";
+    const vaultBtn = document.getElementById('navVaultBtn'); if (vaultBtn) vaultBtn.style.display = 'none';
+    const msgBtn = document.getElementById('navMessagesBtn'); if (msgBtn) msgBtn.style.display = 'none';
+    const logoutBtn = document.getElementById('navLogoutBtn'); if (logoutBtn) logoutBtn.style.display = 'none';
+    const cBtn = document.getElementById('navContractsBtn'); if (cBtn) cBtn.style.display = 'none';
+    const lojaBtn = document.getElementById('navLojaBtn'); if (lojaBtn) lojaBtn.style.display = 'none';
+    const broadcastBtn = document.getElementById('navBroadcastBtn'); if (broadcastBtn) broadcastBtn.style.display = 'none';
+    const walletBtn2 = document.getElementById('navWalletBtn'); if (walletBtn2) walletBtn2.style.display = 'none';
+    const gcBroadcastBtn2 = document.getElementById('gcBroadcastBtn'); if (gcBroadcastBtn2) gcBroadcastBtn2.style.display = 'none';
+}
+
+// =========================================================
+// SESSÃO: restaura login ao recarregar a página (F5)
+// =========================================================
+async function restoreCurrentSession() {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) { renderBootScreen(); return false; }
+
+    const profile = await fetchProfile(session.user.id);
+    if (!profile) { renderBootScreen(); return false; }
+
+    applyProfileToCurrentUser(profile);
+    savedAssets = await loadCardsFromSupabase(currentUser.id);
+    currentUser.inventory = await loadInventoryFromSupabase(currentUser.id);
+
+    renderBootScreen();
+    return true;
+}
+
+// Renderiza a tela inicial depois que sabemos, com certeza, se há sessão ativa
+// ou não — evita o "precisa de F5" causado por renderizar antes da sessão
+// do Supabase ser confirmada.
+function renderBootScreen() {
+    if (currentUser.loggedIn) {
+        showContractsBtnAndResume();
+    }
+    navigateTo('engine');
+}
+
+// Única fonte de verdade pro boot e pra troca de sessão entre abas.
+// INITIAL_SESSION dispara uma vez, já com a sessão (ou null) resolvida pelo
+// Supabase — é o gatilho certo pra só então carregar UI/missões/cofre,
+// em vez de tentar ler dados antes da sessão estar confirmada.
+let _bootResolved = false;
+sb.auth.onAuthStateChange((event) => {
+    if (event === 'INITIAL_SESSION' && !_bootResolved) {
+        _bootResolved = true;
+        restoreCurrentSession();
+    } else if (event === 'SIGNED_OUT') {
+        resetCurrentUserToAnon();
+        navigateTo('engine');
+    }
+});
+
+// REALTIME GLOBAL: a chamada de initGlobalRealtime() roda lá no FINAL deste
+// arquivo (depois de globalFeed/ledgerCache/etc. já estarem declarados) —
+// ver bloco "BOOT: REALTIME GLOBAL" no fim do script.js. Chamá-la aqui em
+// cima lançava ReferenceError (TDZ: as variáveis que a function usa ainda
+// não tinham sido declaradas nesse ponto da execução), o que travava TODO
+// o resto do script — nenhum clique/listener depois desse ponto rodava.
+
+// =========================================================
+// LOGIN / REGISTRO
+// =========================================================
+async function handleAuthSubmit(event) {
+    event.preventDefault();
+    const errorEl = document.getElementById('authErrorMsg');
+    errorEl.style.display = 'none';
+    const submitBtn = document.getElementById('authSubmitBtn');
+
+    // TUDO dentro do try/catch agora — incluindo validações de username/senha
+    // e a checagem de bloqueio por tentativas falhas. Antes essas checagens
+    // rodavam ANTES do try, então qualquer erro inesperado ali (ex: acesso a
+    // sessionStorage bloqueado pelo navegador) travava o clique inteiro sem
+    // nenhuma mensagem visível — exatamente o sintoma relatado. Agora, se
+    // algo desse tipo acontecer, cai no catch e mostra "Falha de comunicação
+    // com a rede" em vez de não fazer nada.
+    try {
+        const rawUser = document.getElementById('authUsername').value;
+        const rawPass = document.getElementById('authPassword').value;
+
+        if (authMode === 'login') {
+            const lockedSecs = secondsLoginLocked();
+            if (lockedSecs > 0) {
+                errorEl.innerText = `Muitas tentativas falhas. Aguarda ${lockedSecs}s antes de tentar novamente.`;
+                errorEl.style.display = 'block';
+                return;
+            }
+        }
+
+        const userCheck = validateUsername(rawUser);
+        if (!userCheck.ok) { errorEl.innerText = userCheck.msg; errorEl.style.display = 'block'; return; }
+        const formattedUser = userCheck.value;
+
+        const passCheck = validatePassword(rawPass);
+        if (!passCheck.ok) { errorEl.innerText = passCheck.msg; errorEl.style.display = 'block'; return; }
+
+        submitBtn.disabled = true;
+        if (authMode === 'register') {
+            const rawEmail = (document.getElementById('authEmail').value || '').trim();
+            const confirmPass = document.getElementById('authConfirmPassword').value;
+            const day = document.getElementById('authBirthDay').value;
+            const month = document.getElementById('authBirthMonth').value;
+            const year = document.getElementById('authBirthYear').value;
+            const termsOk = document.getElementById('authTerms').checked;
+
+            const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!rawEmail || !EMAIL_RE.test(rawEmail)) {
+                errorEl.innerText = 'Informa um e-mail válido para vincular ao terminal.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            if (rawPass !== confirmPass) {
+                errorEl.innerText = 'As chaves (senha e confirmação) não coincidem.';
+                errorEl.style.display = 'block';
+                return;
+            }
+            if (!day || !month || !year) {
+                errorEl.innerText = 'Selecione sua data de nascimento completa.';
+                errorEl.style.display = 'block';
                 return;
             }
             const age = calculateAge(parseInt(day, 10), parseInt(month, 10), parseInt(year, 10));
@@ -67,6 +2417,1594 @@ const baseName = `dr0p_${(asset.id || '').replace('#','')}_${asset.rarityType}`;
                     // com esse e-mail, mesmo a criação do profile tendo falhado.
                     // Por isso a mensagem não pode sugerir "tenta de novo do zero" —
                     // se a pessoa tentar sb.auth.signUp() de novo com o MESMO e-mail,
+                    // vai cair em "already registered". O caminho certo daqui é
+                    // LOGIN (a senha que ela acabou de definir já é válida) — o login
+                    // vai falhar com "perfil não encontrado" (ver fetchProfile em
+                    // handleAuthSubmit), e nesse ponto criamos o profile que faltou.
+                    await sb.auth.signOut();
+                    errorEl.innerHTML = "Falha ao salvar seu perfil (username pode já estar em uso). " +
+                        "Sua conta de acesso já foi criada — tenta ENTRAR (não registrar de novo) " +
+                        "com o mesmo e-mail e senha que você acabou de definir.";
+                    errorEl.style.display = 'block';
+                    return;
+                }
+            }
+
+            showCyberAlert('// NÓ CONSOLIDADO //', 'Registo concluído. Realiza a conexão agora.', 'success');
+            switchAuthMode('login');
+            return;
+        }
+
+        // LOGIN — resolve o e-mail real a partir do @username/alias
+        const loginEmail = await fetchEmailByUsername(formattedUser);
+        if (!loginEmail) {
+            registerFailedLogin();
+            const remaining = MAX_LOGIN_ATTEMPTS - getLoginAttemptState().count;
+            errorEl.innerText = remaining > 0
+                ? `Nó de rede inexistente ou assinatura incorreta. (${remaining} tentativa(s) restante(s))`
+                : `Muitas tentativas falhas. Aguarda ${secondsLoginLocked()}s.`;
+            errorEl.style.display = 'block';
+            return;
+        }
+
+        const { data, error } = await sb.auth.signInWithPassword({ email: loginEmail, password: rawPass });
+        if (error) {
+            registerFailedLogin();
+            const remaining = MAX_LOGIN_ATTEMPTS - getLoginAttemptState().count;
+            errorEl.innerText = remaining > 0
+                ? `Nó de rede inexistente ou assinatura incorreta. (${remaining} tentativa(s) restante(s))`
+                : `Muitas tentativas falhas. Aguarda ${secondsLoginLocked()}s.`;
+            errorEl.style.display = 'block';
+            return;
+        }
+        clearLoginAttempts();
+
+        let profile = await fetchProfile(data.user.id);
+
+        if (!profile) {
+            // AUTO-CURA: auth válido mas sem profile pelo auth.uid.
+            // Causas comuns:
+            //   A) Cadastro interrompido antes de gravar o profile.
+            //   B) Conta Auth recriada — o profile antigo tem id diferente.
+            //
+            // Solução: busca o profile pelo username digitado (sem mexer no id),
+            // e usa ele diretamente sobrescrevendo o id em memória para a sessão.
+            // Não tentamos alterar a PK no banco (Supabase bloqueia via RLS).
+
+            let recovered = null;
+
+            try {
+                const { data: byUsername } = await sb
+                    .from('profiles')
+                    .select(PUBLIC_PROFILE_COLUMNS)
+                    .ilike('username', formattedUser)
+                    .maybeSingle();
+
+                if (byUsername) {
+                    // Encontrou o profile pelo username — usa ele diretamente.
+                    // Sobrescreve o id em memória para que o restante do app
+                    // funcione com o auth.uid atual (gravações futuras usam o id correto).
+                    recovered = { ...byUsername, id: data.user.id };
+                }
+            } catch(e) {
+                console.warn('auto-heal (busca por username):', e);
+            }
+
+            // Se não achou pelo username, tenta criar um profile novo
+            if (!recovered) {
+                recovered = await createProfile(data.user.id, formattedUser, data.user.email);
+            }
+
+            if (!recovered) {
+                errorEl.innerText = 'Não foi possível localizar seu perfil. Verifique se o username está correto ou registre uma nova conta.';
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            profile = recovered;
+        }
+
+        // Fluxo normal de login (serve tanto para o caminho direto quanto para o auto-heal)
+        messageThreads = {};
+        activeThreadUser = null;
+        const prevAssets = [...(savedAssets || [])];
+        applyProfileToCurrentUser(profile);
+        savedAssets = await loadCardsFromSupabase(currentUser.id);
+        currentUser.inventory = await loadInventoryFromSupabase(currentUser.id);
+        checkIncomingGifts(prevAssets, savedAssets);
+        await refreshPendingGifts();
+        initGiftRealtime();
+        await refreshIncomingProposals();
+        initProposalsRealtime();
+        playTerminalSound('login');
+        resumePendingContracts();
+        navigateTo('engine');
+
+    } catch (e) {
+        console.error(e);
+        // DEBUG TEMPORÁRIO: mostra o erro real na tela em vez de uma mensagem
+        // genérica, pra conseguir diagnosticar sem precisar abrir o console.
+        const detail = (e && (e.message || e.error_description || e.toString())) || 'erro desconhecido';
+        errorEl.innerText = "Falha de comunicação com a rede: " + detail;
+        errorEl.style.display = 'block';
+    } finally {
+        submitBtn.disabled = false;
+    }
+}
+
+// =========================================================
+// LOGOUT
+// =========================================================
+async function logoutSession() {
+    await sb.auth.signOut();
+    resetCurrentUserToAnon();
+    pendingGiftsCache = [];
+    _setGiftFabState([]);
+    _incomingProposalsCache = [];
+    _setProposalBadgeState([]);
+    navigateTo('engine');
+}
+
+// =========================================================
+// BOOT: ver onAuthStateChange (INITIAL_SESSION) acima — restoreCurrentSession()
+// já é disparado de lá, só depois que a sessão do Supabase é confirmada.
+// =========================================================
+
+    // =========================================================
+    // PERSISTÊNCIA DO MERCADO — Ponto 1
+    // ⚠️ loadMarket/saveMarket (localStorage) foram REMOVIDOS.
+    // O mercado agora é persistido na tabela `cards` (for_sale + is_listed)
+    // via loadMarketFromSupabase / listCardOnMarket / unlistCardFromMarket /
+    // buyCardFromMarket (ver Parte 5/4, mais abaixo no arquivo).
+    // =========================================================
+    const NOTIF_KEY   = 'dr0p_notifications';
+    // LEDGER_KEY removido: o ledger global agora vive na tabela pública
+    // `eventos_globais` (ver ledgerCache / pushLedger / fetchAndSeedGlobalEvents),
+    // não mais em localStorage.
+
+    // =========================================================
+    // SISTEMA DE COTAÇÃO EM TEMPO REAL (MARKET QUOTES ENGINE)
+    // =========================================================
+    const QUOTES_KEY = 'dr0p_market_quotes';
+
+    // Cotação base de cada raridade (preço de referência em B$)
+    const BASE_QUOTES = {
+        common:    { base: 10,   label: 'COMUM',     labelEN: 'COMMON'    },
+        epic:      { base: 80,   label: 'ÉPICO',     labelEN: 'EPIC'      },
+        legendary: { base: 300,  label: 'LENDÁRIO',  labelEN: 'LEGENDARY' },
+        ancestral: { base: 2000, label: 'ANCESTRAL', labelEN: 'ANCESTRAL' }
+    };
+
+    // Limites de variação pra cotação não explodir nem zerar
+    const QUOTE_FLOOR_MULT = 0.35; // nunca cai abaixo de 35% do valor base
+    const QUOTE_CEIL_MULT  = 3.0;  // nunca sobe acima de 300% do valor base
+
+    function loadMarketQuotes() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(QUOTES_KEY));
+            if (saved && saved.common && saved.epic && saved.legendary) return saved;
+        } catch(e) {}
+        // Estado inicial: todas no preço base, sem variação
+        return {
+            common:    { price: BASE_QUOTES.common.base,    change: 0, trend: 'up' },
+            epic:      { price: BASE_QUOTES.epic.base,      change: 0, trend: 'up' },
+            legendary: { price: BASE_QUOTES.legendary.base, change: 0, trend: 'up' },
+            ancestral: { price: BASE_QUOTES.ancestral.base, change: 0, trend: 'up' }
+        };
+    }
+
+    function saveMarketQuotes(quotes) {
+        try { localStorage.setItem(QUOTES_KEY, JSON.stringify(quotes)); } catch(e) {}
+    }
+
+    let currentLang = (localStorage.getItem('dr0p_lang') || 'PT');
+    let audioCtx = null;
+    let isBgmPlaying = false;
+    let bgmInterval = null;
+
+    let marketQuotes = loadMarketQuotes();
+
+    /**
+     * updateMarketQuotes(droppedRarity)
+     * Disparada toda vez que um drop acontece na máquina.
+     * Regra econômica:
+     *  - Drop ÉPICO ou LENDÁRIO  -> cotação DAQUELA categoria CAI (inflação por excesso de oferta).
+     *  - Drop COMUM              -> cotação das categorias mais altas (ÉPICO e LENDÁRIO) SOBE (escassez relativa).
+     */
+    function updateMarketQuotes(droppedRarity) {
+        const q = marketQuotes;
+
+        const rollPct = () => 0.02 + Math.random() * 0.07;
+
+        function applyMove(key, direction) {
+            if (!q[key]) return;
+            const base = BASE_QUOTES[key].base;
+            const pct = rollPct() * direction;
+            let newPrice = q[key].price * (1 + pct);
+            const floor = base * QUOTE_FLOOR_MULT;
+            const ceil  = base * QUOTE_CEIL_MULT;
+            newPrice = Math.max(floor, Math.min(ceil, newPrice));
+            const changePct = ((newPrice - q[key].price) / q[key].price) * 100;
+            q[key].change = changePct;
+            q[key].trend  = newPrice >= q[key].price ? 'up' : 'down';
+            q[key].price  = Math.round(newPrice * 100) / 100;
+        }
+
+        if (droppedRarity === 'ancestral') {
+            applyMove('ancestral', -1);
+            applyMove('legendary', 1);
+            applyMove('epic', 1);
+        } else if (droppedRarity === 'epic') {
+            applyMove('epic', -1);
+        } else if (droppedRarity === 'legendary') {
+            applyMove('legendary', -1);
+        } else {
+            applyMove('epic', 1);
+            applyMove('legendary', 1);
+            applyMove('common', -1);
+        }
+
+        saveMarketQuotes(q);
+        renderQuotesTicker();
+        return q;
+    }
+
+    function renderQuotesTicker() {
+        const tracks = [
+            document.getElementById('tickerGlobalTrack')
+        ].filter(Boolean);
+        if (tracks.length === 0) return;
+
+        const order = ['common', 'epic', 'legendary', 'ancestral'];
+        const isPT = currentLang === 'PT';
+
+        const itemsHtml = order.map(key => {
+            if (!marketQuotes[key]) return '';
+            const data  = marketQuotes[key];
+            const meta  = BASE_QUOTES[key];
+            const label = isPT ? meta.label : meta.labelEN;
+            const cls   = `tk-${key}`;
+            const dirCls = data.trend === 'up' ? 'up' : 'down';
+            const arrow  = data.trend === 'up' ? '▲' : '▼';
+            const changeAbs = Math.abs(data.change).toFixed(2);
+            return `
+                <div class="ticker-item">
+                    <span class="ticker-label ${cls}">${label}</span>
+                    <span class="ticker-price">${data.price.toFixed(2)} B$</span>
+                    <span class="ticker-change ${dirCls}"><span class="ticker-arrow">${arrow}</span>${changeAbs}%</span>
+                </div>`;
+        }).join('');
+
+        const fullHtml = itemsHtml + itemsHtml;
+        tracks.forEach(track => track.innerHTML = fullHtml);
+    }
+
+    // =========================================================
+    // LEDGER DE TRANSAÇÕES GLOBAIS (Ponto 4)
+    // BUGFIX (site "zerado" em aba anônima/outra conta): isto ANTES lia/
+    // escrevia em localStorage (LEDGER_KEY), que é local a cada navegador —
+    // nenhuma outra aba/sessão via essas entradas. Agora `ledgerCache` é só
+    // um espelho em memória da tabela pública `eventos_globais`, populado
+    // no boot por fetchAndSeedGlobalEvents() e mantido vivo por Realtime
+    // (ver initGlobalRealtime(), mais abaixo) — qualquer aba, logada ou
+    // anônima, vê a MESMA lista, atualizada instantaneamente.
+    // =========================================================
+    let ledgerCache = [];
+    function loadLedger() {
+        return ledgerCache;
+    }
+    async function pushLedger(entry) {
+        // Só usuários autenticados geram atividade real e atribuível —
+        // mesmo padrão de RLS usado em cards/inventario (auth.uid() = id_usuario).
+        if (!currentUser.loggedIn) return;
+        try {
+            const { error } = await sb.from('eventos_globais').insert({
+                id_usuario: currentUser.id,
+                username: currentUser.username,
+                tipo: 'ledger',
+                mensagem: entry
+            });
+            if (error) console.error('pushLedger:', error.message);
+        } catch (e) { console.error('pushLedger:', e); }
+        // Não precisa atualizar ledgerCache/renderMarketLedger aqui na mão —
+        // o INSERT acima dispara o evento Realtime em initGlobalRealtime(),
+        // que já cuida de inserir no cache e re-renderizar pra TODO mundo
+        // (inclusive esta própria aba), de forma consistente.
+    }
+
+    function renderMarketLedger() {
+        const box  = document.getElementById('marketLedgerBox');
+        const list = document.getElementById('marketLedgerList');
+        if (!box || !list) return;
+        const ledger = loadLedger();
+        if (ledger.length === 0) { box.style.display = 'none'; stopLedgerAutoScroll(); return; }
+        box.style.display = 'block';
+        const last10 = ledger.slice(0, 10);
+        list.innerHTML = last10.map((e, i) =>
+            `<div class="ledger-entry ledger-entry-expanded" style="animation-delay:${i * 0.08}s;">
+                <span class="ledger-ts">[${e.ts}]</span>
+                <span class="ledger-text">${e.text}</span>
+             </div>`
+        ).join('');
+        startLedgerAutoScroll(list);
+    }
+
+    // Faz o feed "respirar": rola suavemente para o próximo item a cada
+    // poucos segundos, dando sensação de movimento contínuo e dinâmico.
+    //
+    // BUGFIX (scroll vazando pra página inteira): `entries[idx].scrollIntoView()`
+    // sobe por TODOS os ancestrais roláveis até a window, pra garantir a
+    // visibilidade total do elemento — então, a cada 2.6s, o "respiro" do
+    // ledger também arrastava a PÁGINA INTEIRA junto (mesmo #marketLedgerBox
+    // já tendo seu próprio overflow-y:auto). Trocado por scroll manual via
+    // scrollTop/scrollTo, isolado SÓ no container interno do ledger — nunca
+    // mais toca no scroll da janela. State também isolado: o timer agora é
+    // explicitamente encerrado (stopLedgerAutoScroll) sempre que o ledger
+    // fica vazio/escondido ou quando o usuário sai da tela de Mercado
+    // (ver navigateTo), evitando rodar em segundo plano sem necessidade.
+    let ledgerAutoScrollTimer = null;
+    function startLedgerAutoScroll(list) {
+        if (ledgerAutoScrollTimer) clearInterval(ledgerAutoScrollTimer);
+        const entries = list.querySelectorAll('.ledger-entry');
+        if (entries.length <= 1) return;
+
+        const scrollBox = list.closest('#marketLedgerBox') || list.parentElement;
+        let idx = 0;
+        ledgerAutoScrollTimer = setInterval(() => {
+            idx = (idx + 1) % entries.length;
+            if (!scrollBox) return;
+            const target = entries[idx].offsetTop - scrollBox.offsetTop;
+            if (typeof scrollBox.scrollTo === 'function') {
+                scrollBox.scrollTo({ top: target, behavior: 'smooth' });
+            } else {
+                scrollBox.scrollTop = target;
+            }
+        }, 2600);
+    }
+    function stopLedgerAutoScroll() {
+        if (ledgerAutoScrollTimer) { clearInterval(ledgerAutoScrollTimer); ledgerAutoScrollTimer = null; }
+    }
+
+    // Notificações / histórico de transações — Ponto 2
+    function loadNotifications(username) {
+        try {
+            const all = JSON.parse(localStorage.getItem(NOTIF_KEY)) || {};
+            return all[username] || [];
+        } catch(e) { return []; }
+    }
+    function pushNotification(username, text) {
+        try {
+            const all = JSON.parse(localStorage.getItem(NOTIF_KEY)) || {};
+            if (!all[username]) all[username] = [];
+            all[username].unshift({ text, date: new Date().toLocaleString('pt-PT') });
+            if (all[username].length > 50) all[username].length = 50; // limite
+            localStorage.setItem(NOTIF_KEY, JSON.stringify(all));
+        } catch(e) {}
+    }
+
+    // Alerta cyberpunk — Ponto 2
+    function showCyberAlert(title, msg, type) {
+        // type: 'success' | 'error' | 'warn'
+        const overlay = document.getElementById('cyberAlertOverlay');
+        const box     = document.getElementById('cyberAlertBox');
+        const tEl     = document.getElementById('cyberAlertTitle');
+        const mEl     = document.getElementById('cyberAlertMsg');
+        box.className = 'cyber-alert-box' + (type === 'error' ? ' alert-error' : type === 'warn' ? ' alert-warn' : '');
+        tEl.innerText = title;
+        mEl.innerHTML = msg;
+        overlay.classList.add('visible');
+    }
+    function closeCyberAlert() {
+        document.getElementById('cyberAlertOverlay').classList.remove('visible');
+    }
+
+    // Política de Privacidade — modal próprio (rolável), reaproveita o
+    // visual do cyber-alert mas com sua própria overlay/box para não
+    // conflitar com showCyberAlert() caso algo dispare um alerta por trás.
+    function openPrivacyPolicy() {
+        const overlay = document.getElementById('privacyPolicyOverlay');
+        if (overlay) overlay.classList.add('visible');
+    }
+    function closePrivacyPolicy() {
+        const overlay = document.getElementById('privacyPolicyOverlay');
+        if (overlay) overlay.classList.remove('visible');
+    }
+
+    // =========================================================
+    // ESTADO DE FILTROS E PAGINAÇÃO — Ponto 3
+    // =========================================================
+    const PAGE_SIZE = 9;
+    let vaultFilter  = 'all'; let vaultPage  = 0;
+    let marketFilter = 'all'; let marketPage = 0;
+
+    function setVaultFilter(f) {
+        vaultFilter = f; vaultPage = 0;
+        document.querySelectorAll('#vaultFilterBar .filter-btn').forEach(b => {
+            const isActive = b.dataset.filter === f;
+            b.className = 'filter-btn' + (isActive
+                ? (f==='epic'?' active-epic': f==='legendary'?' active-legendary': f==='ancestral'?' active-ancestral':' active')
+                : '');
+        });
+        renderVaultGrid();
+    }
+    function setMarketFilter(f) {
+        marketFilter = f; marketPage = 0;
+        document.querySelectorAll('#marketFilterBar .filter-btn').forEach(b => {
+            const isActive = b.dataset.filter === f;
+            b.className = 'filter-btn' + (isActive
+                ? (f==='epic'?' active-epic': f==='legendary'?' active-legendary': f==='ancestral'?' active-ancestral':' active')
+                : '');
+        });
+        renderMarketGrid();
+    }
+
+    function renderPagination(containerId, totalItems, currentPage, onPageFn) {
+        const bar = document.getElementById(containerId); if(!bar) return;
+        bar.innerHTML = '';
+        const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+        if (totalPages <= 1) return;
+        for (let i = 0; i < totalPages; i++) {
+            const btn = document.createElement('button');
+            btn.className = 'page-btn' + (i === currentPage ? ' active-page' : '');
+            btn.innerText = i + 1;
+            btn.onclick = () => onPageFn(i);
+            bar.appendChild(btn);
+        }
+        const info = document.createElement('span');
+        info.className = 'page-info';
+        info.innerText = `${currentPage+1} / ${totalPages}`;
+        bar.appendChild(info);
+    }
+
+    // =========================================================
+    // DADOS INICIAIS
+    // =========================================================
+    let selectedProfileUser = null;
+    let savedAssets = [];
+    let messageThreads = {};
+    let activeThreadUser = null;
+
+    // =========================================================
+    // FEED GLOBAL DE MUTAÇÕES/FUSÕES (Ponto 1) — AGORA REAL E PÚBLICO
+    // BUGFIX (site "zerado" em aba anônima/outra conta): isto ANTES persistia
+    // em localStorage (GLOBAL_FEED_KEY) — cada navegador/aba só via os
+    // próprios drops/fusões, nunca os de mais ninguém. `globalFeed` segue
+    // existindo como array em memória (buildStoriesMarquee() e o resto do
+    // app continuam lendo daqui sem mudança), mas quem alimenta esse array
+    // agora é a tabela pública `eventos_globais` (tipo='feed'), carregada no
+    // boot por fetchAndSeedGlobalEvents() e atualizada ao vivo por
+    // initGlobalRealtime() — qualquer aba, logada ou anônima, vê os MESMOS
+    // drops/fusões em tempo real.
+    //
+    // BUGFIX (perfis fantasmas @cyber_k1ng / @neon_samurai): removido o
+    // antigo SEED_FEED estático que era usado como "fallback cosmético"
+    // antes do banco responder. Isso fazia QUALQUER aba mostrar dois cards
+    // falsos por uma fração de segundo (ou indefinidamente, se o fetch
+    // falhasse) — perfis que não existem no Supabase. Agora o estado
+    // inicial é sempre um array vazio, e a UI mostra um aviso de
+    // "carregando" explícito (ver globalFeedLoading + buildStoriesMarquee())
+    // em vez de inventar dados, até a primeira resposta real da rede
+    // chegar — mesmo que essa resposta seja "ainda não há nenhum evento".
+    // =========================================================
+    let globalFeed = [];
+    let globalFeedLoading = true;
+
+    // [BUGFIX MUTAÇÕES_REDE] Rede de segurança: se por qualquer motivo
+    // (latência alta, aba aberta antes do Supabase client terminar de
+    // inicializar, erro silencioso engolido por algum catch) a primeira
+    // resposta de fetchAndSeedGlobalEvents() demorar mais que isto, força
+    // globalFeedLoading=false e repinta — assim o usuário NUNCA vê o feed
+    // travado pra sempre no "carregando", nem (pior) um "nenhum drop
+    // aconteceu" que seria mentira por causa de uma resposta que ainda nem
+    // chegou. Cancelado automaticamente assim que a resposta real chega
+    // (ver fetchAndSeedGlobalEvents).
+    let _globalFeedSafetyTimer = null;
+    function _armGlobalFeedSafetyTimeout() {
+        clearTimeout(_globalFeedSafetyTimer);
+        _globalFeedSafetyTimer = setTimeout(() => {
+            if (globalFeedLoading) {
+                console.warn('[MUTAÇÕES_REDE] fetchAndSeedGlobalEvents demorou demais — tentando novamente.');
+                fetchAndSeedGlobalEvents();
+            }
+        }, 6000);
+    }
+
+    // Mercado: array em memória que renderMarketGrid() lê/filtra/pagina.
+    // Fonte de verdade real é a tabela `cards` no Supabase — este array é
+    // só um CACHE preenchido por loadMarketFromSupabase() sempre que a
+    // tela de mercado é aberta ou uma ação (listar/comprar/remover) muda
+    // o estado, OU quando o Realtime de `cards` detecta uma mudança feita
+    // por QUALQUER usuário (ver initGlobalRealtime()) — assim o mercado se
+    // atualiza ao vivo pra todo mundo, sem precisar de F5.
+    let marketAssets = [];
+
+    // =========================================================
+    // REALTIME GLOBAL (Supabase) — fonte real e pública de:
+    //   • eventos_globais → ledger de mercado + feed de drops/fusões
+    //   • cards            → listagens/vendas/vitrine, refletidas ao vivo
+    // Substitui de raiz qualquer dependência de dados mockados/locais
+    // (localStorage) pra esses dois feeds. Roda incondicionalmente no boot
+    // do script (ver chamada de initGlobalRealtime() perto do
+    // onAuthStateChange, Parte 1), ANTES de qualquer login — inclusive em
+    // aba anônima, já que a leitura de ambas as tabelas é pública via RLS.
+    // =========================================================
+    function rowToLedgerEntry(row) {
+        return { text: row.mensagem, ts: new Date(row.created_at).toLocaleTimeString('pt-PT') };
+    }
+    function rowToFeedCard(row) {
+        return row.card_payload ? { ...row.card_payload, _eventId: row.id } : null;
+    }
+
+    // Publica um card consolidado (drop resgatado ou fusão bem-sucedida) no
+    // feed público. Substitui os antigos `globalFeed.unshift(...) +
+    // saveGlobalFeed(...)` — a re-renderização do marquee acontece via
+    // Realtime (initGlobalRealtime), de forma consistente pra TODO mundo,
+    // inclusive quem disparou a ação.
+    async function pushFeedCard(cardLike) {
+        if (!currentUser.loggedIn) return;
+        try {
+            const { error } = await sb.from('eventos_globais').insert({
+                id_usuario: currentUser.id,
+                username: currentUser.username,
+                tipo: 'feed',
+                mensagem: `${currentUser.username} consolidou ${cardLike.id} [${cardLike.rarityNameEN}]`,
+                card_payload: cardLike
+            });
+            if (error) console.error('pushFeedCard:', error.message);
+        } catch (e) { console.error('pushFeedCard:', e); }
+    }
+
+    // Busca os últimos eventos reais da rede e usa pra popular ledgerCache
+    // (ledger do mercado) e globalFeed (marquee de stories) — chamado uma
+    // única vez no boot, antes de qualquer subscrição Realtime.
+    async function fetchAndSeedGlobalEvents() {
+        _armGlobalFeedSafetyTimeout();
+        const { data, error } = await sb.from('eventos_globais')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+        clearTimeout(_globalFeedSafetyTimer);
+        if (error) {
+            console.error('fetchAndSeedGlobalEvents:', error.message);
+            globalFeedLoading = false; // não deixa o aviso de "carregando" travado pra sempre em caso de falha de rede
+            buildStoriesMarquee();
+            return;
+        }
+
+        ledgerCache = data.map(rowToLedgerEntry);
+
+        const feedCards = data.map(rowToFeedCard).filter(Boolean);
+        // Sempre usa o que veio do banco — mesmo que seja um array vazio
+        // (rede nova, sem eventos ainda). Não há mais fallback pra dados
+        // estáticos/fantasma: array vazio é um estado real e válido.
+        globalFeed = feedCards;
+        globalFeedLoading = false;
+
+        renderMarketLedger();
+        buildStoriesMarquee();
+    }
+
+    // Assina os canais Realtime públicos. Roda incondicionalmente (logado
+    // ou não) — é o que faz o ecossistema parecer "vivo" em QUALQUER aba,
+    // inclusive anônima, sem precisar dar F5.
+    let _globalRealtimeStarted = false;
+    function initGlobalRealtime() {
+        if (_globalRealtimeStarted) return; // evita assinar 2x (ex: hot reload / re-chamada acidental)
+        _globalRealtimeStarted = true;
+
+        fetchAndSeedGlobalEvents();
+
+        // Ledger + marquee: qualquer INSERT em eventos_globais (de QUALQUER
+        // usuário, em QUALQUER aba) chega aqui instantaneamente.
+        sb.channel('eventos_globais_live')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'eventos_globais' }, (payload) => {
+                const row = payload.new;
+                ledgerCache.unshift(rowToLedgerEntry(row));
+                if (ledgerCache.length > 50) ledgerCache.length = 50;
+
+                const card = rowToFeedCard(row);
+                if (card) {
+                    globalFeed.unshift(card);
+                    if (globalFeed.length > 50) globalFeed.length = 50;
+                    buildStoriesMarquee();
+                }
+                // Só repinta o ledger se a tela de mercado estiver mesmo
+                // aberta — evita trabalho de DOM desnecessário em outras telas.
+                const marketScreen = document.getElementById('screen-market');
+                if (marketScreen && marketScreen.classList.contains('active')) renderMarketLedger();
+            })
+            .subscribe();
+
+        // Mercado/vitrine: qualquer INSERT/UPDATE/DELETE em `cards` (nova
+        // listagem, venda, remoção, exposição na vitrine) de QUALQUER
+        // usuário atualiza a tela de mercado de todo mundo ao vivo.
+        sb.channel('cards_live')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'cards' }, () => {
+                const marketScreen = document.getElementById('screen-market');
+                if (marketScreen && marketScreen.classList.contains('active')) renderMarketGrid();
+            })
+            .subscribe();
+    }
+
+
+    const canvas = document.getElementById('pfp-canvas'); 
+    const ctx = canvas ? canvas.getContext('2d') : null;
+    const targetContainer = document.getElementById('target-container');
+    const downloadBtn = document.getElementById('download-btn');
+    const stabilityWrapper = document.getElementById('stability-wrapper');
+    const stabilityLabel = document.getElementById('stability-label');
+    const stabilityBar = document.getElementById('stability-bar');
+    const metaId = document.getElementById('meta-id'); 
+    const metaRarity = document.getElementById('meta-rarity');
+    const metaStyle = document.getElementById('meta-style'); 
+    const metaOwner = document.getElementById('meta-owner');
+
+    const animePool = [
+        "https://i.ibb.co/m56c5F2Z/ced5acf2-417d-4669-b964-96437ab91fda.jpg",
+        "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg",
+        "https://i.ibb.co/S7JbrXX2/fa809178-22dc-4ec1-8d84-2dcea9ab44b7.jpg",
+        "https://i.ibb.co/pBy1Rmyq/sylvanian-pfp.jpg",
+        "https://i.ibb.co/9m50LNJT/db05209d-fd04-4353-a033-d21349f7d98c.jpg",
+        "https://i.ibb.co/LdxbZdpR/91e7283f-2f12-4701-8de0-0798caa5e42e.jpg",
+        "https://i.ibb.co/HfrS8TJh/Screenshot-20260616-213009-Chrome.jpg",
+        "https://i.ibb.co/C3Hp4Cvs/image.jpg",
+        "https://i.ibb.co/ycRhQk8v/image.jpg",
+        "https://i.ibb.co/N28DPq35/Scearm.jpg",
+        "https://i.ibb.co/rGr2fJnT/Pinterest.jpg"
+    ];
+    const preloadedCanvases = [];
+    let lastMintedBuffer = null; let activeAssetData = null; let decayInterval = null; let isRolling = false;
+    let isProcessingClaim = false; // Mutex global: impede duplicação e debito duplo de Bumps
+
+    const dictionary = {
+        PT: {
+            'nav-market': 'MERCADO P2P', 'nav-inbox': 'INBOX SECRETO', 'nav-vault': 'MEU COFRE', 'nav-access': 'ACESSAR TERMINAL',
+            'feed-title': 'MUTAÇÕES_REDE', 'lbl-rarity': 'RARIDADE', 'lbl-style': 'ESTILO VISUAL', 'lbl-creator': 'AUTOR DA MINTAGEM',
+            'vault-title': 'MEU COFRE', 'market-title': 'MERCADO P2P DIRECT', 'messages-title': 'INBOX // DIALOGOS_CRIPTOGRAFADOS', 'profile-showcase': 'VITRINE EXPOSTA',
+            'lbl-id': 'CÓDIGO ID CARD', 'free-sub': 'RISCO DE QUEBRA // FLUXO INESTÁVEL', 'premium-sub': '100% SEGURO // GARANTIA DE COMPILAÇÃO',
+            'faq-title': '> TERMINAL_INFO // PERGUNTAS_FREQUENTES',
+            'faq-q1': '[+] O que é o dr0p_station?',
+            'faq-a1': '▸ Plataforma P2P de cards digitais gerados por IA. Cada card é único, rastreado no registry e negociável em B$ (Bumps).',
+            'faq-q2': '[+] O que são Bumps (B$)?',
+            'faq-a2': '▸ Moeda interna da rede. Usada para resgatar cards épicos/lendários, comprar no mercado P2P e propor trocas. Carregue via PIX ou cripto.',
+            'faq-q3': '[+] O que acontece se não resgatar a tempo?',
+            'faq-a3': '▸ A mutação se autodestrói em 10 segundos por instabilidade de rede. O card é removido do feed global permanentemente.',
+            'faq-q4': '[+] Como funciona a Alquimia?',
+            'faq-a4': '▸ Funde 2 cards do seu cofre para criar um novo. Os originais são destruídos. Raridade resultante depende dos cards usados + roll de probabilidade.',
+            'faq-q5': '[+] Quem pode ver meu perfil e cards?',
+            'faq-a5': '▸ Perfis públicos são visíveis a todos. Cards expostos na vitrine aparecem no feed. O mercado é público mas compras exigem login.',
+            'faq-q6': '[+] Existe risco de perder cards na Fornalha ou em Contratos?',
+            'faq-a6': '▸ Sim. Tanto a Fornalha de Sobrecarga quanto os Contratos envolvem risco real de destruição permanente da carta submetida — uma vez confirmada a operação, instabilidades de rede podem corromper o ativo sem aviso prévio, sem direito a estorno. Cards destruídos rendem Fragmentos de Sucata como compensação parcial, nunca o card em si.',
+            'faq-q7': '[+] De onde vêm as artes dos cards?',
+            'faq-a7': '▸ O terminal intercepta sinais soltos pela rede mundial — referências de cultura pop, memes e ruído visual coletivo — e os processa através de algoritmos de mutação visual próprios. O resultado é uma paródia artística reinterpretada e única, gerada pela própria rede dr0p_station.',
+            'log-prefix': 'LOG // ', 'download-btn': 'RESGATAR ATIVO',
+            'stability-label': 'TEMPO DE RESGATE: 10s',
+            'market-landing-sub': 'VISUALIZAÇÃO PÚBLICA — LOGIN NECESSÁRIO PARA COMPRAR',
+            'premium-instant-badge': '✓ RESGATE GARANTIDO // COMPILAÇÃO IMEDIATA'
+        },
+        EN: {
+            'nav-market': 'P2P MARKET', 'nav-inbox': 'SECRET INBOX', 'nav-vault': 'MY VAULT', 'nav-access': 'ACCESS TERMINAL',
+            'feed-title': 'NETWORK_MUTATIONS', 'lbl-rarity': 'RARITY', 'lbl-style': 'VISUAL STYLE', 'lbl-creator': 'MINT AUTHOR',
+            'vault-title': 'MY SECURE VAULT', 'market-title': 'P2P MARKET DIRECT', 'messages-title': 'INBOX // ENCRYPTED_CHATS', 'profile-showcase': 'EXPOSED SHOWCASE',
+            'lbl-id': 'CARD ID CODE', 'free-sub': 'RISK OF SHATTER // UNSTABLE FLOW', 'premium-sub': '100% SECURE // COMPILATION WARRANTY',
+            'faq-title': '> TERMINAL_INFO // FREQUENTLY ASKED',
+            'faq-q1': '[+] What is dr0p_station?',
+            'faq-a1': '▸ P2P platform for AI-generated digital cards. Each card is unique, tracked in the registry and tradeable in B$ (Bumps).',
+            'faq-q2': '[+] What are Bumps (B$)?',
+            'faq-a2': '▸ Internal network currency. Used to claim epic/legendary cards, buy on P2P market and propose trades. Load via PIX or crypto.',
+            'faq-q3': '[+] What happens if I don\'t claim in time?',
+            'faq-a3': '▸ The mutation self-destructs in 10 seconds due to network instability. The card is permanently removed from the global feed.',
+            'faq-q4': '[+] How does Alchemy work?',
+            'faq-a4': '▸ Fuse 2 cards from your vault to create a new one. Originals are destroyed. Resulting rarity depends on input cards + probability roll.',
+            'faq-q5': '[+] Who can see my profile and cards?',
+            'faq-a5': '▸ Public profiles visible to all. Cards exposed in showcase appear in feed. Market is public but purchases require login.',
+            'faq-q6': '[+] Is there a risk of losing cards in the Furnace or Contracts?',
+            'faq-a6': '▸ Yes. Both the Overload Furnace and Contracts carry a real risk of permanent destruction of the submitted card — once the operation is confirmed, network instabilities can corrupt the asset without prior warning, with no refund. Destroyed cards yield Scrap Fragments as partial compensation, never the card itself.',
+            'faq-q7': '[+] Where do the card arts come from?',
+            'faq-a7': '▸ The terminal intercepts stray signals from the global network — pop culture references, memes and collective visual noise — and processes them through proprietary visual mutation algorithms. The result is a unique, reinterpreted artistic parody generated by the dr0p_station network itself.',
+            'log-prefix': 'LOG // ', 'download-btn': 'CLAIM ASSET',
+            'stability-label': 'CLAIM TIME LEFT: 10s',
+            'market-landing-sub': 'PUBLIC VIEW — LOGIN REQUIRED TO PURCHASE',
+            'premium-instant-badge': '✓ GUARANTEED CLAIM // IMMEDIATE COMPILATION'
+        }
+    };
+
+    const CYBER_VOICES = {
+        PT: [
+            "Acesso concedido.", "Brecha de dados detectada.", "dr0p_station online.", "Mutação instável.",
+            "Ativo integrado ao cofre.", "Protocolo de fusão iniciado.", "Rede segura estabelecida.",
+            "Identidade verificada.", "Transmissão criptografada.", "Alerta de rede ativado.",
+            "Compra confirmada.", "Card lendário detectado.", "Terminal ativado. Bem-vindo, operador."
+        ],
+        EN: [
+            "Access granted.", "Data breach detected.", "dr0p_station online.", "Mutation unstable.",
+            "Asset secured in vault.", "Fusion protocol initiated.", "Secure channel established.",
+            "Identity verified.", "Encrypted transmission.", "Network alert activated.",
+            "Purchase confirmed.", "Legendary card detected.", "Terminal activated. Welcome, operator."
+        ]
+    };
+
+    function speakPhrase(phrasePT, phraseEN) {
+        if (!('speechSynthesis' in window)) return;
+        window.speechSynthesis.cancel();
+        const text = currentLang === 'PT' ? phrasePT : phraseEN;
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = currentLang === 'PT' ? 'pt-BR' : 'en-US';
+        u.rate = 1.1; u.pitch = 0.8; u.volume = 0.9;
+        window.speechSynthesis.speak(u);
+    }
+
+    function speakRandom() {
+        if (!('speechSynthesis' in window)) return;
+        window.speechSynthesis.cancel();
+        const pool = CYBER_VOICES[currentLang];
+        const text = pool[Math.floor(Math.random() * pool.length)];
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = currentLang === 'PT' ? 'pt-BR' : 'en-US';
+        u.rate = 1.0; u.pitch = 0.75; u.volume = 0.9;
+        window.speechSynthesis.speak(u);
+    }
+
+    // =========================================================
+    // SISTEMA CENTRAL DE ÁUDIO E VOZ SINTETIZADA (Ponto 3)
+    // =========================================================
+    // =========================================================
+    // SFX — CHOQUE / CURTO-CIRCUITO ELÉTRICO (dispara junto do glitch
+    // visual da Alquimia/Fusão — ver FASE 2 de fuseCards)
+    // =========================================================
+    function playFusionShockSound() {
+        try {
+            initAudio();
+            const now = audioCtx.currentTime;
+
+            // Buzz principal: dente-de-serra grave com frequência instável
+            // (efeito de "curto" elétrico, tremendo)
+            const buzz = audioCtx.createOscillator();
+            const buzzGain = audioCtx.createGain();
+            buzz.type = 'sawtooth';
+            buzz.frequency.setValueAtTime(90, now);
+            buzzGain.gain.setValueAtTime(0.001, now);
+            buzzGain.gain.linearRampToValueAtTime(0.18, now + 0.02);
+            for (let i = 0; i < 14; i++) {
+                const t = now + i * 0.045;
+                buzz.frequency.setValueAtTime(60 + Math.random() * 420, t);
+            }
+            buzzGain.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+            buzz.connect(buzzGain); buzzGain.connect(audioCtx.destination);
+            buzz.start(now); buzz.stop(now + 0.65);
+
+            // Crackle de alta frequência por cima, tipo faísca/arco voltaico
+            for (let i = 0; i < 8; i++) {
+                const t = now + Math.random() * 0.6;
+                const spark = audioCtx.createOscillator();
+                const sparkGain = audioCtx.createGain();
+                spark.type = 'square';
+                spark.frequency.setValueAtTime(1800 + Math.random() * 3200, t);
+                sparkGain.gain.setValueAtTime(0.05, t);
+                sparkGain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+                spark.connect(sparkGain); sparkGain.connect(audioCtx.destination);
+                spark.start(t); spark.stop(t + 0.04);
+            }
+        } catch (e) {}
+    }
+
+    function playTerminalSound(type) {
+        // type: 'login' | 'error' | 'claim' | 'alchemy'
+        try { initAudio(); } catch(e) {}
+
+        const beep = (freq, oscType, dur, gain) => {
+            try {
+                initAudio();
+                const osc = audioCtx.createOscillator();
+                const g   = audioCtx.createGain();
+                osc.type = oscType || 'square';
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                g.gain.setValueAtTime(gain || 0.12, audioCtx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+                osc.connect(g); g.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + dur);
+            } catch(e) {}
+        };
+
+        if (type === 'login') {
+            beep(440, 'sine', 0.1, 0.12);
+            setTimeout(() => beep(880, 'sine', 0.18, 0.1), 120);
+            setTimeout(() => speakPhrase("Terminal ativado. Bem-vindo, operador.", "Terminal activated. Welcome, operator."), 300);
+
+        } else if (type === 'error') {
+            beep(300, 'sawtooth', 0.3, 0.2);
+            setTimeout(() => beep(180, 'sawtooth', 0.3, 0.18), 180);
+            setTimeout(() => speakPhrase("Acesso negado. Bumps insuficientes.", "Access denied. Insufficient Bumps."), 300);
+
+        } else if (type === 'claim') {
+            beep(523, 'triangle', 0.25, 0.15);
+            setTimeout(() => beep(659, 'triangle', 0.25, 0.12), 100);
+            setTimeout(() => beep(784, 'triangle', 0.35, 0.1), 200);
+            setTimeout(() => speakPhrase("Ativo integrado ao cofre.", "Asset secured in vault."), 400);
+
+        } else if (type === 'alchemy') {
+            beep(200, 'sawtooth', 0.15, 0.15);
+            setTimeout(() => beep(400, 'square', 0.15, 0.12), 150);
+            setTimeout(() => beep(800, 'sine', 0.15, 0.1), 300);
+            setTimeout(() => beep(1200, 'sine', 0.3, 0.12), 450);
+            setTimeout(() => speakPhrase("Protocolo de fusão concluído. Nova entidade gerada.", "Fusion protocol complete. New entity generated."), 700);
+
+        } else if (type === 'overload') {
+            // Sirene ciberpunk: dois tons alternando 3x + voz específica de sobrecarga
+            beep(1800, 'sawtooth', 0.18, 0.25);
+            setTimeout(() => beep(900,  'sawtooth', 0.18, 0.22), 220);
+            setTimeout(() => beep(1800, 'sawtooth', 0.18, 0.22), 440);
+            setTimeout(() => beep(900,  'sawtooth', 0.18, 0.20), 660);
+            setTimeout(() => beep(1800, 'sawtooth', 0.18, 0.20), 880);
+            setTimeout(() => beep(600,  'square',   0.35, 0.18), 1100);
+            setTimeout(() => speakPhrase(
+                "Alerta crítico. Sobrecarga na rede detectada. Chance de drop épico aumentada por cinco minutos.",
+                "Critical alert. Network overload detected. Epic drop rate increased for five minutes."
+            ), 1500);
+        }
+    }
+
+    function toggleLanguage() {
+        currentLang = currentLang === 'PT' ? 'EN' : 'PT';
+        try { localStorage.setItem('dr0p_lang', currentLang); } catch(e) {}
+        document.getElementById('langLabel').innerText = currentLang;
+        document.querySelectorAll('[data-i18n]').forEach(el => {
+            const key = el.getAttribute('data-i18n');
+            if (dictionary[currentLang][key]) el.innerText = dictionary[currentLang][key];
+        });
+        if (!activeAssetData && !isRolling) {
+            document.getElementById('status-text').innerText = currentLang === 'PT' ? 'AGUARDANDO_MUTACAO...' : 'AWAITING_MUTATION...';
+        } else if (activeAssetData) {
+            metaRarity.innerText = currentLang === 'PT' ? activeAssetData.rarityName : activeAssetData.rarityNameEN;
+            metaStyle.innerText  = currentLang === 'PT' ? activeAssetData.styleName  : activeAssetData.styleNameEN;
+            if (downloadBtn.style.display === "block") {
+                downloadBtn.innerText = activeAssetData.costToClaim > 0 ?
+                    (currentLang === 'PT' ? `RESGATAR (CUSTO: 50 B$)` : `CLAIM (COST: 50 B$)`) :
+                    (currentLang === 'PT' ? "ENVIAR AO COFRE VIRTUAL" : "SEND TO SECURE VAULT");
+            }
+        }
+        speakRandom();
+        renderQuotesTicker();
+    }
+
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+    }
+
+    function playSynthSound(type) {
+        try {
+            initAudio();
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode); gainNode.connect(audioCtx.destination);
+
+            if (type === 'click') {
+                osc.type = 'sine'; osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+                gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.05);
+            } else if (type === 'success') {
+                let now = audioCtx.currentTime;
+                osc.type = 'triangle'; osc.frequency.setValueAtTime(523.25, now);
+                osc.frequency.exponentialRampToValueAtTime(1046.50, now + 0.15);
+                gainNode.gain.setValueAtTime(0.15, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc.start(); osc.stop(now + 0.3);
+
+                setTimeout(() => {
+                    let osc2 = audioCtx.createOscillator(); let gain2 = audioCtx.createGain();
+                    osc2.type = 'sine'; osc2.frequency.setValueAtTime(1318.51, audioCtx.currentTime);
+                    osc2.connect(gain2); gain2.connect(audioCtx.destination);
+                    gain2.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                    gain2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+                    osc2.start(); osc2.stop(audioCtx.currentTime + 0.2);
+                }, 80);
+            } else if (type === 'tick') {
+                osc.type = 'square'; osc.frequency.setValueAtTime(1400, audioCtx.currentTime);
+                gainNode.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.02);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.02);
+            } else if (type === 'shatter') {
+                let now = audioCtx.currentTime;
+                osc.type = 'sawtooth'; osc.frequency.setValueAtTime(280, now);
+                osc.frequency.linearRampToValueAtTime(40, now + 0.4);
+                gainNode.gain.setValueAtTime(0.25, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+                osc.start(); osc.stop(now + 0.45);
+            } else if (type === 'roll') {
+                osc.type = 'sine'; osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+                osc.frequency.linearRampToValueAtTime(880, audioCtx.currentTime + 0.12);
+                gainNode.gain.setValueAtTime(0.06, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.12);
+            }
+        } catch(e) {}
+    }
+
+    function toggleBackgroundAudio() {
+        initAudio();
+        const btn = document.getElementById('audioToggleBtn');
+        if (isBgmPlaying) {
+            clearInterval(bgmInterval); isBgmPlaying = false;
+            btn.classList.remove('on');
+        } else {
+            isBgmPlaying = true;
+            btn.classList.add('on');
+            let beatIndex = 0;
+            const bass = [55.00, 55.00, 48.99, 48.99, 65.41, 65.41, 58.27, 58.27];
+            bgmInterval = setInterval(() => {
+                try {
+                    let osc = audioCtx.createOscillator(); let gain = audioCtx.createGain();
+                    let filter = audioCtx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.setValueAtTime(300, audioCtx.currentTime);
+                    osc.type = 'sawtooth'; osc.frequency.setValueAtTime(bass[beatIndex % bass.length], audioCtx.currentTime);
+                    osc.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+                    gain.gain.setValueAtTime(0.15, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.22);
+                    osc.start(); osc.stop(audioCtx.currentTime + 0.25); beatIndex++;
+                } catch(e) {}
+            }, 250);
+        }
+    }
+
+    animePool.forEach(url => {
+        const img = new Image(); img.crossOrigin = "anonymous"; img.src = url;
+        img.onload = () => {
+            const off = document.createElement('canvas'); off.width = 600; off.height = 600;
+            off.getContext('2d').drawImage(img, 0, 0, 600, 600); preloadedCanvases.push(off);
+        };
+    });
+
+    function resizeCanvases() {
+        if(!canvas) return;
+        const size = targetContainer.getBoundingClientRect().width || 400;
+        canvas.width = size; canvas.height = size;
+    }
+    window.addEventListener('resize', resizeCanvases); setTimeout(resizeCanvases, 150);
+
+    function toggleFaq(el) {
+        const ans = el.nextElementSibling;
+        ans.style.display = (ans.style.display === 'block') ? 'none' : 'block';
+    }
+
+    // =========================================================
+    // [FIX ANTI-CRASH] safeNavigationRouter — navigateTo blindada com
+    // try/catch estruturado em TODOS os pontos críticos. Impede o
+    // crash intermitente que redirecionava o usuário para a Home.
+    // =========================================================
+    function navigateTo(screenId, skipProfileReload) {
+        // [safeNavigationRouter] Guarda de tipo: screenId deve ser string
+        try {
+            if (!screenId || typeof screenId !== 'string') {
+                console.error('[safeNavigationRouter] screenId inválido:', screenId);
+                return;
+            }
+        } catch(routeGuardErr) {
+            console.error('[safeNavigationRouter] Erro no guard de tipo:', routeGuardErr);
+            return;
+        }
+
+        try { playSynthSound('click'); } catch(e) {}
+
+        // Limpa estado anterior do drop ao sair do engine
+        try {
+            if (downloadBtn) downloadBtn.disabled = false;
+        } catch(e) {}
+
+        // Troca de tela SPA
+        try {
+            document.querySelectorAll('.spa-screen').forEach(s => s.classList.remove('active'));
+            const t = document.getElementById('screen-' + screenId);
+            if (t) {
+                t.classList.add('active');
+            } else {
+                console.warn('[safeNavigationRouter] Tela não encontrada no DOM:', 'screen-' + screenId);
+                // [anti-crash] NÃO redireciona para Home automaticamente — apenas loga o aviso
+                return;
+            }
+        } catch(screenSwitchErr) {
+            console.error('[safeNavigationRouter] Erro ao trocar tela:', screenSwitchErr);
+            return; // aborta navegação sem redirecionar
+        }
+
+        // Inicialização específica por tela — cada bloco isolado
+        try {
+            if (screenId === 'engine') {
+                setTimeout(resizeCanvases, 50);
+                renderDailyDropButton();
+                renderDailyMissions();
+                renderDropStyleFilters();
+            }
+        } catch(e) { console.warn('[safeNavigationRouter] engine init:', e); }
+
+        try { if (screenId === 'leaderboard') renderLeaderboard(); }
+        catch(e) { console.warn('[safeNavigationRouter] leaderboard:', e); }
+
+        try { if (screenId === 'vault') renderVaultGrid(); }
+        catch(e) { console.warn('[safeNavigationRouter] vault:', e); }
+
+        try {
+            if (screenId === 'market') { renderMarketGrid(); renderMarketLedger(); }
+            else { stopLedgerAutoScroll(); }
+        } catch(e) { console.warn('[safeNavigationRouter] market:', e); }
+
+        try {
+            if (screenId === 'messages') { renderChatThreads(); renderGlobalOffers('offersContainer'); }
+        } catch(e) { console.warn('[safeNavigationRouter] messages:', e); }
+
+        // [safeNavigationRouter] Carregamento do perfil — protegido contra
+        // redirecionamento fantasma causado por exceção em viewTargetUserCollection.
+        try {
+            if (screenId === 'profile' && !skipProfileReload) {
+                if (!currentUser || !currentUser.loggedIn) {
+                    // Usuário deslogado tentando acessar perfil — redireciona para auth
+                    // de forma controlada (não como crash)
+                    navigateTo('auth');
+                    return;
+                }
+                viewTargetUserCollection(
+                    currentUser.username,
+                    currentUser.code,
+                    currentUser.bio,
+                    currentUser.avatar,
+                    currentUser.banner,
+                    true
+                );
+            }
+        } catch(profileErr) {
+            console.error('[safeNavigationRouter] Erro ao carregar perfil:', profileErr);
+            // [anti-crash] NÃO redireciona para Home — mantém tela atual visível
+        }
+
+        try { if (screenId === 'contracts') renderContractsScreen(); }
+        catch(e) { console.warn('[safeNavigationRouter] contracts:', e); }
+
+        try { if (screenId === 'loja') renderLoja(true); }
+        catch(e) { console.warn('[safeNavigationRouter] loja:', e); }
+    }
+
+    // ── MENU HAMBÚRGUER MOBILE — REMOVIDO ───────────────────────────────
+    // O menu hambúrguer foi eliminado do projeto. A navegação mobile agora
+    // usa o mesmo .nav-menu-wrapper empilhado por flex-wrap, sem painel
+    // suspenso nem botão de alternância.
+
+    function handleProfileNavClick() {
+        if (!currentUser.loggedIn) {
+            showCyberAlert('ACESSO_NEGADO:', 'Perfil bloqueado. Faça login para acessar seu terminal de operador.', 'error');
+            setTimeout(() => { closeCyberAlert(); navigateTo('auth'); }, 1500);
+            return;
+        }
+        navigateTo('profile');
+    }
+
+    function populateAgeSelectors() {
+        const dayEl = document.getElementById('authBirthDay');
+        const monthEl = document.getElementById('authBirthMonth');
+        const yearEl = document.getElementById('authBirthYear');
+        if (!dayEl || dayEl.options.length > 1) return; // já populado, evita duplicar
+
+        for (let d = 1; d <= 31; d++) {
+            const opt = document.createElement('option'); opt.value = d; opt.textContent = d; dayEl.appendChild(opt);
+        }
+        const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+        MESES.forEach((m, i) => {
+            const opt = document.createElement('option'); opt.value = i + 1; opt.textContent = m; monthEl.appendChild(opt);
+        });
+        const currentYear = new Date().getFullYear();
+        for (let y = currentYear - 13; y >= currentYear - 100; y--) {
+            const opt = document.createElement('option'); opt.value = y; opt.textContent = y; yearEl.appendChild(opt);
+        }
+    }
+
+    function calculateAge(day, month, year) {
+        const today = new Date();
+        const birth = new Date(year, month - 1, day);
+        let age = today.getFullYear() - birth.getFullYear();
+        const beforeBirthdayThisYear = (today.getMonth() < birth.getMonth()) ||
+            (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate());
+        if (beforeBirthdayThisYear) age--;
+        return age;
+    }
+
+    function switchAuthMode(mode) {
+        authMode = mode;
+        document.getElementById('authErrorMsg').style.display = 'none';
+        const registerOnlyEls = document.querySelectorAll('.register-only');
+        const emailInput = document.getElementById('authEmail');
+        const confirmInput = document.getElementById('authConfirmPassword');
+        const termsInput = document.getElementById('authTerms');
+        if(mode === 'login') {
+            document.getElementById('tab-login').classList.add('active'); document.getElementById('tab-register').classList.remove('active');
+            document.getElementById('authTitle').innerText = "SINCRO_CONTA"; document.getElementById('authSubmitBtn').innerText = "Acessar Sistema";
+            registerOnlyEls.forEach(el => el.style.display = 'none');
+            if (emailInput) emailInput.required = false;
+            if (confirmInput) confirmInput.required = false;
+            if (termsInput) termsInput.required = false;
+        } else {
+            document.getElementById('tab-login').classList.remove('active'); document.getElementById('tab-register').classList.add('active');
+            document.getElementById('authTitle').innerText = "REGISTRAR_NÓ"; document.getElementById('authSubmitBtn').innerText = "Consolidar Identidade";
+            registerOnlyEls.forEach(el => el.style.display = '');
+            populateAgeSelectors();
+            if (emailInput) emailInput.required = true;
+            if (confirmInput) confirmInput.required = true;
+            if (termsInput) termsInput.required = true;
+        }
+    }
+
+    // =========================================================
+    // SEGURANÇA: SANITIZAÇÃO E VALIDAÇÃO DE INPUTS
+    // =========================================================
+    const RESERVED_USERNAMES = ['admin', 'administrator', 'root', 'system', 'bot', 'null', 'undefined', 'moderator', 'support'];
+
+    function sanitizeInput(str) {
+        if (typeof str !== 'string') return '';
+        return str
+            .replace(/[<>"'`&;{}()\[\]\\\/]/g, '') // remove tags HTML e chars perigosos
+            .replace(/javascript:/gi, '')
+            .replace(/on\w+=/gi, '')
+            .trim()
+            .slice(0, 64); // limite máximo
+    }
+
+    function validateUsername(raw) {
+        const clean = sanitizeInput(raw);
+        if (!clean || clean.length < 2) return { ok: false, msg: 'Username deve ter pelo menos 2 caracteres.' };
+        const lower = clean.toLowerCase().replace(/^@/, '');
+        if (RESERVED_USERNAMES.includes(lower)) return { ok: false, msg: 'Username reservado. Escolhe outro alias.' };
+        if (!/^@?[a-zA-Z0-9_\-\.]{2,30}$/.test(clean)) return { ok: false, msg: 'Username inválido. Use apenas letras, números, _ ou -' };
+        return { ok: true, value: clean.startsWith('@') ? clean : '@' + clean };
+    }
+
+    function pauseMarquee() { document.getElementById('storiesContainer').classList.remove('animated'); }
+    function resumeMarquee() { document.getElementById('storiesContainer').classList.add('animated'); }
+
+    function masterRenderLoop() {
+        if (ctx && canvas) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (isRolling && preloadedCanvases.length > 0) {
+                ctx.drawImage(preloadedCanvases[Math.floor(Math.random() * preloadedCanvases.length)], 0, 0, canvas.width, canvas.height);
+            } else if (lastMintedBuffer) {
+                ctx.drawImage(lastMintedBuffer, 0, 0, canvas.width, canvas.height);
+            } else {
+                ctx.fillStyle = "#06060c"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "#00ff66"; ctx.font = "bold 14px 'Space Mono'"; ctx.textAlign = "center";
+                ctx.fillText("[SISTEMA_PRONTO_PARA_MINTAR]", canvas.width/2, canvas.height/2);
+            }
+        }
+        requestAnimationFrame(masterRenderLoop);
+    }
+    requestAnimationFrame(masterRenderLoop);
+
+    // =========================================================
+    // MISSÕES DIÁRIAS — Reset a cada 24h reais via timestamp
+    // =========================================================
+    const DAILY_MISSIONS_KEY = 'dr0p_daily_missions';
+
+    const DAILY_MISSIONS_DB = [
+        {
+            id: 'MSN-01',
+            name: 'Primeira Extração',
+            desc: 'Resgate 1 card comum na máquina de drop.',
+            reqRarity: 'common',
+            reqCount: 1,
+            reward: 20,
+            rewardLabel: '20 B$'
+        },
+        {
+            id: 'MSN-02',
+            name: 'Caçador Épico',
+            desc: 'Possua 1 card Épico no cofre.',
+            reqRarity: 'epic',
+            reqCount: 1,
+            reward: 80,
+            rewardLabel: '80 B$'
+        },
+        {
+            id: 'MSN-03',
+            name: 'Lendário da Rede',
+            desc: 'Possua 1 card Lendário no cofre.',
+            reqRarity: 'legendary',
+            reqCount: 1,
+            reward: 200,
+            rewardLabel: '200 B$'
+        },
+        {
+            id: 'MSN-04',
+            name: 'ENTIDADE ANCESTRAL',
+            desc: 'Possua 1 card ANCESTRAL no cofre. [MISSÃO RARA]',
+            reqRarity: 'ancestral',
+            reqCount: 1,
+            reward: 500,
+            rewardLabel: '500 B$'
+        }
+    ];
+
+    function loadDailyMissions() {
+        try {
+            const all = JSON.parse(localStorage.getItem(DAILY_MISSIONS_KEY)) || {};
+            return all[currentUser.username] || { lastReset: 0, completed: [] };
+        } catch(e) { return { lastReset: 0, completed: [] }; }
+    }
+
+    function saveDailyMissions(data) {
+        try {
+            const all = JSON.parse(localStorage.getItem(DAILY_MISSIONS_KEY)) || {};
+            all[currentUser.username] = data;
+            localStorage.setItem(DAILY_MISSIONS_KEY, JSON.stringify(all));
+        } catch(e) {}
+    }
+
+    function checkDailyMissionsReset() {
+        const data = loadDailyMissions();
+        const now = Date.now();
+        if (now - data.lastReset >= 86400000) {
+            // Reseta painel após 24h
+            saveDailyMissions({ lastReset: now, completed: [] });
+            return { lastReset: now, completed: [] };
+        }
+        return data;
+    }
+
+    async function claimDailyMission(missionId) {
+        if (!currentUser.loggedIn) { navigateTo('auth'); return; }
+        const mission = DAILY_MISSIONS_DB.find(m => m.id === missionId);
+        if (!mission) return;
+
+        const data = checkDailyMissionsReset();
+        if (data.completed.includes(missionId)) return;
+
+        // Verifica requisito: conta cards da raridade no cofre
+        const count = savedAssets.filter(a => a.rarityType === mission.reqRarity).length;
+        if (count < mission.reqCount) {
+            showCyberAlert('MISSÃO NÃO CONCLUÍDA',
+                `Requisito: <b>${mission.reqCount} card(s) ${mission.reqRarity.toUpperCase()}</b> no cofre.<br>Você tem: <b>${count}</b>.`, 'warn');
+            return;
+        }
+
+        // Log de terminal antes de creditar
+        const logLines = [
+            `> INICIANDO PROCESSO DE VERIFICAÇÃO...`,
+            `> MISSÃO [${missionId}]: ${mission.name.toUpperCase()}`,
+            `> REQUISITO VALIDADO: ${count} CARD(S) ${mission.reqRarity.toUpperCase()} DETECTADO(S)`,
+            `> CALCULANDO RECOMPENSA: ${mission.reward} B$`,
+            `> CREDITANDO NO TERMINAL...`,
+            `> OPERAÇÃO CONCLUÍDA. +${mission.reward} B$ ADICIONADOS.`
+        ];
+
+        // Credita recompensa
+        currentUser.bumps += mission.reward;
+        await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
+
+        // Marca missão como concluída
+        data.completed.push(missionId);
+        saveDailyMissions(data);
+
+        // Atualiza badge de saldo
+        const profBumpsEl = document.getElementById('profBumps');
+        if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
+
+        playSynthSound('success');
+        if (mission.reqRarity === 'ancestral') triggerAncestralFlash('#ff007f');
+
+        showCyberAlert(
+            '// MISSÃO CONCLUÍDA //',
+            `<div style="font-family:'Space Mono',monospace; font-size:0.6rem; color:#00ff6699; text-align:left; margin-bottom:12px; line-height:2;">${logLines.map(l => `<div>${l}</div>`).join('')}</div>` +
+            `<b style="color:#ffaa00; font-size:0.9rem;">+${mission.reward} B$</b> creditados.<br>Saldo atual: <b>${currentUser.bumps} B$</b>`,
+            'success'
+        );
+
+        renderDailyMissions();
+    }
+
+    function renderDailyMissions() {
+        const container = document.getElementById('dailyMissionsContainer');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (!currentUser.loggedIn) {
+            container.innerHTML = '<div class="empty-vault-notice">Login necessário para ver missões diárias.</div>';
+            return;
+        }
+
+        const data = checkDailyMissionsReset();
+        const now = Date.now();
+        const remaining = Math.max(0, 86400000 - (now - data.lastReset));
+        const h = Math.floor(remaining / 3600000);
+        const m = Math.floor((remaining % 3600000) / 60000);
+
+        // Header com reset timer
+        const header = document.createElement('div');
+        header.style.cssText = 'font-size:0.55rem; color:#555566; letter-spacing:1px; margin-bottom:12px;';
+        header.innerText = `> MISSÕES_DIÁRIAS // RESET EM ${String(h).padStart(2,'0')}h${String(m).padStart(2,'0')}m`;
+        container.appendChild(header);
+
+        DAILY_MISSIONS_DB.forEach(mission => {
+            const isDone = data.completed.includes(mission.id);
+            const isAncestral = mission.reqRarity === 'ancestral';
+
+            // Missão concluída some da lista
+            if (isDone) return;
+
+            const card = document.createElement('div');
+            card.style.cssText = `
+                background: ${isAncestral ? '#120008' : '#07070f'};
+                border: 1px solid ${isAncestral ? '#ff007f' : '#333344'};
+                padding: 14px 16px; margin-bottom: 8px; position: relative; overflow: hidden;
+                ${isAncestral ? 'box-shadow: 0 0 12px rgba(255,0,127,0.2);' : ''}
+            `;
+
+            const countOwned = savedAssets.filter(a => a.rarityType === mission.reqRarity).length;
+            const canClaim = countOwned >= mission.reqCount;
+
+            card.innerHTML = `
+                <div style="font-size:0.5rem; color:${isAncestral ? '#ff007f' : '#666680'}; letter-spacing:2px; margin-bottom:4px;">${mission.id} ${isAncestral ? '// ⚠ MISSÃO RARA' : ''}</div>
+                <div style="font-family:'Archivo Black',sans-serif; font-size:0.8rem; color:${isAncestral ? '#ff007f' : '#fff'}; margin-bottom:4px;">${mission.name}</div>
+                <div style="font-size:0.58rem; color:#888899; margin-bottom:8px;">${mission.desc}</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                    <span style="font-size:0.55rem; color:${isAncestral ? '#ff007f' : '#ffaa00'}; border:1px solid currentColor; padding:2px 7px;">💰 +${mission.rewardLabel}</span>
+                    <span style="font-size:0.5rem; color:#666;">VOCÊ TEM: ${countOwned}/${mission.reqCount}</span>
+                    <button class="btn-action" style="border-color:${canClaim ? (isAncestral ? '#ff007f' : '#00ff66') : '#333'}; color:${canClaim ? (isAncestral ? '#ff007f' : '#00ff66') : '#555'}; ${canClaim ? '' : 'cursor:not-allowed; opacity:0.5;'} padding:6px 14px; width:auto;" ${canClaim ? `onclick="claimDailyMission('${mission.id}')"` : 'disabled'}>
+                        ${canClaim ? '▶ RESGATAR' : 'INCOMPLETA'}
+                    </button>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+
+        // Se todas concluídas
+        if (container.querySelectorAll('div[style]').length <= 1) {
+            const done = document.createElement('div');
+            done.className = 'empty-vault-notice';
+            done.innerHTML = '✅ TODAS AS MISSÕES DO DIA CONCLUÍDAS.<br><small style="color:#444;font-size:0.55rem;">Volta amanhã para novas missões.</small>';
+            container.appendChild(done);
+        }
+    }
+
+    // =========================================================
+    // PROVENIÊNCIA — ID Único, Hash Criptográfico e Timestamp
+    // Sistema interno de prova de origem: todo card gerado no
+    // dr0p_station carrega uma assinatura imutável. Mesmo sem
+    // blockchain, o registro no localStorage funciona como
+    // "ata de nascimento" do ativo. Útil para detectar cópias
+    // e como base para tokenização futura (Web3).
+    // =========================================================
+
+    /**
+     * Hash leve e determinístico (DJB2) a partir dos dados do card.
+     * Roda de forma síncrona e offline, sem depender de SubtleCrypto.
+     * O resultado muda se qualquer campo-semente do card mudar.
+     */
+    function _djb2Hash(str) {
+        let h = 5381;
+        for (let i = 0; i < str.length; i++) {
+            h = ((h << 5) + h) ^ str.charCodeAt(i);
+            h |= 0; // força inteiro 32 bits
+        }
+        return (h >>> 0).toString(16).padStart(8, '0').toUpperCase();
+    }
+
+    /**
+     * Gera o objeto de proveniência para um card.
+     * @param {object} cardData  Objeto parcial ou completo do card (precisa de id, rarityType, styleName, creator)
+     * @returns {{ hash: string, timestamp: number, origin: string }}
+     */
+    function generateProvenance(cardData) {
+        const ts   = Date.now();
+        const seed = [cardData.id, cardData.rarityType, cardData.styleName, cardData.creator, ts].join('|');
+        return {
+            hash:      `DS-${_djb2Hash(seed)}`,   // ex: DS-4A2F9C1B
+            timestamp: ts,
+            origin:    'DROP_STATION_INTERNAL'
+        };
+    }
+
+    /**
+     * Injeta proveniência + flag Web3 no objeto do card SE ainda não tiver.
+     * Cards do feed global legado ou demo ficam sem — comportamento esperado.
+     * A partir desta versão, também inicializa o Survival Counter (fusion_count),
+     * o histórico genético (genetic_history) e a assinatura visual do QR Code.
+     * @param {object} cardObj  Objeto do card (mutado in-place e retornado)
+     */
+    function attachProvenance(cardObj) {
+        if (cardObj.provenance) return cardObj; // já tem — nunca sobrescrever
+        cardObj.provenance  = generateProvenance(cardObj);
+        cardObj.isTokenized = false; // preparação para fluxo Web3
+
+        // ── ALQUIMIA: contador de sobrevivência + linhagem genética ──
+        if (typeof cardObj.fusion_count !== 'number') cardObj.fusion_count = 0;
+        if (!Array.isArray(cardObj.genetic_history)) cardObj.genetic_history = [];
+        cardObj.eliteEligible = cardObj.fusion_count >= 3;
+
+        // ── Resoluções: UI leve (500px) sempre disponível; HD só sob demanda ──
+        if (!cardObj.resolutions) {
+            cardObj.resolutions = { ui: { w: 500, h: 500 }, hd: { w: 4000, h: 4000, src: null } };
+        }
+
+        regenerateQrSignature(cardObj);
+        return cardObj;
+    }
+
+    /**
+     * Regera a assinatura visual do QR Code de um card sempre que seu estado muda:
+     * criação, transferência de propriedade ou sobrevivência a uma fusão.
+     * O hash base (provenance.hash) nunca muda — só o sufixo de estado "-Fxx".
+     */
+    function regenerateQrSignature(cardObj) {
+        const suffix = `F${cardObj.fusion_count || 0}`;
+        cardObj.qr_code_hash   = `${cardObj.provenance.hash}-${suffix}`;
+        // URL pública de inspeção direta do card
+        const cardDisplayId = encodeURIComponent(cardObj.id || cardObj.qr_code_hash);
+        cardObj.qr_payload_url = `https://dr0p-station.vercel.app/inspect?card=${cardDisplayId}&hash=${encodeURIComponent(cardObj.qr_code_hash)}`;
+        return cardObj;
+    }
+
+    /**
+     * Desenha o QR Code dinâmico de um card num container do DOM.
+     * Usa a lib QRCode (qrcodejs) carregada no <head> do index.html.
+     * Sempre limpa o container antes de redesenhar (necessário pois o
+     * QR muta a cada novo estado do card).
+     */
+    function renderQRCode(cardObj, containerId) {
+        const el = document.getElementById(containerId);
+        if (!el || typeof QRCode === 'undefined' || !cardObj.qr_payload_url) return;
+        el.innerHTML = ''; // limpa render anterior — o QR é regenerado, não acumulado
+        new QRCode(el, {
+            text: cardObj.qr_payload_url,
+            width: 120,
+            height: 120,
+            colorDark: '#00ffff',
+            colorLight: '#020204',
+            correctLevel: QRCode.CorrectLevel.M
+        });
+    }
+
+    // ITEMS_DB, getUserInventory e consumeInventoryItem agora vêm da Parte 3 (Supabase), no final do arquivo.
+
+    // DAILY DROPS — Recompensa diária (cooldown de 24h)
+    const DAILY_DROP_REWARD_BUMPS = 30; // 30 B$ garantidos — nunca trava o usuário
+
+    function getDailyDropKey() {
+        return `cyber_daily_drop_${currentUser.username}`;
+    }
+
+    async function claimDailyDrop() {
+        if (!currentUser.loggedIn) { navigateTo('auth'); return; }
+        const key = getDailyDropKey();
+        const last = parseInt(localStorage.getItem(key) || '0', 10);
+        const now = Date.now();
+        if (now - last < 86400000) { renderDailyDropButton(); return; }
+
+        currentUser.bumps += DAILY_DROP_REWARD_BUMPS;
+        localStorage.setItem(key, String(now));
+        await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
+
+        showCyberAlert('PROCESSO_CONCLUÍDO:', `Subsídio de rede coletado! +${DAILY_DROP_REWARD_BUMPS} B$ creditados na conta.`, 'success');
+        playTerminalSound('claim');
+        renderDailyDropButton();
+    }
+
+    function renderDailyDropButton() {
+        const btn = document.getElementById('dailyDropBtn');
+        if (!btn) return;
+        if (!currentUser.loggedIn) { btn.innerText = '🛰️ LOGIN PARA COLHER SUBSÍDIO'; btn.disabled = true; return; }
+
+        const last = parseInt(localStorage.getItem(getDailyDropKey()) || '0', 10);
+        const remaining = 86400000 - (Date.now() - last);
+
+        if (remaining <= 0) {
+            btn.disabled = false;
+            btn.innerText = `🛰️ COLHER SUBSÍDIO DA REDE (+${DAILY_DROP_REWARD_BUMPS} B$)`;
+        } else {
+            btn.disabled = true;
+            const h = Math.floor(remaining / 3600000);
+            const m = Math.floor((remaining % 3600000) / 60000);
+            const s = Math.floor((remaining % 60000) / 1000);
+            btn.innerText = `⏳ PRÓXIMO SUBSÍDIO EM ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        }
+    }
+    setInterval(renderDailyDropButton, 1000);
+
+    // =========================================================
+    // LEADERBOARD — Placar Global de Operadores
+    // =========================================================
+    let leaderboardMode = 'bumps'; // 'bumps' | 'legendary'
+
+    function setLeaderboardMode(mode) {
+        leaderboardMode = mode;
+        document.querySelectorAll('#leaderboardModeBar .filter-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.mode === mode);
+        });
+        renderLeaderboard();
+    }
+
+    async function renderLeaderboard() {
+        const list = document.getElementById('leaderboardList');
+        if (!list) return;
+
+        // Busca todos os perfis (substitui loadRegistry()) + contagem de lendários por usuário
+        // Também busca avatar e avatar_frame pra renderizar a moldura neon de cada operador no Placar.
+        const { data: profilesData, error: profErr } = await sb.from('profiles').select('id, username, bumps, fusion_count, avatar, avatar_frame');
+        if (profErr) { console.error('renderLeaderboard (profiles):', profErr.message); list.innerHTML = '<div class="empty-vault-notice">FALHA AO CARREGAR PLACAR.</div>'; return; }
+
+        const { data: legendaryRows, error: cardsErr } = await sb.from('cards').select('id_usuario').eq('rarity_type', 'legendary');
+        if (cardsErr) console.error('renderLeaderboard (cards):', cardsErr.message);
+        const legendaryCounts = {};
+        (legendaryRows || []).forEach(r => { legendaryCounts[r.id_usuario] = (legendaryCounts[r.id_usuario] || 0) + 1; });
+
+        const rows = (profilesData || []).map(u => ({
+            username: u.username,
+            bumps: u.bumps || 0,
+            legendaryCount: legendaryCounts[u.id] || 0,
+            avatar: u.avatar || 'https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg',
+            avatarFrame: u.avatar_frame || FRAME_DEFAULT_ID
+        }));
+
+        rows.sort((a, b) => leaderboardMode === 'bumps' ? (b.bumps - a.bumps) : (b.legendaryCount - a.legendaryCount));
+        const top5 = rows.slice(0, 5);
+
+        if (top5.length === 0) {
+            list.innerHTML = '<div class="empty-vault-notice">NENHUM OPERADOR REGISTRADO NA REDE.</div>';
+            return;
+        }
+
+        // Recompensas sazonais (simuladas, sem valor real) atreladas a cada posição do Placar Global.
+        const SEASON_REWARDS = [
+            '+500 B$ + Caixa Lendária',
+            '+300 B$ + Caixa Épica',
+            '+150 B$ + Caixa Épica',
+            '+75 B$ + Caixa Comum',
+            '+50 B$ + Caixa Comum'
+        ];
+
+        list.innerHTML = top5.map((r, i) => {
+            const medal = ['🥇','🥈','🥉','🎖️','🎖️'][i] || '▫️';
+            const value = leaderboardMode === 'bumps' ? `${r.bumps} B$` : `${r.legendaryCount} LENDÁRIOS`;
+            const isMe = r.username === currentUser.username ? ' style="color:#00ffff;"' : '';
+            // Mostra SOMENTE recompensas em Bumps na coluna de recompensas
+            const bumpsReward = ['500 B$', '300 B$', '150 B$', '75 B$', '50 B$'][i] || '—';
+            const avatarSrc = r.avatar || 'https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg';
+            return `<div class="leaderboard-row" onclick="viewExternalProfile('${r.username.replace(/'/g,"\\'")}');"${isMe}>
+                <span>${medal} #${i+1}</span>
+                <span class="avatar-container ${r.avatarFrame}"><span class="cyber-frame"><img src="${avatarSrc}" draggable="false" loading="lazy" onerror="this.src='https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg'"></span></span>
+                <span>${r.username}</span>
+                <span>${value}</span>
+                <span class="lb-rewards">💰 ${bumpsReward}</span>
+            </div>`;
+        }).join('');
+    }
+
+    // =========================================================
+    // BADGES DE CONQUISTA
+    // =========================================================
+    function computeBadges(userData) {
+        const badges = [];
+        const fusionCount = (userData && userData.fusionCount) || 0;
+        const bumps = (userData && userData.bumps) || 0;
+        if (fusionCount >= 10) badges.push({ icon: '⚗️', label: 'MESTRE ALQUIMISTA' });
+        if (bumps >= 1000) badges.push({ icon: '🐋', label: 'BALEIA DA REDE' });
+        const legendaryCount = ((userData && userData.savedAssets) || []).filter(a => a.rarityType === 'legendary').length;
+        if (legendaryCount >= 3) badges.push({ icon: '💎', label: 'CAÇADOR DE LENDAS' });
+        return badges;
+    }
+
+    async function renderProfileBadges(username) {
+        const zone = document.getElementById('profBadgesZone');
+        if (!zone) return;
+        const profile = await fetchProfileByUsername(username);
+        if (!profile) { zone.innerHTML = '<span class="badge-tag badge-empty">SEM INSÍGNIAS REGISTRADAS</span>'; return; }
+        const { data: legendaryRows } = await sb.from('cards').select('id').eq('id_usuario', profile.id).eq('rarity_type', 'legendary');
+        const userData = {
+            fusionCount: profile.fusion_count || 0,
+            bumps: profile.bumps || 0,
+            savedAssets: (legendaryRows || []).map(() => ({ rarityType: 'legendary' }))
+        };
+        const badges = computeBadges(userData);
+        zone.innerHTML = badges.length === 0
+            ? '<span class="badge-tag badge-empty">SEM INSÍGNIAS REGISTRADAS</span>'
+            : badges.map(b => `<span class="badge-tag">${b.icon} ${b.label}</span>`).join('');                    // se a pessoa tentar sb.auth.signUp() de novo com o MESMO e-mail,
                     // vai cair em "already registered". O caminho certo daqui é
                     // LOGIN (a senha que ela acabou de definir já é válida) — o login
                     // vai falhar com "perfil não encontrado" (ver fetchProfile em
