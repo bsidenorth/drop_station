@@ -2812,6 +2812,7 @@ async function logoutSession() {
             // selo PURGED/DETONADA via CSS) e --purge-label conforme idioma.
             card.className = `album-card rare-${a.rarityType}${a.isPurged ? ' is-purged' : ''}`;
             if (a.isPurged) card.style.setProperty('--purge-label', currentLang === 'PT' ? '"DETONADA"' : '"PURGED"');
+            applyCardMotionAttrs(card, a);
             card.dataset.vaultIndex = index;
             const custodyBadge = a.isListed ? `<div style="position:absolute;top:-5px;left:-5px;background:#ff0044;color:#fff;font-size:0.5rem;padding:2px 6px;font-weight:bold;z-index:5;box-shadow:0 0 8px #ff0044;">🔒 EM CUSTÓDIA</div>` : '';
 
@@ -3340,7 +3341,14 @@ async function logoutSession() {
         if(!cardAsset) return;
         const ownerName = cardAsset.creator || cardAsset.owner;
 
-        document.getElementById('inspectImg').src = cardAsset.imgSrc;
+        // [RESTRUTURAÇÃO INSPECT] O nó de mídia recebe SOMENTE o caminho do
+        // arquivo (src) + a classe/atributo de movimento quando aplicável.
+        // Nenhuma bounding box dinâmica é aplicada aqui — dimensões/proporção
+        // ficam inteiramente a cargo do CSS estático do elemento, nunca de
+        // estilos inline calculados em JS, para não achatar a proporção do ativo.
+        const inspectImgEl = document.getElementById('inspectImg');
+        inspectImgEl.src = cardAsset.imgSrc;
+        applyCardMotionAttrs(inspectImgEl, cardAsset);
         document.getElementById('inspectTitle').innerText = `INSPECT // ${cardAsset.id}`;
 
         // [ESCOPO 4] CARIMBO DE EXCLUSÃO — exibe chamas pixel art + selo
@@ -4568,6 +4576,49 @@ async function logoutSession() {
     }
 
     // =========================================================
+    // MOVIMENTO CONTÍNUO (BOTÃO "GIF" DA FUSÃO)
+    // Cards marcados com isAnimated:true recebem um filtro de movimento
+    // (data-motion-filter) sorteado entre as variantes abaixo. O sorteio
+    // acontece no momento da fusão (ligado ao ID recém-gerado do card) e
+    // é re-derivado de forma DETERMINÍSTICA a partir do próprio ID em
+    // qualquer render futuro — por isso o mesmo card sempre mostra o
+    // mesmo filtro em Inventário, Vitrine e Modal de Inspect, mesmo sem
+    // precisar gravar a variante escolhida em coluna própria no banco.
+    // =========================================================
+    const MOTION_FILTER_VARIANTS = ['random-glitch', 'vortex-wave'];
+
+    function getCardMotionFilter(card) {
+        if (!card || !card.isAnimated) return null;
+        if (card.motionFilter && MOTION_FILTER_VARIANTS.includes(card.motionFilter)) {
+            return card.motionFilter;
+        }
+        const seed = String(card.id || '');
+        let hash = 0;
+        for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+        const variant = MOTION_FILTER_VARIANTS[hash % MOTION_FILTER_VARIANTS.length];
+        card.motionFilter = variant; // cache em memória — evita resortear no mesmo card
+        return variant;
+    }
+
+    /**
+     * Aplica (ou remove) a classe ativa de animação + o atributo
+     * data-motion-filter num elemento do DOM, com base no card.isAnimated.
+     * Usado de forma idêntica no Inventário, na Vitrine e no Modal de Inspect,
+     * garantindo que o filtro de movimento acompanhe o card pelo ecossistema.
+     */
+    function applyCardMotionAttrs(domEl, card) {
+        if (!domEl || !card) return;
+        const variant = getCardMotionFilter(card);
+        if (variant) {
+            domEl.classList.add('card-motion-active');
+            domEl.dataset.motionFilter = variant;
+        } else {
+            domEl.classList.remove('card-motion-active');
+            delete domEl.dataset.motionFilter;
+        }
+    }
+
+    // =========================================================
     // EFEITO VISUAL DINÂMICO DE FUSÃO (ALQUIMIA) — Ponto 4
     // Gera um filtro CSS aleatório + distorção/pixelado/ruído únicos
     // a cada fusão, sempre a partir da imagem-base do card resultante.
@@ -4852,6 +4903,9 @@ async function logoutSession() {
         const alchPanel = document.getElementById('alchemyPanel');
         alchPanel.classList.add('alchemy-fusing');
         _injectDevChangerIfAbsent(); // [DEV] injeta botão se ainda não existir
+        _injectFusionGifButtonIfAbsent(); // injeta o botão "GIF" se ainda não existir
+        const gifModeForThisFusion = _fusionGifModeActive || _devForceGifMode;
+        if (_fusionGifModeActive) toggleFusionGifMode(); // consome o toggle — vale só para esta fusão
         playSynthSound('click');
         speakPhrase("Iniciando fusão. Aguarde a estabilização.", "Initiating fusion sequence. Stand by.");
     
@@ -4995,6 +5049,7 @@ async function logoutSession() {
                         creator: currentUser.username, registered: true, exposed: false,
                         forSale: false, isListed: false, price: 0,
                         imgSrc: fusedVisual, isFused: true, tags: ['fused'],
+                        isAnimated: gifModeForThisFusion,
                         fusion_count: 0, genetic_history: [] // resíduo instável — linhagem não sobrevive
                     };
                     // ── PROVENIÊNCIA: novo hash exclusivo do card fundido ──
@@ -5062,6 +5117,7 @@ async function logoutSession() {
                         forSale: false, isListed: false, price: 0,
                         imgSrc: fusedVisual,
                         isFused: true, tags: ['fused', 'evento'],
+                        isAnimated: gifModeForThisFusion,
                         fusion_count: inheritedFusionCount,
                         genetic_history: inheritedHistory,
                         eliteEligible: inheritedFusionCount >= 3
@@ -5135,6 +5191,7 @@ async function logoutSession() {
             exposed.forEach((a) => {
                 const card = document.createElement('div');
                 card.className = 'album-card rare-' + (a.rarityType || 'common');
+                applyCardMotionAttrs(card, a);
                 const rarityColor = a.rarityType === 'ancestral' ? '#ff007f'
                     : a.rarityType === 'legendary' ? '#00ffff'
                     : a.rarityType === 'epic' ? '#ffaa00'
@@ -5178,6 +5235,47 @@ async function logoutSession() {
         } else {
             console.info('[DEV] FORÇAR GIF MODE desativado — probabilidades normais restauradas');
         }
+    }
+
+    // =========================================================
+    // BOTÃO "GIF" DA FUSÃO — controle do usuário (não confundir com o
+    // dev changer acima). Quando ativo, marca o card resultante da
+    // PRÓXIMA fusão como is_animated:true, fazendo-o herdar um filtro
+    // de movimento contínuo (ver getCardMotionFilter) em todo o
+    // ecossistema. É consumido (desativado) após cada fusão.
+    // =========================================================
+    let _fusionGifModeActive = false;
+
+    function toggleFusionGifMode() {
+        _fusionGifModeActive = !_fusionGifModeActive;
+        const btn = document.getElementById('fusionGifBtn');
+        if (btn) {
+            btn.classList.toggle('active', _fusionGifModeActive);
+            btn.innerText = _fusionGifModeActive
+                ? (currentLang === 'PT' ? '🎞️ GIF: ATIVO' : '🎞️ GIF: ON')
+                : '🎞️ GIF';
+            btn.style.borderColor = _fusionGifModeActive ? '#ff00ff' : '';
+            btn.style.color = _fusionGifModeActive ? '#ff00ff' : '';
+        }
+    }
+
+    /**
+     * Injeta o botão "GIF" no painel de fusão, caso ainda não exista.
+     * Chamado no mesmo ponto em que o painel de alquimia é exibido.
+     */
+    function _injectFusionGifButtonIfAbsent() {
+        const panel = document.getElementById('alchemyPanel');
+        if (!panel) return;
+        if (document.getElementById('fusionGifBtn')) return; // já injetado
+        const gifBtn = document.createElement('button');
+        gifBtn.id = 'fusionGifBtn';
+        gifBtn.className = 'btn-action';
+        gifBtn.innerText = '🎞️ GIF';
+        gifBtn.title = currentLang === 'PT'
+            ? 'Marca o card resultante desta fusão como ativo animado (movimento contínuo).'
+            : 'Marks the result of this fusion as an animated asset (continuous motion).';
+        gifBtn.addEventListener('click', function(e) { e.stopPropagation(); toggleFusionGifMode(); });
+        panel.appendChild(gifBtn);
     }
 
     /**
@@ -6505,15 +6603,31 @@ async function toggleExposeAsset(index) {
         return;
     }
 
+    // [FIX VITRINE] Reaplica a vitrine pública sempre que o próprio dono
+    // estiver com o perfil aberto — sem isso, o card alternado só
+    // atualizava no Cofre (renderVaultGrid) e a Vitrine ficava com o
+    // estado antigo até a página ser recarregada.
+    const refreshShowcaseIfOwnerViewing = () => {
+        if (selectedProfileUser === currentUser.username) {
+            renderShowcaseInventory(savedAssets, currentUser.equippedCosmetics, true);
+            const showcaseRankArea = document.getElementById('showcaseRankArea');
+            if (showcaseRankArea && typeof computeCollectionLevel === 'function') {
+                computeCollectionLevel(savedAssets, showcaseRankArea);
+            }
+        }
+    };
+
     const novoEstado = !asset.exposed;
     savedAssets[index].exposed = novoEstado;
     renderVaultGrid(); // feedback imediato na UI
+    refreshShowcaseIfOwnerViewing(); // mantém a vitrine sincronizada em tempo real
 
     const ok = await updateCardInSupabase(asset, { exposed: novoEstado });
     if (!ok) {
         savedAssets[index].exposed = !novoEstado; // rollback
         showCyberAlert('ERRO_DE_REDE', 'Não foi possível atualizar a vitrine. Tenta novamente.', 'error');
         renderVaultGrid();
+        refreshShowcaseIfOwnerViewing();
         return;
     }
 
