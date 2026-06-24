@@ -1066,20 +1066,17 @@ async function logoutSession() {
     const metaStyle = document.getElementById('meta-style'); 
     const metaOwner = document.getElementById('meta-owner');
 
-    const animePool = [
-        "https://i.ibb.co/m56c5F2Z/ced5acf2-417d-4669-b964-96437ab91fda.jpg",
-        "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg",
-        "https://i.ibb.co/S7JbrXX2/fa809178-22dc-4ec1-8d84-2dcea9ab44b7.jpg",
-        "https://i.ibb.co/pBy1Rmyq/sylvanian-pfp.jpg",
-        "https://i.ibb.co/9m50LNJT/db05209d-fd04-4353-a033-d21349f7d98c.jpg",
-        "https://i.ibb.co/LdxbZdpR/91e7283f-2f12-4701-8de0-0798caa5e42e.jpg",
-        "https://i.ibb.co/HfrS8TJh/Screenshot-20260616-213009-Chrome.jpg",
-        "https://i.ibb.co/C3Hp4Cvs/image.jpg",
-        "https://i.ibb.co/ycRhQk8v/image.jpg",
-        "https://i.ibb.co/N28DPq35/Scearm.jpg",
-        "https://i.ibb.co/rGr2fJnT/Pinterest.jpg"
-    ];
+    // ── POOL DE IMAGENS DOS DROPS ─────────────────────────────────────
+    // Removido o pool fixo de imgbb (eram só imagens de teste). Agora as
+    // imagens dos drops vêm 100% do bucket privado `high-res-assets`
+    // (Supabase Storage) — qualquer imagem que você subir lá passa a
+    // poder sair num drop aleatório. preloadedCanvasPaths[i] guarda o
+    // NOME DO ARQUIVO no bucket que corresponde a preloadedCanvases[i],
+    // pra sabermos depois, no card já mintado, qual arquivo original
+    // pedir ao clicar em "Obter Item" (ver loadDropImagePoolFromBucket
+    // mais abaixo e executeDoubleAssetDownload).
     const preloadedCanvases = [];
+    const preloadedCanvasPaths = [];
     let lastMintedBuffer = null; let activeAssetData = null; let decayInterval = null; let isRolling = false;
     let isProcessingClaim = false; // Mutex global: impede duplicação e debito duplo de Bumps
 
@@ -1377,13 +1374,45 @@ async function logoutSession() {
         }
     }
 
-    animePool.forEach(url => {
-        const img = new Image(); img.crossOrigin = "anonymous"; img.src = url;
-        img.onload = () => {
-            const off = document.createElement('canvas'); off.width = 600; off.height = 600;
-            off.getContext('2d').drawImage(img, 0, 0, 600, 600); preloadedCanvases.push(off);
-        };
-    });
+    // ── CARREGA O POOL DE DROPS DIRETO DO BUCKET high-res-assets ──────
+    // Lista todos os arquivos do bucket privado, gera Signed URLs em
+    // lote (1h de validade — só pro carregamento inicial dos drops, não
+    // confundir com a Signed URL de 60s usada no download HD individual
+    // em executeDoubleAssetDownload) e pré-desenha cada um num canvas
+    // off-screen, guardando o nome do arquivo em preloadedCanvasPaths
+    // na MESMA posição do canvas correspondente em preloadedCanvases.
+    async function loadDropImagePoolFromBucket() {
+        try {
+            const { data: files, error } = await sb.storage.from('high-res-assets').list('', { limit: 1000 });
+            if (error) { console.error('[Pool de drops] Falha ao listar bucket:', error.message); return; }
+            const imageFiles = (files || []).filter(f => /\.(png|jpe?g|webp|gif)$/i.test(f.name));
+            if (imageFiles.length === 0) {
+                console.warn('[Pool de drops] Bucket high-res-assets está vazio — nenhuma imagem disponível pra mintagem.');
+                return;
+            }
+
+            const paths = imageFiles.map(f => f.name);
+            const { data: signedList, error: signErr } = await sb.storage
+                .from('high-res-assets')
+                .createSignedUrls(paths, 3600);
+            if (signErr || !signedList) { console.error('[Pool de drops] Falha ao gerar signed URLs:', signErr?.message); return; }
+
+            signedList.forEach(item => {
+                if (!item.signedUrl) return;
+                const img = new Image(); img.crossOrigin = "anonymous"; img.src = item.signedUrl;
+                img.onload = () => {
+                    const off = document.createElement('canvas'); off.width = 600; off.height = 600;
+                    off.getContext('2d').drawImage(img, 0, 0, 600, 600);
+                    preloadedCanvases.push(off);
+                    preloadedCanvasPaths.push(item.path);
+                };
+                img.onerror = () => console.warn('[Pool de drops] Falha ao carregar do bucket:', item.path);
+            });
+        } catch (e) {
+            console.error('[Pool de drops] Erro inesperado ao carregar do bucket:', e);
+        }
+    }
+    loadDropImagePoolFromBucket();
 
     function resizeCanvases() {
         if(!canvas) return;
@@ -2521,8 +2550,16 @@ async function logoutSession() {
             document.getElementById('btnFree').classList.remove('disabled');
             document.getElementById('btnPremium').classList.remove('disabled');
 
-            if (preloadedCanvases.length === 0) { isRolling = false; return; }
-            const sourceBuffer = preloadedCanvases[Math.floor(Math.random() * preloadedCanvases.length)];
+            if (preloadedCanvases.length === 0) {
+                isRolling = false;
+                targetContainer.classList.remove("rolling");
+                stabilityWrapper.style.display = "none";
+                showCyberAlert('BUCKET VAZIO', 'Nenhuma imagem disponível no bucket high-res-assets. Suba ao menos uma imagem no Storage do Supabase para liberar os drops.', 'error');
+                return;
+            }
+            const sourceIndex = Math.floor(Math.random() * preloadedCanvases.length);
+            const sourceBuffer = preloadedCanvases[sourceIndex];
+            const sourceBucketPath = preloadedCanvasPaths[sourceIndex];
             const bakedBuffer = document.createElement('canvas'); bakedBuffer.width = 600; bakedBuffer.height = 600;
             const bCtx = bakedBuffer.getContext('2d');
 
@@ -2612,7 +2649,11 @@ async function logoutSession() {
             activeAssetData = { 
                 id: generatedId, rarityType: rarityKey, rarityName: rarityName, rarityNameEN: rarityNameEN,
                 styleName: styleName, styleNameEN: styleNameEN, creator: currentUser.loggedIn ? currentUser.username : "OG DROP", 
-                registered: currentUser.loggedIn, exposed: false, forSale: false, price: 0, imgSrc: bakedBuffer.toDataURL(), costToClaim: claimCost 
+                registered: currentUser.loggedIn, exposed: false, forSale: false, price: 0, imgSrc: bakedBuffer.toDataURL(), costToClaim: claimCost,
+                // ── BUCKET high-res-assets: guarda o arquivo ORIGINAL sorteado
+                // pra este card. É esse caminho (não o id do card) que
+                // "Obter Item" usa pra gerar a Signed URL do HD verdadeiro.
+                resolutions: { ui: { w: 500, h: 500 }, hd: { w: 4000, h: 4000, src: sourceBucketPath } } 
             };
 
             // BUGFIX (feed global com lixo/efêmero): este card ainda NÃO foi
@@ -3488,14 +3529,6 @@ async function logoutSession() {
             btn.onclick = () => { closeInspectModal(); initiateTradeContact(ownerName, cardAsset.id); };
             zone.appendChild(btn);
         }
-        // ── BUCKET high-res-assets: permite ao dono original re-baixar o
-        // ativo em HD a partir do modal de inspect, a qualquer momento. ──
-        if (cardAsset.creator === currentUser.username && !cardAsset.isPurged) {
-            const hdBtn = document.createElement('button'); hdBtn.className = 'btn-action'; hdBtn.style.borderColor = '#00ff66';
-            hdBtn.innerText = '📥 DOWNLOAD HD';
-            hdBtn.onclick = () => executeDoubleAssetDownload(cardAsset);
-            zone.appendChild(hdBtn);
-        }
 
         // ── PROVENIÊNCIA: exibe hash, timestamp e botão Web3 ──────────
         const prov = cardAsset.provenance;
@@ -4085,37 +4118,14 @@ async function logoutSession() {
     // estática (.png/.jpg) em alta definição, mesmo que o card
     // possua variações animadas. Download em lote removido.
     // =========================================================
+    // Botão "Obter Item 📥" do cofre — ÚNICO ponto de download HD do app.
+    // Agora busca o ativo de alta resolução REAL no bucket privado
+    // high-res-assets (Signed URL de 60s), em vez de re-baixar a prévia
+    // já vista na tela (asset.imgSrc, que é só o canvas baked/watermarked).
     async function downloadVaultAsset(index) {
         const asset = savedAssets[index];
         if (!asset) return;
-        if (asset.creator !== currentUser.username) {
-            showCyberAlert('ACESSO NEGADO', 'Apenas o dono original pode descarregar este ativo.', 'error');
-            return;
-        }
-
-        const baseName = `dr0p_${(asset.id || '').replace('#','')}_${asset.rarityType}`;
-
-        // Somente download estático PNG/JPG
-        const aStatic = document.createElement('a');
-        aStatic.href = asset.imgSrc;
-        if (asset.imgSrc && asset.imgSrc.startsWith('data:')) {
-            aStatic.download = `${baseName}_hd.png`;
-            aStatic.click();
-        } else if (asset.imgSrc) {
-            // Tenta fetch para forçar download em vez de abrir no browser
-            try {
-                const resp = await fetch(asset.imgSrc);
-                const blob = await resp.blob();
-                const url = URL.createObjectURL(blob);
-                const a2 = document.createElement('a');
-                a2.href = url;
-                a2.download = `${baseName}_hd.png`;
-                a2.click();
-                setTimeout(() => URL.revokeObjectURL(url), 5000);
-            } catch(e) {
-                window.open(asset.imgSrc, '_blank');
-            }
-        }
+        await executeDoubleAssetDownload(asset);
     }
 
     // Gera um WebP animado simples (2 frames com glow pulsante) a partir
@@ -6539,9 +6549,12 @@ function markCardPurgedLocally(card, reason) {
 // ═══════════════════════════════════════════════════════════════
 // DOWNLOAD SEGURO — BUCKET PRIVADO high-res-assets (Supabase)
 // Gera uma Signed URL de 60s e dispara o download automaticamente.
-// Convenção de nome no bucket: display_id do card sem o '#' + extensão.
-// Ex: card #449201 → arquivo 449201.png
-// Chame com: executeDoubleAssetDownload(asset)
+// O arquivo buscado é o ORIGINAL sorteado no momento do drop, salvo em
+// asset.resolutions.hd.src (ver loadDropImagePoolFromBucket e o bake do
+// card em executeHardwareRoll) — não é mais derivado do id do card,
+// porque o id é gerado aleatoriamente e nunca bateria com o nome real
+// do arquivo no bucket.
+// Chamada apenas pelo botão "Obter Item 📥" do cofre (downloadVaultAsset).
 // ═══════════════════════════════════════════════════════════════
 async function executeDoubleAssetDownload(asset) {
     if (!asset) return;
@@ -6552,10 +6565,13 @@ async function executeDoubleAssetDownload(asset) {
         return;
     }
 
-    // Nome do arquivo no bucket: display_id sem '#' + extensão
-    // Ajuste a extensão (.png / .jpg / .webp) conforme o que você fez upload
-    const rawId = (asset.id || asset.displayId || '').toString().replace('#', '');
-    const nomeDoArquivo = `${rawId}.png`;
+    const nomeDoArquivo = asset.resolutions?.hd?.src;
+    if (!nomeDoArquivo) {
+        showCyberAlert('SEM HD VINCULADO', 'Este card não tem um arquivo de alta resolução vinculado no bucket (mintado antes da integração ou pool vazio no momento do drop).', 'error');
+        return;
+    }
+
+    const rawId = (asset.id || '').toString().replace('#', '');
 
     showCyberAlert('COMPILANDO ATIVO...', 'Gerando link seguro de alta resolução. Aguarde.', 'info');
 
@@ -6570,7 +6586,7 @@ async function executeDoubleAssetDownload(asset) {
             console.error('[HD Download]', error);
             showCyberAlert(
                 'ERRO DE ACESSO',
-                'Não foi possível gerar o link seguro. Verifique se o arquivo existe no bucket.',
+                'Não foi possível gerar o link seguro. Verifique se o arquivo ainda existe no bucket.',
                 'error'
             );
             return;
@@ -6584,7 +6600,10 @@ async function executeDoubleAssetDownload(asset) {
         const objectUrl = URL.createObjectURL(blob);
 
         const baseName = `dr0p_${rawId}_${asset.rarityType || 'card'}_1000px`;
-        const ext = blob.type.includes('jpeg') ? 'jpg'
+        // Detecta a extensão pelo tipo real do blob — se o arquivo original
+        // no bucket for um .gif, o download sai como .gif (animado), não png.
+        const ext = blob.type.includes('gif')  ? 'gif'
+                  : blob.type.includes('jpeg') ? 'jpg'
                   : blob.type.includes('webp') ? 'webp'
                   : 'png';
 
@@ -6604,6 +6623,7 @@ async function executeDoubleAssetDownload(asset) {
         showCyberAlert('FALHA NO DOWNLOAD', 'Erro ao baixar o ativo. Tente novamente.', 'error');
     }
 }
+
 
 // =========================================================
 // CLAIM: resgata o card que acabou de "rolar" pro cofre do usuário
@@ -6685,10 +6705,6 @@ async function claimAssetLogic() {
         pushFeedCard(assetSnapshot);
 
         showCyberAlert('PROCESSO_CONCLUÍDO:', currentLang === 'PT' ? 'Consolidado no seu cofre seguro!' : 'Consolidated into your secure vault!', 'success');
-
-        // ── BUCKET high-res-assets: dispara o download do ativo em alta
-        // resolução automaticamente após o card ser salvo no cofre. ──
-        await executeDoubleAssetDownload(assetSnapshot);
 
     } catch (e) {
         console.error(e);
