@@ -5445,15 +5445,33 @@ async function logoutSession() {
         if (avatarFrameWrap) {
             avatarFrameWrap.classList.remove('frame-style-1', 'frame-style-2', 'frame-style-3', 'frame-style-4', 'frame-subnet-static-pulse');
             avatarFrameWrap.classList.add(displayFrame);
+            // Esconde o label "MUDAR AVATAR" e o onclick em perfis de terceiros
+            const avatarOverlayLabel = avatarFrameWrap.querySelector('.avatar-overlay-label');
+            if (avatarOverlayLabel) avatarOverlayLabel.style.display = isOwner ? '' : 'none';
+            avatarFrameWrap.style.cursor = isOwner ? 'pointer' : 'default';
+            avatarFrameWrap.onclick = isOwner ? openAvatarSelector : null;
         }
         // Aplica os 3 efeitos visuais reais (glow de fundo, adereço de card,
         // estante) usando ESTRITAMENTE os cosméticos do perfil exibido.
         applyAllEquippedEffects(displayEquipped);
 
-        // Banner
+        // Banner — detecta se é gradient CSS ou URL de imagem
         const bannerEl = document.getElementById('profBannerView');
         if (bannerEl) {
-            bannerEl.style.backgroundImage = banner ? `url(${banner})` : '';
+            // Para visitantes de terceiros, usa o banner do targetProfile se disponível
+            const bannerValue = (!isOwner && targetProfile && targetProfile.banner)
+                ? targetProfile.banner
+                : banner;
+            if (!bannerValue) {
+                bannerEl.style.backgroundImage = '';
+                bannerEl.style.background = '';
+            } else if (bannerValue.startsWith('linear-gradient') || bannerValue.startsWith('radial-gradient')) {
+                bannerEl.style.backgroundImage = 'none';
+                bannerEl.style.background = bannerValue;
+            } else {
+                bannerEl.style.background = '';
+                bannerEl.style.backgroundImage = `url(${bannerValue})`;
+            }
         }
 
         // Saldo (somente para o próprio usuário)
@@ -5647,7 +5665,8 @@ async function logoutSession() {
                 await updateProfileInSupabase(currentUser.id, { avatar: a.imgSrc });
                 closeAvatarSelector();
             };
-            div.innerHTML = `<div class="album-preview-wrapper"><img src="${a.imgSrc}"></div>`;
+            const gifBadge = a.isAnimated ? '<span style="position:absolute;top:3px;right:3px;background:#ff00ff;color:#000;font-size:0.4rem;font-weight:bold;padding:1px 4px;border-radius:2px;z-index:2;">GIF</span>' : '';
+            div.innerHTML = `<div class="album-preview-wrapper" style="position:relative;">${gifBadge}<img src="${a.imgSrc}"></div>`;
             grid.appendChild(div);
         });
     }
@@ -6556,6 +6575,22 @@ async function purgeCardInSupabase(cardDbId, reason) {
         exposed: false, for_sale: false, is_listed: false
     }).eq('id', cardDbId);
     if (error) { console.error('purgeCardInSupabase:', error.message); return false; }
+
+    // Publica o card destruído no feed mutações_rede com selo PURGED
+    // O card precisa estar no cofre local para obtermos os metadados
+    const localCard = savedAssets.find(c => c.dbId === cardDbId || c.id === cardDbId);
+    if (localCard && currentUser.loggedIn) {
+        try {
+            await sb.from('eventos_globais').insert({
+                id_usuario: currentUser.id,
+                username: currentUser.username,
+                tipo: 'feed',
+                mensagem: `${currentUser.username} destruiu ${localCard.id} [${localCard.rarityNameEN || localCard.rarityType}] via ${reason || 'alquimia'}`,
+                card_payload: { ...localCard, isPurged: true, purgedReason: reason || 'fusao' }
+            });
+        } catch(e) { console.error('purgeCardInSupabase feed push:', e); }
+    }
+
     return true;
 }
 
@@ -7987,6 +8022,22 @@ function renderEquipmentInventory(isOwner) {
             ${ownedItems.map(equipmentInventoryItemMarkup).join('')}
         </div>
     `;
+}
+
+// Roteador de equipamento do inventário de relíquias:
+// • categoria 'moldura' / 'subnet' → lojaEquipFrame (avatar_frame)
+// • demais categorias (fundo, adereco, estante, emoticon) → lojaToggleCosmeticSlot
+async function lojaEquipItem(itemId, category) {
+    if (!currentUser || !currentUser.loggedIn) {
+        if (typeof showCyberAlert === 'function') showCyberAlert('ACESSO NEGADO', 'Faça login para equipar itens.', 'error');
+        return;
+    }
+    const cat = (category || '').toLowerCase();
+    if (cat === 'moldura' || cat === 'subnet' || cat.includes('frame')) {
+        await lojaEquipFrame(itemId);
+    } else {
+        await lojaToggleCosmeticSlot(itemId);
+    }
 }
 
 // Equipar uma moldura comprada na Loja (reaproveita setAvatarFrame, que já
