@@ -1582,7 +1582,17 @@ async function logoutSession() {
         } else {
             document.getElementById('tab-login').classList.remove('active'); document.getElementById('tab-register').classList.add('active');
             document.getElementById('authTitle').innerText = "REGISTRAR_NÓ"; document.getElementById('authSubmitBtn').innerText = "Consolidar Identidade";
-            registerOnlyEls.forEach(el => el.style.display = '');
+            // BUGFIX TELA DE REGISTRO: setar style.display = '' apenas remove o
+            // override INLINE — sem override, o elemento volta a cair na regra
+            // de classe ".register-only { display: none; }" do CSS (mesma
+            // especificidade, declarada depois no arquivo, então ela ganha e
+            // os campos continuam escondidos mesmo na aba "Registrar Nó").
+            // Setando um valor explícito por tipo de elemento (inline sempre
+            // vence a folha de estilos externa), o formulário de cadastro
+            // volta a aparecer corretamente.
+            registerOnlyEls.forEach(el => {
+                el.style.display = el.classList.contains('auth-checkbox-row') ? 'flex' : 'block';
+            });
             populateAgeSelectors();
             if (emailInput) emailInput.required = true;
             if (confirmInput) confirmInput.required = true;
@@ -2758,11 +2768,16 @@ async function logoutSession() {
 
         displayItems.forEach((a) => {
             const node = document.createElement('div');
-            node.className = 'story-node';
+            // [ESCOPO 4] Cards purgados (fundidos/destruídos) ganham a classe
+            // story-node--purged, que ativa via CSS o avatar dessaturado +
+            // borda vermelha pulsante + selo "✕"/DETONADA sobre a miniatura
+            // (ver .story-node--purged no CSS). O card continua passando
+            // normalmente na esteira — só fica visualmente marcado.
+            node.className = a.isPurged ? 'story-node story-node--purged' : 'story-node';
             node.addEventListener('click', () => openInspectModal(a));
             node.innerHTML = `
                 <div class="story-avatar-wrapper rare-${a.rarityType}"><img src="${a.imgSrc}"></div>
-                <div class="story-meta">${a.creator}<br><b>${a.id}</b></div>
+                <div class="story-meta">${a.creator}<br><b>${a.id}</b>${a.isPurged ? `<br><span style="color:#ff0033;">${currentLang === 'PT' ? 'DETONADA' : 'PURGED'}</span>` : ''}</div>
             `;
             container.appendChild(node);
         });
@@ -4536,8 +4551,21 @@ async function logoutSession() {
                 document.body.classList.remove('furnace-screen-shake');
                 glitchOverlay.remove();
 
-                // Remove os cards da memória local ANTES de decidir o resultado
-                savedAssets = savedAssets.filter(a => !idsConsumidos.includes(a.id));
+                // BUGFIX (cards purgados sumindo do cofre): antes, os cards
+                // consumidos eram removidos de savedAssets aqui e o selo
+                // PURGED/DETONADA era aplicado só nas cópias soltas em
+                // `snaps` (que nunca voltavam pro array) — resultado: o
+                // ativo desaparecia do cofre pra sempre em vez de continuar
+                // visível, marcado como detonado. Agora os originais
+                // permanecem no array; só fica marcado isPurged=true.
+                const purgeOriginaisDaFornalha = async (reason) => {
+                    for (const id of idsConsumidos) {
+                        const original = savedAssets.find(a => a.id === id);
+                        if (!original) continue;
+                        if (original._dbId) await purgeCardInSupabase(original._dbId, reason);
+                        markCardPurgedLocally(original, reason);
+                    }
+                };
 
                 const roll = Math.random();
                 let alertTitle, alertMsg, alertType;
@@ -4546,10 +4574,7 @@ async function logoutSession() {
                     // ── FALHA (80%): marca todos os cards selecionados como purged
                     // (continuam existindo como registro histórico/inspecionável,
                     // em vez de serem apagados sem deixar rastro) ──
-                    for (const snap of snaps) {
-                        if (snap._dbId) await purgeCardInSupabase(snap._dbId, 'fornalha_falha');
-                        markCardPurgedLocally(snap, 'fornalha_falha');
-                    }
+                    await purgeOriginaisDaFornalha('fornalha_falha');
                     // Concede Fragmentos de Sucata como compensação
                     const furnFragments = snaps.length * FRAGMENTS_PER_FURNACE_FAIL;
                     currentUser.fragments = (currentUser.fragments || 0) + furnFragments;
@@ -4568,10 +4593,7 @@ async function logoutSession() {
                 } else {
                     // ── SUCESSO (20%): marca originais como purged (consumidos pela
                     // mutação) + gera 1 card novo de alta raridade ──
-                    for (const snap of snaps) {
-                        if (snap._dbId) await purgeCardInSupabase(snap._dbId, 'fornalha_mutacao');
-                        markCardPurgedLocally(snap, 'fornalha_mutacao');
-                    }
+                    await purgeOriginaisDaFornalha('fornalha_mutacao');
 
                     const rarityRoll = Math.random();
                     const newRarity = rarityRoll < 0.55 ? 'ancestral' : 'legendary';
@@ -5044,27 +5066,28 @@ async function logoutSession() {
                 document.body.classList.remove('fusion-screen-shake');
                 glitchOverlay.remove();
     
-                // Remove cartas originais ANTES de qualquer resultado
-                // (Núcleo de Backup: se a fusão falhar, o card principal (c1) é preservado)
+                // BUGFIX (cards purgados sumindo do cofre): os cards originais
+                // (c1/c2) permanecem em savedAssets — nunca são removidos do
+                // array. Apenas são marcados isPurged=true quando consumidos,
+                // preservando o selo PURGED/DETONADA no cofre, no Inspect e
+                // no feed, em vez de desaparecerem por completo.
                 const insuranceWillSave = nucleoBackupAtivo && roll < pb;
-                savedAssets = savedAssets.filter(a => a.id !== id1 && a.id !== id2);
                 // Nota: cards em custódia no mercado (isListed) não podem ser fundidos
                 // (validado antes, no início de fuseCards), então não há necessidade
                 // de tocar em marketAssets/Supabase aqui.
-                if (insuranceWillSave) savedAssets.push(snap1); // c2 é consumido pelo seguro; c1 retorna ao cofre
     
                 // ── SUPABASE: marca como purged os cards realmente consumidos ──
                 // Se o seguro salvou c1, só c2 é purgado; senão, os dois são.
                 // Marcados como purged em vez de apagados: continuam existindo
                 // como registro histórico/inspecionável (selo PURGED/DETONADA).
                 if (insuranceWillSave) {
-                    if (snap2._dbId) await purgeCardInSupabase(snap2._dbId, 'fusao_sacrificio');
-                    markCardPurgedLocally(snap2, 'fusao_sacrificio');
+                    if (c2._dbId) await purgeCardInSupabase(c2._dbId, 'fusao_sacrificio');
+                    markCardPurgedLocally(c2, 'fusao_sacrificio');
                 } else {
-                    if (snap1._dbId) await purgeCardInSupabase(snap1._dbId, 'fusao_destruicao_total');
-                    if (snap2._dbId) await purgeCardInSupabase(snap2._dbId, 'fusao_destruicao_total');
-                    markCardPurgedLocally(snap1, 'fusao_destruicao_total');
-                    markCardPurgedLocally(snap2, 'fusao_destruicao_total');
+                    if (c1._dbId) await purgeCardInSupabase(c1._dbId, 'fusao_destruicao_total');
+                    if (c2._dbId) await purgeCardInSupabase(c2._dbId, 'fusao_destruicao_total');
+                    markCardPurgedLocally(c1, 'fusao_destruicao_total');
+                    markCardPurgedLocally(c2, 'fusao_destruicao_total');
                 }
     
                 let result, fusedCard, alertTitle, alertMsg, alertType;
@@ -6547,13 +6570,19 @@ function markCardPurgedLocally(card, reason) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// DOWNLOAD SEGURO — BUCKET PRIVADO high-res-assets (Supabase)
-// Gera uma Signed URL de 60s e dispara o download automaticamente.
-// O arquivo buscado é o ORIGINAL sorteado no momento do drop, salvo em
-// asset.resolutions.hd.src (ver loadDropImagePoolFromBucket e o bake do
-// card em executeHardwareRoll) — não é mais derivado do id do card,
-// porque o id é gerado aleatoriamente e nunca bateria com o nome real
-// do arquivo no bucket.
+// DOWNLOAD DO ATIVO — SEMPRE A ARTE DO JOGO, NUNCA O ARQUIVO ORIGINAL
+// BUGFIX: antes este botão buscava o arquivo BRUTO sorteado no bucket
+// privado high-res-assets do Supabase (asset.resolutions.hd.src) — ou
+// seja, a imagem original, sem nenhum dos filtros/efeitos do jogo.
+// As imagens originais NUNCA devem aparecer no drop nem no download.
+// Agora o download sempre usa asset.imgSrc — a mesma arte estática já
+// processada/baked pelos filtros do jogo, exibida no Cofre/Inspect/
+// Vitrine — re-renderizada em alta resolução (PNG).
+// Se a fusão gerou uma variante animada (asset.isAnimated === true,
+// modo "GIF" da fusão), o download sai como um .gif animado de
+// verdade, reaplicando o MESMO filtro de movimento (random-glitch ou
+// vortex-wave — ver getCardMotionFilter / MOTION_FILTER_VARIANTS) que
+// o card já exibe dentro do jogo, mantendo a arte modificada.
 // Chamada apenas pelo botão "Obter Item 📥" do cofre (downloadVaultAsset).
 // ═══════════════════════════════════════════════════════════════
 async function executeDoubleAssetDownload(asset) {
@@ -6565,63 +6594,147 @@ async function executeDoubleAssetDownload(asset) {
         return;
     }
 
-    const nomeDoArquivo = asset.resolutions?.hd?.src;
-    if (!nomeDoArquivo) {
-        showCyberAlert('SEM HD VINCULADO', 'Este card não tem um arquivo de alta resolução vinculado no bucket (mintado antes da integração ou pool vazio no momento do drop).', 'error');
+    if (!asset.imgSrc) {
+        showCyberAlert('SEM ARTE VINCULADA', 'Este card não tem uma imagem vinculada para download.', 'error');
         return;
     }
 
     const rawId = (asset.id || '').toString().replace('#', '');
-
-    showCyberAlert('COMPILANDO ATIVO...', 'Gerando link seguro de alta resolução. Aguarde.', 'info');
+    const baseName = `dr0p_${rawId}_${asset.rarityType || 'card'}_1000px`;
+    // Card mutado com filtro de movimento ativo → baixa GIF animado real.
+    // Card normal → baixa PNG estático em alta resolução.
+    const motionVariant = getCardMotionFilter(asset);
 
     try {
-        // Gera Signed URL — expira em 60 segundos
-        const { data, error } = await sb
-            .storage
-            .from('high-res-assets')
-            .createSignedUrl(nomeDoArquivo, 60);
-
-        if (error || !data?.signedUrl) {
-            console.error('[HD Download]', error);
-            showCyberAlert(
-                'ERRO DE ACESSO',
-                'Não foi possível gerar o link seguro. Verifique se o arquivo ainda existe no bucket.',
-                'error'
-            );
-            return;
+        if (motionVariant) {
+            showCyberAlert('COMPILANDO MUTAÇÃO...', 'Gerando GIF animado em alta resolução. Isso pode levar alguns segundos.', 'info');
+            const gifBlob = await _renderCardMotionAsGif(asset.imgSrc, motionVariant);
+            if (!gifBlob) throw new Error('Falha ao gerar o GIF animado.');
+            _triggerBlobDownload(gifBlob, `${baseName}.gif`);
+            showCyberAlert('✓ DOWNLOAD INICIADO', `GIF animado <b>${baseName}.gif</b> enviado para o seu dispositivo.`, 'success');
+        } else {
+            showCyberAlert('COMPILANDO ATIVO...', 'Gerando imagem estática em alta resolução. Aguarde.', 'info');
+            const pngBlob = await _renderStaticHdPng(asset.imgSrc);
+            if (!pngBlob) throw new Error('Falha ao gerar a imagem.');
+            _triggerBlobDownload(pngBlob, `${baseName}.png`);
+            showCyberAlert('✓ DOWNLOAD INICIADO', `Ativo HD <b>${baseName}.png</b> enviado para o seu dispositivo.`, 'success');
         }
-
-        // Faz fetch do blob para forçar download direto (sem abrir nova aba)
-        const resp = await fetch(data.signedUrl);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-        const blob = await resp.blob();
-        const objectUrl = URL.createObjectURL(blob);
-
-        const baseName = `dr0p_${rawId}_${asset.rarityType || 'card'}_1000px`;
-        // Detecta a extensão pelo tipo real do blob — se o arquivo original
-        // no bucket for um .gif, o download sai como .gif (animado), não png.
-        const ext = blob.type.includes('gif')  ? 'gif'
-                  : blob.type.includes('jpeg') ? 'jpg'
-                  : blob.type.includes('webp') ? 'webp'
-                  : 'png';
-
-        const a = document.createElement('a');
-        a.href = objectUrl;
-        a.download = `${baseName}.${ext}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
-
-        showCyberAlert('✓ DOWNLOAD INICIADO', `Ativo HD <b>${baseName}.${ext}</b> enviado para o seu dispositivo.`, 'success');
-
     } catch (err) {
-        console.error('[HD Download] Falha:', err);
+        console.error('[Download] Falha:', err);
         showCyberAlert('FALHA NO DOWNLOAD', 'Erro ao baixar o ativo. Tente novamente.', 'error');
     }
+}
+
+// Dispara o download de um Blob já gerado localmente, sem abrir nova aba.
+function _triggerBlobDownload(blob, filename) {
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+}
+
+// Re-renderiza asset.imgSrc (a arte JÁ modificada pelos filtros do jogo,
+// não o arquivo bruto do bucket) numa resolução maior, preservando a
+// proporção, e devolve um Blob PNG.
+function _renderStaticHdPng(srcDataUrl, targetSize = 1000) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            const scale = targetSize / Math.max(img.naturalWidth, img.naturalHeight);
+            const w = Math.max(1, Math.round(img.naturalWidth * scale));
+            const h = Math.max(1, Math.round(img.naturalHeight * scale));
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('toBlob falhou')), 'image/png');
+        };
+        img.onerror = () => reject(new Error('Falha ao carregar imagem de origem.'));
+        img.src = srcDataUrl;
+    });
+}
+
+// ── Reproduz em frames de canvas os MESMOS valores de
+// hue-rotate/saturate/brightness/transform das @keyframes CSS
+// motionRandomGlitch / motionVortexWave (ver injectMotionFilterStyles,
+// topo do arquivo), pra que o .gif baixado mostre exatamente a mesma
+// mutação visual que o card já exibe dentro do jogo. ──
+const MOTION_GIF_KEYFRAMES = {
+    'random-glitch': [
+        { hue: 0,   sat: 100, bri: 100, tx: 0,  ty: 0 },
+        { hue: 40,  sat: 180, bri: 100, tx: -3, ty: 3 },
+        { hue: -30, sat: 140, bri: 100, tx: 3,  ty: -3 },
+        { hue: 60,  sat: 200, bri: 100, tx: -3, ty: 0 },
+        { hue: -15, sat: 160, bri: 100, tx: 3,  ty: 3 },
+    ],
+    'vortex-wave': [
+        { hue: 0,   sat: 100, bri: 100, rot: 0,   scale: 1 },
+        { hue: 90,  sat: 100, bri: 108, rot: 0.8, scale: 1.008 },
+        { hue: 180, sat: 100, bri: 115, rot: 1.5, scale: 1.015 },
+        { hue: 90,  sat: 100, bri: 108, rot: 0.8, scale: 1.008 },
+    ],
+};
+
+// Busca o gif.worker.js como Blob (URL.createObjectURL), porque o
+// gif.js precisa rodar num Web Worker same-origin — buscar direto da
+// CDN cross-origin trava a criação do Worker no navegador.
+let _gifWorkerBlobUrlPromise = null;
+function _getGifWorkerBlobUrl() {
+    if (!_gifWorkerBlobUrlPromise) {
+        _gifWorkerBlobUrlPromise = fetch('https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js')
+            .then(r => { if (!r.ok) throw new Error('Falha ao buscar gif.worker.js'); return r.blob(); })
+            .then(blob => URL.createObjectURL(blob));
+    }
+    return _gifWorkerBlobUrlPromise;
+}
+
+// Gera o .gif animado real (via gif.js) a partir da arte já filtrada do
+// card (srcDataUrl = asset.imgSrc), aplicando a mesma variante de
+// movimento que o card usa dentro do jogo (random-glitch / vortex-wave).
+function _renderCardMotionAsGif(srcDataUrl, variant, targetSize = 1000) {
+    return new Promise((resolve, reject) => {
+        if (typeof GIF === 'undefined') { reject(new Error('gif.js não carregado.')); return; }
+        const frames = MOTION_GIF_KEYFRAMES[variant] || MOTION_GIF_KEYFRAMES['random-glitch'];
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = async () => {
+            try {
+                const scale = targetSize / Math.max(img.naturalWidth, img.naturalHeight);
+                const w = Math.max(1, Math.round(img.naturalWidth * scale));
+                const h = Math.max(1, Math.round(img.naturalHeight * scale));
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                const ctx = canvas.getContext('2d');
+
+                const workerScript = await _getGifWorkerBlobUrl();
+                const gif = new GIF({ workers: 2, quality: 10, width: w, height: h, workerScript });
+
+                frames.forEach(f => {
+                    ctx.clearRect(0, 0, w, h);
+                    ctx.save();
+                    ctx.filter = `hue-rotate(${f.hue}deg) saturate(${f.sat}%) brightness(${f.bri}%)`;
+                    ctx.translate(w / 2, h / 2);
+                    if (f.rot) ctx.rotate(f.rot * Math.PI / 180);
+                    if (f.scale) ctx.scale(f.scale, f.scale);
+                    ctx.translate(-w / 2 + (f.tx || 0), -h / 2 + (f.ty || 0));
+                    ctx.drawImage(img, 0, 0, w, h);
+                    ctx.restore();
+                    gif.addFrame(ctx, { copy: true, delay: 180 });
+                });
+
+                gif.on('finished', blob => resolve(blob));
+                gif.on('abort', () => reject(new Error('Geração do GIF abortada.')));
+                gif.render();
+            } catch (e) { reject(e); }
+        };
+        img.onerror = () => reject(new Error('Falha ao carregar imagem de origem.'));
+        img.src = srcDataUrl;
+    });
 }
 
 
