@@ -6503,7 +6503,7 @@ function cardToInsertRow(card, userId) {
 // LEITURA: carrega todo o cofre do usuário ao logar / restaurar sessão
 // =========================================================
 async function loadCardsFromSupabase(userId) {
-    const { data, error } = await sb.from('cards').select('*').eq('id_usuario', userId).order('created_at', { ascending: true });
+    const { data, error } = await sb.from('cards').select('*').eq('id_usuario', userId).eq('is_purged', false).order('created_at', { ascending: true });
     if (error) { console.error('loadCardsFromSupabase:', error.message); return []; }
     return data.map(rowToCard);
 }
@@ -6578,7 +6578,7 @@ async function purgeCardInSupabase(cardDbId, reason) {
 
     // Publica o card destruído no feed mutações_rede com selo PURGED
     // O card precisa estar no cofre local para obtermos os metadados
-    const localCard = savedAssets.find(c => c.dbId === cardDbId || c.id === cardDbId);
+    const localCard = savedAssets.find(c => c._dbId === cardDbId || c.id === cardDbId);
     if (localCard && currentUser.loggedIn) {
         try {
             await sb.from('eventos_globais').insert({
@@ -6602,6 +6602,11 @@ function markCardPurgedLocally(card, reason) {
     card.purgedAt = new Date().toISOString();
     card.purgedReason = reason || 'fusao';
     card.exposed = false; card.forSale = false; card.isListed = false;
+    // Remove do cofre em memória imediatamente — loadCardsFromSupabase já filtra
+    // is_purged=true no banco, mas sem isso o card voltaria a aparecer
+    // no cofre até o próximo reload de página.
+    const idx = savedAssets.indexOf(card);
+    if (idx !== -1) savedAssets.splice(idx, 1);
 }
 
 // ═══════════════════════════════════════════════════════════════
