@@ -453,6 +453,16 @@
         if (_globalRealtimeStarted) return; // evita assinar 2x (ex: hot reload / re-chamada acidental)
         _globalRealtimeStarted = true;
 
+        // LIMPEZA (5 MIN): dispara a função cleanup_expired_mutations()
+        // toda vez que alguém abre o site. É só uma REDE DE SEGURANÇA —
+        // a limpeza "de verdade" roda no banco via pg_cron a cada minuto
+        // (ver schema_patch_auto_cleanup.sql), mesmo sem ninguém online.
+        // Isso aqui só garante que, se o pg_cron não estiver habilitado
+        // no projeto, a limpeza ainda acontece sempre que há tráfego.
+        sb.rpc('cleanup_expired_mutations').then(({ error }) => {
+            if (error) console.warn('[cleanup_expired_mutations]', error.message);
+        });
+
         fetchAndSeedGlobalEvents();
 
         // Ledger + marquee: qualquer INSERT em eventos_globais (de QUALQUER
