@@ -150,8 +150,8 @@
                     <div class="price-card"><label data-i18n="lbl-creator">AUTOR DA MINTAGEM</label><div class="price-value" id="meta-owner">DESCONHECIDO</div></div>
                 </div>
 
-                <!-- [ESCOPO 4] Filtros avançados de busca — Free Roll + Premium Drop -->
-                <div class="drop-filters-bar" id="dropFiltersBar">
+                <!-- [ESCOPO 4] Filtros avançados de busca — Free Roll + Premium Drop (oculto visualmente; lógica JS preservada como easter egg) -->
+                <div class="drop-filters-bar" id="dropFiltersBar" style="display:none;">
                     <button type="button" class="drop-filter-toggle" id="dropFilterToggleBtn" onclick="toggleDropFiltersPanel()">
                         <span>▾ FILTROS_AVANÇADOS</span>
                         <span class="drop-filter-active-count" id="dropFilterActiveCount" style="display:none;">0</span>
@@ -220,7 +220,7 @@
                 </div>
 
                 <div class="terminal-faq-box">
-                    <div class="faq-title" data-i18n="faq-title" // TERMINAL_INFO</div>
+                    <div class="faq-title" data-i18n="faq-title">// TERMINAL_INFO</div>
                     <div class="faq-item">
                         <div class="faq-q" onclick="toggleFaq(this)" data-i18n="faq-q1">[+] O que é o dr0p_station?</div>
                         <div class="faq-a" data-i18n="faq-a1">▸ Plataforma P2P de cards digitais gerados por IA. Cada card é único, rastreado no registry e negociável em B$ (Bumps).</div>
@@ -270,9 +270,7 @@
                 <div class="auth-error" id="authErrorMsg">Chave inválida ou usuário não encontrado.</div>
                 <form onsubmit="handleAuthSubmit(event)">
                     <div class="auth-form-group">
-                        <label>@USERNAME
-                        
-        </label>
+                        <label>@USERNAME</label>
                         <input type="text" id="authUsername" class="auth-input" required placeholder="cyber_punk99" autocomplete="username">
                     </div>
                     <div class="auth-form-group register-only" id="authEmailGroup" style="display:none;">
