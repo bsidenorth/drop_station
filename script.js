@@ -987,7 +987,11 @@ async function logoutSession() {
     async function fetchAndSeedGlobalEvents() {
         _armGlobalFeedSafetyTimeout();
         const { data, error } = await sb.from('eventos_globais')
-            .select('*')
+            // ANTI-EGRESS: select(*) trazia TODAS as colunas (inclusive
+            // colunas grandes não usadas aqui) para os 50 últimos eventos,
+            // multiplicado por toda visita à página (até de visitantes
+            // deslogados). rowToLedgerEntry/rowToFeedCard só leem estas 4.
+            .select('id, mensagem, created_at, card_payload')
             .order('created_at', { ascending: false })
             .limit(50);
         clearTimeout(_globalFeedSafetyTimer);
@@ -1397,17 +1401,38 @@ async function logoutSession() {
                 .createSignedUrls(paths, 3600);
             if (signErr || !signedList) { console.error('[Pool de drops] Falha ao gerar signed URLs:', signErr?.message); return; }
 
-            signedList.forEach(item => {
-                if (!item.signedUrl) return;
-                const img = new Image(); img.crossOrigin = "anonymous"; img.src = item.signedUrl;
-                img.onload = () => {
-                    const off = document.createElement('canvas'); off.width = 600; off.height = 600;
-                    off.getContext('2d').drawImage(img, 0, 0, 600, 600);
-                    preloadedCanvases.push(off);
-                    preloadedCanvasPaths.push(item.path);
-                };
-                img.onerror = () => console.warn('[Pool de drops] Falha ao carregar do bucket:', item.path);
-            });
+            // BUGFIX: o código anterior usava .forEach() com img.onload assíncrono
+            // e NÃO esperava nada — loadDropImagePoolFromBucket() retornava (e a
+            // Promise de ensurePoolLoaded() resolvia) antes de qualquer imagem
+            // terminar de carregar. Resultado: o roll seguinte via
+            // preloadedCanvases.length === 0 mesmo com arquivos reais no bucket,
+            // e disparava o alerta falso de "BUCKET VAZIO". Agora usamos
+            // Promise.all, então a função só termina depois que CADA imagem do
+            // bucket já tentou carregar (sucesso ou falha).
+            const loadTasks = signedList
+                .filter(item => item.signedUrl)
+                .map(item => new Promise(resolve => {
+                    const img = new Image();
+                    img.crossOrigin = "anonymous";
+                    img.onload = () => {
+                        const off = document.createElement('canvas'); off.width = 600; off.height = 600;
+                        off.getContext('2d').drawImage(img, 0, 0, 600, 600);
+                        preloadedCanvases.push(off);
+                        preloadedCanvasPaths.push(item.path);
+                        resolve();
+                    };
+                    img.onerror = () => {
+                        console.warn('[Pool de drops] Falha ao carregar do bucket:', item.path);
+                        resolve(); // não trava o Promise.all por um arquivo corrompido/inacessível
+                    };
+                    img.src = item.signedUrl;
+                }));
+
+            await Promise.all(loadTasks);
+
+            if (preloadedCanvases.length === 0) {
+                console.warn('[Pool de drops] Nenhuma imagem do bucket conseguiu carregar (ver avisos acima).');
+            }
         } catch (e) {
             console.error('[Pool de drops] Erro inesperado ao carregar do bucket:', e);
         }
@@ -1415,11 +1440,23 @@ async function logoutSession() {
     // ── LAZY LOAD: pool só é carregado na primeira tentativa de drop,
     // não na abertura da página. Isso reduz egress do Supabase drasticamente
     // para visitantes que apenas navegam sem dropar.
+    // BUGFIX: antes, dois cliques rápidos em "Free Roll"/"Premium" antes do
+    // pool terminar de carregar disparavam DOIS list()+createSignedUrls()
+    // em paralelo (poolLoaded só virava true de forma síncrona, mas a
+    // promise de carregamento real não era compartilhada) — desperdiçando
+    // egress e podendo duplicar imagens em preloadedCanvases. Agora
+    // _poolLoadPromise guarda a Promise em andamento e toda chamada
+    // concorrente espera a MESMA promise em vez de disparar outra.
     let poolLoaded = false;
+    let _poolLoadPromise = null;
     async function ensurePoolLoaded() {
         if (poolLoaded || preloadedCanvases.length > 0) return;
-        poolLoaded = true;
-        await loadDropImagePoolFromBucket();
+        if (_poolLoadPromise) return _poolLoadPromise;
+        _poolLoadPromise = loadDropImagePoolFromBucket().finally(() => {
+            poolLoaded = true;
+            _poolLoadPromise = null;
+        });
+        return _poolLoadPromise;
     }
 
     function resizeCanvases() {
@@ -2564,16 +2601,17 @@ async function logoutSession() {
             } 
         }, 100);
 
-        setTimeout(() => {
+        setTimeout(async () => {
             clearInterval(tickInterval);
             targetContainer.classList.remove("rolling");
             document.getElementById('btnFree').classList.remove('disabled');
             document.getElementById('btnPremium').classList.remove('disabled');
 
-            if (preloadedCanvases.length === 0) {
-                // Aguarda o pool carregar antes de concluir que está vazio
-                await ensurePoolLoaded();
-            }
+            // Aguarda o pool carregar (e esperar TODAS as imagens decodificarem)
+            // antes de concluir que está vazio. ensurePoolLoaded() agora só
+            // resolve depois que cada Image() do bucket já chamou onload/onerror,
+            // então preloadedCanvases.length reflete a realidade do bucket.
+            await ensurePoolLoaded();
 
             if (preloadedCanvases.length === 0) {
                 isRolling = false;
@@ -6554,7 +6592,16 @@ function cardToInsertRow(card, userId) {
 // LEITURA: carrega todo o cofre do usuário ao logar / restaurar sessão
 // =========================================================
 async function loadCardsFromSupabase(userId) {
-    const { data, error } = await sb.from('cards').select('*').eq('id_usuario', userId).eq('is_purged', false).order('created_at', { ascending: true });
+    // ANTI-EGRESS: colunas explícitas (as mesmas que rowToCard lê) em vez
+    // de '*'. Limite de 500 cards por usuário evita que um cofre gigante
+    // (ou um bug de duplicação) puxe um payload sem teto a cada login.
+    const CARD_COLUMNS = 'id, display_id, rarity_type, rarity_name, rarity_name_en, style_name, style_name_en, creator, registered, exposed, for_sale, is_listed, price, img_src, tags, is_fused, fusion_count, elite_eligible, genetic_history, parent_ids, provenance_hash, provenance_timestamp, provenance_origin, is_tokenized, qr_code_hash, qr_payload_url, watermark_color, filter_style, resolutions, is_purged, purged_at, purged_reason, is_animated, animated_mime, created_at';
+    const { data, error } = await sb.from('cards')
+        .select(CARD_COLUMNS)
+        .eq('id_usuario', userId)
+        .eq('is_purged', false)
+        .order('created_at', { ascending: true })
+        .limit(500);
     if (error) { console.error('loadCardsFromSupabase:', error.message); return []; }
     return data.map(rowToCard);
 }
@@ -7070,7 +7117,13 @@ function rowToInventoryItem(row) {
 // LEITURA: carrega o inventário completo do usuário
 // =========================================================
 async function loadInventoryFromSupabase(userId) {
-    const { data, error } = await sb.from('inventario').select('*').eq('id_usuario', userId).order('created_at', { ascending: true });
+    // ANTI-EGRESS: colunas explícitas (as mesmas que rowToInventoryItem lê)
+    // em vez de '*', com teto de 1000 linhas por usuário.
+    const { data, error } = await sb.from('inventario')
+        .select('id, item_id, template_id, category, qty, created_at')
+        .eq('id_usuario', userId)
+        .order('created_at', { ascending: true })
+        .limit(1000);
     if (error) { console.error('loadInventoryFromSupabase:', error.message); return []; }
     return data.map(rowToInventoryItem);
 }
@@ -7084,8 +7137,10 @@ async function grantInventoryItem(userId, templateId, qty = 1) {
     if (!tpl) { console.warn('grantInventoryItem: template desconhecido', templateId); return null; }
 
     // Se já existe uma pilha desse item pro usuário, incrementa em vez de duplicar linha
+    // ANTI-EGRESS: só precisamos de id (pra fazer o update) e qty (pra
+    // incrementar) — não da linha inteira.
     const { data: existing, error: findErr } = await sb.from('inventario')
-        .select('*').eq('id_usuario', userId).eq('template_id', templateId).maybeSingle();
+        .select('id, qty').eq('id_usuario', userId).eq('template_id', templateId).maybeSingle();
     if (findErr) { console.error('grantInventoryItem (find):', findErr.message); return null; }
 
     if (existing) {
@@ -7202,11 +7257,17 @@ async function deleteInventoryItem(item) {
 // =========================================================
 
 async function loadMarketFromSupabase() {
+    // ANTI-EGRESS: mesma lista explícita de colunas usada em
+    // loadCardsFromSupabase (rowToCard não muda entre as duas leituras).
+    // Limite de 200 itens — o mercado P2P é uma vitrine pública pega por
+    // QUALQUER visitante (logado ou não), então sem teto aqui o egress
+    // escala com o número de visitas, não com o número de usuários reais.
     const { data, error } = await sb.from('cards')
-        .select('*')
+        .select('id, display_id, rarity_type, rarity_name, rarity_name_en, style_name, style_name_en, creator, registered, exposed, for_sale, is_listed, price, img_src, tags, is_fused, fusion_count, elite_eligible, genetic_history, parent_ids, provenance_hash, provenance_timestamp, provenance_origin, is_tokenized, qr_code_hash, qr_payload_url, watermark_color, filter_style, resolutions, is_purged, purged_at, purged_reason, is_animated, animated_mime, created_at')
         .eq('for_sale', true)
         .eq('is_listed', true)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(200);
     if (error) { console.error('loadMarketFromSupabase:', error.message); return []; }
     return data.map(rowToCard);
 }
@@ -8647,8 +8708,15 @@ function renderGlobalChatMessages() {
 }
 
 async function fetchAndSeedGlobalChat() {
+    // ANTI-EGRESS: colunas explícitas. Nota: is_broadcast NÃO existe na
+    // tabela chat_global (ver schema.sql) — pedir essa coluna no select
+    // causaria erro 400 do PostgREST ("column does not exist"), o que
+    // quebraria o carregamento do chat inteiro. m.is_broadcast no render
+    // continua undefined/falsy como já era (o glow de broadcast nunca
+    // chegou a funcionar porque a coluna nunca existiu; se quiserem esse
+    // recurso de fato, é preciso adicionar a coluna no schema primeiro).
     const { data, error } = await sb.from('chat_global')
-        .select('*')
+        .select('id, username, mensagem, cosmetics, created_at')
         .order('created_at', { ascending: false })
         .limit(50);
     if (error) { console.error('fetchAndSeedGlobalChat:', error.message); return; }
