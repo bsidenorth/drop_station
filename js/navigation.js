@@ -220,6 +220,20 @@
     function resumeMarquee() { document.getElementById('storiesContainer').classList.add('animated'); }
 
     function masterRenderLoop() {
+        // PERF FIX (travadeira geral): antes este loop rodava a 60fps pra
+        // sempre, em QUALQUER tela do app (perfil, loja, chat, etc.), mesmo
+        // com o canvas do drop fora de tela. Agora só redesenha de fato
+        // quando a tela #screen-engine (onde o canvas vive) está ativa.
+        // Nas outras telas, vira um polling bem mais leve (a cada 500ms)
+        // só pra saber quando o usuário volta — sem gastar CPU/GPU à toa.
+        const engineScreen = document.getElementById('screen-engine');
+        const isEngineActive = engineScreen && engineScreen.classList.contains('active');
+
+        if (!isEngineActive) {
+            setTimeout(masterRenderLoop, 500);
+            return;
+        }
+
         if (ctx && canvas) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             if (isRolling && preloadedCanvases.length > 0) {

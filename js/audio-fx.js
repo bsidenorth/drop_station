@@ -249,23 +249,26 @@
                 return;
             }
 
-            const paths = imageFiles.map(f => f.name);
+            // Embaralha a ordem antes de pedir as Signed URLs — assim o
+            // "primeiro arquivo carregado" não é sempre o mesmo (depende
+            // da ordem que o bucket devolve), e a galeria fica variada
+            // desde o primeiro drop de cada visitante.
+            const shuffled = imageFiles.slice().sort(() => Math.random() - 0.5);
+            const paths = shuffled.map(f => f.name);
+
             const { data: signedList, error: signErr } = await sb.storage
                 .from('high-res-assets')
                 .createSignedUrls(paths, 3600);
             if (signErr || !signedList) { console.error('[Pool de drops] Falha ao gerar signed URLs:', signErr?.message); return; }
 
-            // BUGFIX: o código anterior usava .forEach() com img.onload assíncrono
-            // e NÃO esperava nada — loadDropImagePoolFromBucket() retornava (e a
-            // Promise de ensurePoolLoaded() resolvia) antes de qualquer imagem
-            // terminar de carregar. Resultado: o roll seguinte via
-            // preloadedCanvases.length === 0 mesmo com arquivos reais no bucket,
-            // e disparava o alerta falso de "BUCKET VAZIO". Agora usamos
-            // Promise.all, então a função só termina depois que CADA imagem do
-            // bucket já tentou carregar (sucesso ou falha).
-            const loadTasks = signedList
-                .filter(item => item.signedUrl)
-                .map(item => new Promise(resolve => {
+            const queue = signedList.filter(item => item.signedUrl);
+            if (queue.length === 0) {
+                console.warn('[Pool de drops] Nenhuma signed URL válida retornada pelo bucket.');
+                return;
+            }
+
+            function loadOne(item) {
+                return new Promise(resolve => {
                     const img = new Image();
                     img.crossOrigin = "anonymous";
                     img.onload = () => {
@@ -273,16 +276,36 @@
                         off.getContext('2d').drawImage(img, 0, 0, 600, 600);
                         preloadedCanvases.push(off);
                         preloadedCanvasPaths.push(item.path);
-                        resolve();
+                        resolve(true);
                     };
                     img.onerror = () => {
                         console.warn('[Pool de drops] Falha ao carregar do bucket:', item.path);
-                        resolve(); // não trava o Promise.all por um arquivo corrompido/inacessível
+                        resolve(false); // não trava o carregamento por um arquivo corrompido/inacessível
                     };
                     img.src = item.signedUrl;
-                }));
+                });
+            }
 
-            await Promise.all(loadTasks);
+            // PERF FIX (drop demorando "uma vida" pra rolar): antes, esta
+            // função só terminava depois que TODAS as imagens do bucket
+            // (potencialmente centenas) tivessem sido baixadas e desenhadas
+            // — e o primeiro drop de qualquer sessão ficava bloqueado nesse
+            // Promise.all gigante. Agora carregamos só A PRIMEIRA imagem
+            // (suficiente pra liberar o roll imediatamente) e despachamos
+            // o resto do bucket em lotes pequenos, EM SEGUNDO PLANO, sem
+            // bloquear nenhum clique em Free Roll/Premium. A galeria vai
+            // ficando mais variada conforme o resto carrega, e cada drop
+            // sorteia dentre o que já estiver pronto naquele momento.
+            await loadOne(queue[0]);
+
+            const rest = queue.slice(1);
+            const BATCH_SIZE = 4;
+            (async function loadRestInBackground() {
+                for (let i = 0; i < rest.length; i += BATCH_SIZE) {
+                    const batch = rest.slice(i, i + BATCH_SIZE);
+                    await Promise.all(batch.map(loadOne));
+                }
+            })();
 
             if (preloadedCanvases.length === 0) {
                 console.warn('[Pool de drops] Nenhuma imagem do bucket conseguiu carregar (ver avisos acima).');
