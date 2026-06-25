@@ -2571,6 +2571,11 @@ async function logoutSession() {
             document.getElementById('btnPremium').classList.remove('disabled');
 
             if (preloadedCanvases.length === 0) {
+                // Aguarda o pool carregar antes de concluir que está vazio
+                await ensurePoolLoaded();
+            }
+
+            if (preloadedCanvases.length === 0) {
                 isRolling = false;
                 targetContainer.classList.remove("rolling");
                 stabilityWrapper.style.display = "none";
@@ -2669,7 +2674,7 @@ async function logoutSession() {
             activeAssetData = { 
                 id: generatedId, rarityType: rarityKey, rarityName: rarityName, rarityNameEN: rarityNameEN,
                 styleName: styleName, styleNameEN: styleNameEN, creator: currentUser.loggedIn ? currentUser.username : "OG DROP", 
-                registered: currentUser.loggedIn, exposed: false, forSale: false, price: 0, imgSrc: bakedBuffer.toDataURL(), costToClaim: claimCost,
+                registered: currentUser.loggedIn, exposed: false, forSale: false, price: 0, imgSrc: bakedBuffer.toDataURL('image/webp', 0.75), costToClaim: claimCost,
                 // ── BUCKET high-res-assets: guarda o arquivo ORIGINAL sorteado
                 // pra este card. É esse caminho (não o id do card) que
                 // "Obter Item" usa pra gerar a Signed URL do HD verdadeiro.
@@ -4850,7 +4855,7 @@ async function logoutSession() {
 
                 // [DEV CHANGER] Se modo GIF forçado, aplica filtros dinâmicos sobre o canvas final
                 if (typeof _applyDevGifFilters === 'function') { _applyDevGifFilters(canvas, SIZE); }
-                resolve(canvas.toDataURL());
+                resolve(canvas.toDataURL('image/webp', 0.75));
             };
             img.onerror = () => resolve(baseImgSrc); // fallback: usa imagem original sem efeito
             img.src = baseImgSrc;
