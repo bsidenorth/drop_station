@@ -827,8 +827,8 @@
     <div class="modal-overlay" id="inspectModal" onclick="closeInspectModal()">
         <div class="modal-card" onclick="event.stopPropagation()" style="border-color: #00ffff; text-align: center;">
             <h3 id="inspectTitle" style="color: #00ffff; font-family:'Archivo Black'; font-size:1.1rem;">INSPEÇÃO_DE_ATIVO</h3>
-            <p style="font-size:0.6rem; color:#666;" id="inspectSubtitle">CLIQUE PARA</p>
-            <div class="inspect-card-container"> INTERAGIR                 <div class="hologram-glow" id="holoGlow"></div>
+            <p style="font-size:0.6rem; color:#666;" id="inspectSubtitle">CLIQUE PARA INTERAGIR</p>
+            <div class="inspect-card-container"><div class="hologram-glow" id="holoGlow"></div>
                 <div class="inspect-card-3d" id="card3D" onmousemove="rotateCard(event)" onmouseleave="resetCardRotation()">
                     <img id="inspectImg" src="" alt="Preview">
                     <!-- [ESCOPO 4] Carimbo de card destruído — Alquimia/Fornalha/Fusão/dr0p_station.
@@ -852,7 +852,7 @@
     <!-- MODAL: CONTRATO — SELECIONAR CARDS -->
     <div class="modal-overlay" id="contractCardModal" onclick="closeContractCardModal()">
         <div class="modal-card" onclick="event.stopPropagation()" style="border-color:#ff6600; max-width:560px;">
-            <h3 style="color:#ff6600;">ALOCAR CARDS // <span id="contractModalTitle"></span></h3>
+            <h3 style="color:#ff6600;">ALOCAR PFP // <span id="contractModalTitle"></span></h3>
             <p style="font-size:0.6rem; color:#888899; margin-bottom:6px;" id="contractModalDesc"></p>
             <p style="font-size:0.6rem; color:#ffaa00; margin-bottom:14px;" id="contractModalReq"></p>
             <div id="contractCardSelectGrid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; max-height:280px; overflow-y:auto; margin-bottom:16px;"></div>
