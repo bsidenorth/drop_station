@@ -1412,7 +1412,15 @@ async function logoutSession() {
             console.error('[Pool de drops] Erro inesperado ao carregar do bucket:', e);
         }
     }
-    loadDropImagePoolFromBucket();
+    // ── LAZY LOAD: pool só é carregado na primeira tentativa de drop,
+    // não na abertura da página. Isso reduz egress do Supabase drasticamente
+    // para visitantes que apenas navegam sem dropar.
+    let poolLoaded = false;
+    async function ensurePoolLoaded() {
+        if (poolLoaded || preloadedCanvases.length > 0) return;
+        poolLoaded = true;
+        await loadDropImagePoolFromBucket();
+    }
 
     function resizeCanvases() {
         if(!canvas) return;
@@ -2519,8 +2527,10 @@ async function logoutSession() {
         return idx === -1 ? naturalIndex : idx;
     }
 
-    function executeHardwareRoll(isPremium) {
+    async function executeHardwareRoll(isPremium) {
         if (isRolling) return;
+        // Garante que o pool de imagens foi carregado (lazy load — só na primeira chamada)
+        await ensurePoolLoaded();
         // PREMIUM_DROP_PASS: bloqueia imediatamente se deslogado
         if (isPremium && !currentUser.loggedIn) {
             showCyberAlert('ACESSO_NEGADO:', currentLang === 'PT'
@@ -2776,7 +2786,7 @@ async function logoutSession() {
             node.className = a.isPurged ? 'story-node story-node--purged' : 'story-node';
             node.addEventListener('click', () => openInspectModal(a));
             node.innerHTML = `
-                <div class="story-avatar-wrapper rare-${a.rarityType}"><img src="${a.imgSrc}"></div>
+                <div class="story-avatar-wrapper rare-${a.rarityType}"><img src="${a.imgSrc}" loading="lazy"></div>
                 <div class="story-meta">${a.creator}<br><b>${a.id}</b>${a.isPurged ? `<br><span style="color:#ff0033;">${currentLang === 'PT' ? 'DETONADA' : 'PURGED'}</span>` : ''}</div>
             `;
             container.appendChild(node);
@@ -2921,7 +2931,7 @@ async function logoutSession() {
                 : '';
             card.innerHTML = `
                 ${custodyBadge}
-                <div class="album-preview-wrapper"><img src="${a.imgSrc}" draggable="false"></div>
+                <div class="album-preview-wrapper"><img src="${a.imgSrc}" draggable="false" loading="lazy"></div>
                 ${a.forSale ? `<div class="market-badge">${a.price} B$</div>` : ''}
                 <div class="album-meta">
                     <div class="album-id">${a.id}</div>
@@ -3321,7 +3331,7 @@ async function logoutSession() {
             const card = document.createElement('div');
             card.className = `album-card rare-${a.rarityType}`;
             card.innerHTML = `
-                <div class="album-preview-wrapper"><img src="${a.imgSrc}"></div>
+                <div class="album-preview-wrapper"><img src="${a.imgSrc}" loading="lazy"></div>
                 <div class="album-meta">
                     <div class="album-id">${a.id} <span style="font-size:0.6rem; color:#00ff66; cursor:pointer;" class="ext-profile">by ${a.creator}</span></div>
                     <div class="album-price">${a.price} B$</div>
@@ -5666,7 +5676,7 @@ async function logoutSession() {
                 closeAvatarSelector();
             };
             const gifBadge = a.isAnimated ? '<span style="position:absolute;top:3px;right:3px;background:#ff00ff;color:#000;font-size:0.4rem;font-weight:bold;padding:1px 4px;border-radius:2px;z-index:2;">GIF</span>' : '';
-            div.innerHTML = `<div class="album-preview-wrapper" style="position:relative;">${gifBadge}<img src="${a.imgSrc}"></div>`;
+            div.innerHTML = `<div class="album-preview-wrapper" style="position:relative;">${gifBadge}<img src="${a.imgSrc}" loading="lazy"></div>`;
             grid.appendChild(div);
         });
     }
