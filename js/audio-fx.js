@@ -365,20 +365,23 @@
                 }
             }
 
-            // PERF FIX (drop demorando "uma vida" pra rolar): antes, esta
-            // função só terminava depois que TODAS as imagens do bucket
-            // (potencialmente centenas) tivessem sido baixadas e desenhadas
-            // — e o primeiro drop de qualquer sessão ficava bloqueado nesse
-            // Promise.all gigante. Agora carregamos só A PRIMEIRA imagem
-            // (suficiente pra liberar o roll imediatamente) e despachamos
-            // o resto do bucket em lotes pequenos, EM SEGUNDO PLANO, sem
-            // bloquear nenhum clique em Free Roll/Premium. A galeria vai
-            // ficando mais variada conforme o resto carrega, e cada drop
-            // sorteia dentre o que já estiver pronto naquele momento.
-            await loadOne(queue[0]);
+            // PERF FIX (drop demorando "uma vida" pra rolar) + VARIEDADE
+            // NO ROLL: a versão anterior carregava só A PRIMEIRA imagem
+            // antes de liberar o roll — rápido, mas a animação de "sorteio"
+            // (e até o resultado minerado) ficavam ENROSCADOS nessa única
+            // imagem, já que o pool só tinha 1 opção pra sortear até o
+            // carregamento em segundo plano alcançar. Agora carregamos um
+            // pequeno LOTE inicial (em paralelo) antes de liberar — ainda
+            // MUITO mais rápido que esperar o bucket inteiro (que pode ter
+            // centenas de arquivos), mas já dá variedade real pra animação
+            // misturar imagens em vez de repetir sempre a mesma. O resto do
+            // bucket continua carregando em segundo plano, em lotes, sem
+            // bloquear nenhum clique em Free Roll/Premium.
+            const INITIAL_BATCH_SIZE = Math.min(8, queue.length);
+            const initialBatch = queue.slice(0, INITIAL_BATCH_SIZE);
+            await Promise.all(initialBatch.map(loadOne));
 
-
-            const rest = queue.slice(1);
+            const rest = queue.slice(INITIAL_BATCH_SIZE);
             const BATCH_SIZE = 4;
             (async function loadRestInBackground() {
                 for (let i = 0; i < rest.length; i += BATCH_SIZE) {
