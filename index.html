@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>DR0P_STATION // MUTATION_ENGINE</title>
+    <title>dr0p_station // MUTATION_NETWORK</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
@@ -96,7 +96,7 @@
                 </button>
             </div>
 
-            <div class="sys-info"><b>STATUS_ENGINE:</b> <span style="color:#00ff66;"><b><i>ONLINE</i></b></span></div>
+            <div class="sys-info"><b>STATUS_ENGINE:</b> <span style="color:#00ff66;"><b>ONLINE</b></span></div>
         </div>
     </header>
 
@@ -138,7 +138,7 @@
                         </svg>
                     </span>
                     <span class="dl-label">RESGATAR ATIVO</span>
-                    <span class="dl-sub">↓ STATIC + ANIMATED</span>
+                    <span class="dl-sub">↓</span>
                 </button>
             </div>
 
@@ -147,7 +147,7 @@
                     <div class="price-card"><label data-i18n="lbl-id">CÓDIGO ID CARD</label><div class="price-value" id="meta-id">#000000</div></div>
                     <div class="price-card"><label data-i18n="lbl-rarity">RARIDADE</label><div class="price-value" id="meta-rarity">AGUARDANDO...</div></div>
                     <div class="price-card"><label data-i18n="lbl-style">ESTILO VISUAL</label><div class="price-value" id="meta-style">NENHUM</div></div>
-                    <div class="price-card"><label data-i18n="lbl-creator">AUTOR DA MINTAGEM</label><div class="price-value" id="meta-owner">-</div></div>
+                    <div class="price-card"><label data-i18n="lbl-creator">AUTOR DA MINTAGEM</label><div class="price-value" id="meta-owner">DESCONHECIDO</div></div>
                 </div>
 
                 <!-- [ESCOPO 4] Filtros avançados de busca — Free Roll + Premium Drop -->
@@ -161,9 +161,9 @@
                             <label>RARIDADE_ALVO</label>
                             <div class="drop-filter-tags" id="dropRarityFilterTags">
                                 <button type="button" class="drop-filter-tag active" data-rarity="all" onclick="setDropRarityFilter('all')">TODAS</button>
-                                <button type="button" class="drop-filter-tag" data-rarity="common" onclick="setDropRarityFilter('common')">COMMON</button>
-                                <button type="button" class="drop-filter-tag" data-rarity="epic" onclick="setDropRarityFilter('epic')">EPIC</button>
-                                <button type="button" class="drop-filter-tag" data-rarity="legendary" onclick="setDropRarityFilter('legendary')">LEGENDARY</button>
+                                <button type="button" class="drop-filter-tag" data-rarity="common" onclick="setDropRarityFilter('common')">COMUM</button>
+                                <button type="button" class="drop-filter-tag" data-rarity="epic" onclick="setDropRarityFilter('epic')">ÉPICO</button>
+                                <button type="button" class="drop-filter-tag" data-rarity="legendary" onclick="setDropRarityFilter('legendary')">LENDÁRIO</button>
                                 <button type="button" class="drop-filter-tag" data-rarity="ancestral" onclick="setDropRarityFilter('ancestral')" style="border-color:#ff007f; color:#ff007f;">ANCESTRAL</button>
                             </div>
                         </div>
@@ -266,7 +266,7 @@
                     <button class="auth-tab-btn" id="tab-register" onclick="switchAuthMode('register')">Registrar Nó</button>
                 </div>
                 <h2 id="authTitle">ENTRAR NA REDE</h2>
-                <div class="auth-subtitle" id="authSubtitle">Acessar terminal seguro do dr0p_station.</div>
+                <div class="auth-subtitle" id="authSubtitle">Acessar terminal do dr0p_station.</div>
                 <div class="auth-error" id="authErrorMsg">Chave inválida ou usuário não encontrado.</div>
                 <form onsubmit="handleAuthSubmit(event)">
                     <div class="auth-form-group">
@@ -317,32 +317,6 @@
             <div id="contractsGrid" class="contracts-grid"></div>
         </div>
     </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         SCREEN: LOJA — [ESCOPO 2] Sistema de abas horizontais dinâmicas
-    ════════════════════════════════════════════════════════════════ -->
-    <div id="screen-loja" class="spa-screen">
-        <div class="vault-layout">
-            <div class="vault-header vault-header-compact">
-                <h2 style="color:#ffaa00;">MERCADO_NEGRO // SPIKE STORE</h2>
-                <p style="font-size:0.65rem; color:#888899;">Adquira cosméticos, molduras e upgrades de ostentação para sua identidade na rede.</p>
-            </div>
-
-            <!-- Abas de categoria da loja — [ESCOPO 2] mais compactas -->
-            <div class="loja-tab-bar loja-tab-bar-compact" id="lojaTabBar">
-                <button class="loja-tab active" data-tab="all"      onclick="setLojaTab('all')">TODOS</button>
-                <button class="loja-tab" data-tab="molduras"        onclick="setLojaTab('molduras')">MOLDURAS</button>
-                <button class="loja-tab" data-tab="estantes"        onclick="setLojaTab('estantes')">ESTANTES</button>
-                <button class="loja-tab" data-tab="temas"           onclick="setLojaTab('temas')">TEMAS</button>
-                <button class="loja-tab" data-tab="cosmeticos"      onclick="setLojaTab('cosmeticos')">COSMÉTICOS</button>
-                <button class="loja-tab" data-tab="emotes"          onclick="setLojaTab('emotes')">CYBER_EMOTES</button>
-            </div>
-
-            <!-- Grid dos itens da loja — populado pelo script.js via renderLojaGrid() -->
-            <div id="lojaScreen" class="loja-screen-compact"></div>
-        </div>
-    </div>
-
     <!-- ═══════════════════════════════════════════════════════════════
          SCREEN: VAULT (Cofre)
     ════════════════════════════════════════════════════════════════ -->
@@ -359,8 +333,8 @@
                 <button class="filter-btn" style="border-color:#ff00ff; color:#ff00ff;" onclick="toggleAlchemyPanel()">⚗️ ALQUIMIA</button>
                 <button class="filter-btn" style="border-color:#ffaa00; color:#ffaa00; margin-left:auto;" onclick="toggleArenaPanel()">🎲 ARENA DE APOSTAS</button>
             </div>
-
-            <!-- ARENA DE APOSTAS -->
+            
+         <!-- ARENA DE APOSTAS -->
             <div id="arenaApostasPanel" style="display:none; background:#0a0700; border:1px solid #ffaa00; padding:20px; margin-bottom:20px;">
                 <div id="arenaMenuView">
                     <div style="color:#ffaa00; font-weight:bold; font-size:0.75rem; letter-spacing:2px; margin-bottom:4px;">🎲 ARENA DE APOSTAS // ESCOLHA SEU PROTOCOLO</div>
@@ -422,24 +396,24 @@
                     </div>
                     <p style="font-size:0.6rem; color:#888899; margin-bottom:14px;" id="alchDesc">Seleciona 2 cards do cofre para fundir. Os originais serão <b style="color:#ff0044">DESTRUÍDOS</b>. Resultado garantido mas raridade é probabilística.</p>
                     <div class="alchemy-gallery-wrap">
-                        <span class="alchemy-gallery-label">▶ CLIQUE PARA SELECIONAR CARD_ALPHA  e CARD_BETA </span>
+                        <span class="alchemy-gallery-label">▶ CLIQUE PARA SELECIONAR PFP_PRIMARIO  e PFP_SECUNDARIO </span>
                         <div class="alchemy-gallery-grid" id="alchGalleryGrid"></div>
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 0;" id="alchSlotContainer">
                         <div class="alchemy-card-slot">
-                            <label>CARD_ALPHA</label>
+                            <label>PFP_PRIMARIO</label>
                             <select id="fuseCard1" style="display:none;"></select>
                             <div class="alchemy-card-preview" id="previewSlot1">
-                                <div class="alch-empty-slot">⚗<span>ALPHA VAZIO</span></div>
+                                <div class="alch-empty-slot">⚗<span>VAZIO</span></div>
                             </div>
                             <div class="alch-slot-name" id="alchSlotName1">—</div>
                         </div>
-                        <div class="alchemy-card-slot" style="flex:0; align-self:center; font-size:1.5rem; color:#ff00ff; text-shadow:0 0 15px #ff00ff; min-width:30px; text-align:center;">⚡</div>
+                        <div class="alchemy-card-slot" style="flex:0; align-self:center; font-size:1.5rem; color:#ff00ff; text-shadow:0 0 15px #ff00ff; min-width:30px; text-align:center;">⚡ </div>
                         <div class="alchemy-card-slot">
-                            <label>CARD_BETA</label>
+                            <label>PFP_SECUNDARIO</label>
                             <select id="fuseCard2" style="display:none;"></select>
                             <div class="alchemy-card-preview" id="previewSlot2">
-                                <div class="alch-empty-slot">⚗<span>BETA VAZIO</span></div>
+                                <div class="alch-empty-slot">⚗<span>VAZIO</span></div>
                             </div>
                             <div class="alch-slot-name" id="alchSlotName2">—</div>
                         </div>
@@ -448,7 +422,7 @@
                         <div style="color:#ff00ff; font-size:0.55rem; font-weight:bold; margin-bottom:8px; letter-spacing:1px;">MATRIZ DE PROBABILIDADE</div>
                         <div class="prob-row"><span class="prob-success">✓ SUCESSO ÉPICO+</span><span id="probSuccess">—</span></div>
                         <div class="prob-row"><span class="prob-break">✕ FALHA / CARTA QUEBRA</span><span id="probBreak">—</span></div>
-                        <div class="prob-row"><span class="prob-common">◆ ITEM COMUM</span><span id="probCommon">—</span></div>
+                        <div class="prob-row"><span class="prob-common"> ITEM COMUM</span><span id="probCommon">—</span></div>
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
                         <button class="btn-action" style="border-color:#ff00ff; background:#ff00ff; color:#000; font-weight:bold;" onclick="fuseCards(document.getElementById('fuseCard1').value, document.getElementById('fuseCard2').value)">⚡ EXECUTAR FUSÃO</button>
@@ -462,7 +436,7 @@
                     </div>
                     <p style="font-size:0.6rem; color:#ffaa0099; margin-bottom:14px;">Seleciona até 3 ativos de baixa raridade pra derreter no núcleo. <b style="color:#ff5500">80% DE CHANCE DE DESTRUIÇÃO TOTAL</b>. 20% de chance de MUTAÇÃO MÁXIMA (Lendário/Ancestral).</p>
                     <div class="alchemy-gallery-wrap furnace-gallery-wrap">
-                        <span class="alchemy-gallery-label furnace-gallery-label">▶ CLIQUE PARA SELECIONAR ATÉ 3 CARDS PARA A FORNALHA</span>
+                        <span class="alchemy-gallery-label furnace-gallery-label">▶ CLIQUE PARA SELECIONAR ATÉ 3 PFPs PARA A FORNALHA</span>
                         <div class="alchemy-gallery-grid furnace-gallery-grid" id="furnGalleryGrid"></div>
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 0;" id="furnSlotContainer">
@@ -492,7 +466,7 @@
     ════════════════════════════════════════════════════════════════ -->
     <div id="screen-market" class="spa-screen">
         <div class="vault-layout">
-            <div class="vault-header"><h2 style="color: #ffaa00;" data-i18n="market-title">MERCADO P2P DIRECT</h2><p>Negocie ou envie propostas de troca de cards criptograficos.</p></div>
+            <div class="vault-header"><h2 style="color: #ffaa00;" data-i18n="market-title">MERCADO DIRETO</h2><p>Envie propostas de troca, venda e negocie suas PFPs exclusivas </p></div>
 
             <!-- LEDGER DE TRANSAÇÕES — [ESCOPO 4] maior, fontes maiores, avatares -->
             <div id="marketLedgerBox" class="market-ledger-expanded" style="display:none;">
@@ -503,9 +477,9 @@
             <div class="filter-bar" id="marketFilterBar">
                 <label>FILTRAR:</label>
                 <button class="filter-btn active" data-filter="all"       onclick="setMarketFilter('all')">TODOS</button>
-                <button class="filter-btn"         data-filter="common"    onclick="setMarketFilter('common')">COMMON</button>
-                <button class="filter-btn"         data-filter="epic"      onclick="setMarketFilter('epic')">EPIC</button>
-                <button class="filter-btn"         data-filter="legendary" onclick="setMarketFilter('legendary')">LEGENDARY</button>
+                <button class="filter-btn"         data-filter="common"    onclick="setMarketFilter('common')">COMUM</button>
+                <button class="filter-btn"         data-filter="epic"      onclick="setMarketFilter('epic')">ÉPICO</button>
+                <button class="filter-btn"         data-filter="legendary" onclick="setMarketFilter('legendary')">LENDÁRIO</button>
                 <button class="filter-btn"         data-filter="ancestral" onclick="setMarketFilter('ancestral')" style="border-color:#ff007f; color:#ff007f;">ANCESTRAL</button>
             </div>
             <div class="album-grid" id="marketGrid"></div>
@@ -530,7 +504,7 @@
                         <div class="deal-asset-meta">
                             <img src="" id="dealAssetImg" class="deal-asset-img">
                             <div>
-                                <span style="color:#ff00ff; font-weight:bold;">CARD EM NEGOCIAÇÃO</span>
+                                <span style="color:#ff00ff; font-weight:bold;">PFP EM NEGOCIAÇÃO</span>
                                 <div id="dealAssetTitle" style="font-weight:700;">#000000</div>
                             </div>
                         </div>
@@ -558,9 +532,9 @@
                                 <input type="number" id="counterBumpsInput" class="chat-input" style="padding:6px; width:110px;" placeholder="0 B$">
                             </div>
                             <div style="display:flex; flex-direction:column; gap:2px; flex:1;">
-                                <label style="font-size:0.5rem; color:#556;">ADICIONAR FIGURINHA DO SEU COFRE COMO TROCA</label>
+                                <label style="font-size:0.5rem; color:#556;">ADICIONAR PFP DO SEU COFRE COMO TROCA</label>
                                 <select id="counterAssetSelect" class="counter-select-pfp">
-                                    <option value="">-- NENHUMA FIGURINHA SELECIONADA --</option>
+                                    <option value="">-- NENHUMA PFP SELECIONADA --</option>
                                 </select>
                             </div>
                             <button class="btn-action" style="border-color:#ffaa00; width:140px; margin-top:12px;" onclick="submitCounterProposal()">ENVIAR OFERTA</button>
@@ -715,7 +689,7 @@
     <div class="modal-overlay" id="sendGiftModal" onclick="closeSendGiftModal()">
         <div class="modal-card send-gift-card" onclick="event.stopPropagation()" style="border-color:#ff00ff; max-width:440px;">
             <h3 style="color:#ff00ff;">PRESENTE_CRIPTOGRAFADO // ENVIO_DIRETO</h3>
-            <p style="font-size:0.6rem; color:#888899; margin-bottom:14px;">Card selecionado: <b id="giftCardLabel" style="color:#00ffff;">#000000</b>. Esta ação transfere o ativo permanentemente — sem estorno.</p>
+            <p style="font-size:0.6rem; color:#888899; margin-bottom:14px;">PFP selecionado: <b id="giftCardLabel" style="color:#00ffff;">#000000</b>. Esta ação transfere o ativo permanentemente — sem estorno.</p>
             <label style="font-size:0.55rem; color:#ff00ff; letter-spacing:1px;">@USERNAME_DO_DESTINATÁRIO</label>
             <input type="text" id="giftTargetUsernameInput" class="auth-input" placeholder="cyber_k1ng" autocomplete="off" style="margin-bottom:6px;">
             <div id="giftTargetStatus" class="gift-target-status" style="min-height:12px;"></div>
@@ -853,9 +827,8 @@
     <div class="modal-overlay" id="inspectModal" onclick="closeInspectModal()">
         <div class="modal-card" onclick="event.stopPropagation()" style="border-color: #00ffff; text-align: center;">
             <h3 id="inspectTitle" style="color: #00ffff; font-family:'Archivo Black'; font-size:1.1rem;">INSPEÇÃO_DE_ATIVO</h3>
-            <p style="font-size:0.6rem; color:#666;" id="inspectSubtitle">ARRASTE PARA ROTACIONAR EM 360°</p>
-            <div class="inspect-card-container">
-                <div class="hologram-glow" id="holoGlow"></div>
+            <p style="font-size:0.6rem; color:#666;" id="inspectSubtitle">CLIQUE PARA</p>
+            <div class="inspect-card-container"> INTERAGIR                 <div class="hologram-glow" id="holoGlow"></div>
                 <div class="inspect-card-3d" id="card3D" onmousemove="rotateCard(event)" onmouseleave="resetCardRotation()">
                     <img id="inspectImg" src="" alt="Preview">
                     <!-- [ESCOPO 4] Carimbo de card destruído — Alquimia/Fornalha/Fusão/dr0p_station.
