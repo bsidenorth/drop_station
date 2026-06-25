@@ -4636,6 +4636,10 @@ async function logoutSession() {
                     };
                     attachProvenance(newCard);
                     newCard.provenance.parentIds = idsConsumidos;
+                    // Upload imagem pro Storage antes de gravar no banco
+                    if (newCard.imgSrc && newCard.imgSrc.startsWith('data:')) {
+                        newCard.imgSrc = await uploadCardImageToBucket(newCard.imgSrc, newCard.id);
+                    }
                     savedAssets.push(newCard);
 
                     const inserted = await insertCardToSupabase(newCard, currentUser.id);
@@ -5142,6 +5146,10 @@ async function logoutSession() {
                     };
                     // ── PROVENIÊNCIA: novo hash exclusivo do card fundido ──
                     attachProvenance(fusedCard);
+                    // Upload imagem pro Storage antes de gravar no banco
+                    if (fusedCard.imgSrc && fusedCard.imgSrc.startsWith('data:')) {
+                        fusedCard.imgSrc = await uploadCardImageToBucket(fusedCard.imgSrc, fusedCard.id);
+                    }
                     savedAssets.push(fusedCard);
                     // ── SUPABASE: grava o novo card resultante da fusão ──
                     const insertedCommon = await insertCardToSupabase(fusedCard, currentUser.id);
@@ -5213,6 +5221,10 @@ async function logoutSession() {
                     // ── PROVENIÊNCIA: hash exclusivo + herança de linhagem (já regenera o QR) ──
                     attachProvenance(fusedCard);
                     fusedCard.provenance.parentIds = [id1, id2]; // rastreabilidade de linhagem
+                    // Upload imagem pro Storage antes de gravar no banco
+                    if (fusedCard.imgSrc && fusedCard.imgSrc.startsWith('data:')) {
+                        fusedCard.imgSrc = await uploadCardImageToBucket(fusedCard.imgSrc, fusedCard.id);
+                    }
                     savedAssets.push(fusedCard);
                     // ── SUPABASE: grava o novo card resultante da fusão ──
                     const insertedSuccess = await insertCardToSupabase(fusedCard, currentUser.id);
@@ -6470,6 +6482,30 @@ function rowToCard(row) {
     };
 }
 
+// =========================================================
+// UPLOAD DE IMAGEM DO CARD PARA O SUPABASE STORAGE
+// Em vez de salvar base64 no banco (que infla o Database Size),
+// fazemos upload do PNG renderizado para o bucket 'card-assets'
+// e gravamos só a URL pública na coluna img_src.
+// =========================================================
+async function uploadCardImageToBucket(imgSrc, displayId) {
+    try {
+        // Converte dataURL base64 para Blob
+        const res = await fetch(imgSrc);
+        const blob = await res.blob();
+        const fileName = `${displayId.replace('#', '')}_${Date.now()}.png`;
+        const { data, error } = await sb.storage
+            .from('card-assets')
+            .upload(fileName, blob, { contentType: 'image/png', upsert: false, cacheControl: '31536000' });
+        if (error) { console.error('uploadCardImageToBucket:', error.message); return imgSrc; } // fallback: base64
+        const { data: pub } = sb.storage.from('card-assets').getPublicUrl(data.path);
+        return pub?.publicUrl || imgSrc;
+    } catch (e) {
+        console.error('uploadCardImageToBucket erro:', e);
+        return imgSrc; // fallback: base64
+    }
+}
+
 function cardToInsertRow(card, userId) {
     return {
         id_usuario: userId,
@@ -6840,6 +6876,13 @@ async function claimAssetLogic() {
 
         // ── PROVENIÊNCIA: injeta hash + timestamp de nascimento ──
         attachProvenance(assetSnapshot);
+
+        // ── UPLOAD DA IMAGEM: substitui base64 por URL do Storage ──
+        // Isso reduz drasticamente o tamanho do banco (img_src era uma string
+        // base64 enorme; agora é só uma URL curta).
+        if (assetSnapshot.imgSrc && assetSnapshot.imgSrc.startsWith('data:')) {
+            assetSnapshot.imgSrc = await uploadCardImageToBucket(assetSnapshot.imgSrc, assetSnapshot.id);
+        }
 
         // Salvaguarda extra: impede duplicado se ID já existir no cofre
         const alreadyOwned = savedAssets.some(a => a.id === assetSnapshot.id);
