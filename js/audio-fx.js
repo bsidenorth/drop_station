@@ -232,6 +232,68 @@
         }
     }
 
+    // =========================================================
+    // CACHE PERSISTENTE (IndexedDB) DO POOL DE DROPS
+    // EGRESS FIX: o bucket high-res-assets é privado, então só pode ser
+    // servido via Signed URL — e cada Signed URL é ÚNICA a cada
+    // carregamento. Isso IMPEDE o cache HTTP normal do navegador (pra
+    // ele, é sempre "um arquivo novo"), e fazia o bucket inteiro ser
+    // rebaixado em TODA visita/F5 de TODO visitante — inflando o Egress
+    // do projeto sem necessidade real (Storage real do bucket é minúsculo
+    // comparado ao Egress consumido).
+    // Aqui guardamos os BYTES de cada imagem (não a URL, que muda) num
+    // IndexedDB local. Na próxima vez que o MESMO navegador precisar da
+    // MESMA imagem, ela é lida do disco local — zero rede, zero egress.
+    // =========================================================
+    const DROP_CACHE_DB_NAME = 'dr0p_station_cache';
+    const DROP_CACHE_STORE   = 'drop_images';
+    const DROP_CACHE_TTL_MS  = 24 * 60 * 60 * 1000; // 24h — depois disso, revalida com o bucket
+
+    let _dropCacheDbPromise = null;
+    function _openDropCacheDb() {
+        if (_dropCacheDbPromise) return _dropCacheDbPromise;
+        _dropCacheDbPromise = new Promise((resolve) => {
+            if (!('indexedDB' in window)) { resolve(null); return; }
+            try {
+                const req = indexedDB.open(DROP_CACHE_DB_NAME, 1);
+                req.onupgradeneeded = () => {
+                    req.result.createObjectStore(DROP_CACHE_STORE, { keyPath: 'path' });
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => resolve(null); // falha de IndexedDB nunca deve travar o jogo
+            } catch (e) { resolve(null); }
+        });
+        return _dropCacheDbPromise;
+    }
+
+    async function _getCachedDropImage(path) {
+        try {
+            const db = await _openDropCacheDb();
+            if (!db) return null;
+            return await new Promise(resolve => {
+                const tx = db.transaction(DROP_CACHE_STORE, 'readonly');
+                const req = tx.objectStore(DROP_CACHE_STORE).get(path);
+                req.onsuccess = () => {
+                    const entry = req.result;
+                    resolve(entry && (Date.now() - entry.ts) < DROP_CACHE_TTL_MS ? entry.blob : null);
+                };
+                req.onerror = () => resolve(null);
+            });
+        } catch (e) { return null; }
+    }
+
+    function _setCachedDropImage(path, blob) {
+        // fire-and-forget — se falhar (ex: quota do navegador cheia), o
+        // jogo continua funcionando normal, só sem cachear esse arquivo.
+        _openDropCacheDb().then(db => {
+            if (!db) return;
+            try {
+                const tx = db.transaction(DROP_CACHE_STORE, 'readwrite');
+                tx.objectStore(DROP_CACHE_STORE).put({ path, blob, ts: Date.now() });
+            } catch (e) {}
+        });
+    }
+
     // ── CARREGA O POOL DE DROPS DIRETO DO BUCKET high-res-assets ──────
     // Lista todos os arquivos do bucket privado, gera Signed URLs em
     // lote (1h de validade — só pro carregamento inicial dos drops, não
@@ -267,23 +329,40 @@
                 return;
             }
 
-            function loadOne(item) {
+            function _drawBlobToPool(item, blob) {
                 return new Promise(resolve => {
                     const img = new Image();
-                    img.crossOrigin = "anonymous";
                     img.onload = () => {
                         const off = document.createElement('canvas'); off.width = 600; off.height = 600;
                         off.getContext('2d').drawImage(img, 0, 0, 600, 600);
                         preloadedCanvases.push(off);
                         preloadedCanvasPaths.push(item.path);
+                        URL.revokeObjectURL(img.src);
                         resolve(true);
                     };
-                    img.onerror = () => {
-                        console.warn('[Pool de drops] Falha ao carregar do bucket:', item.path);
-                        resolve(false); // não trava o carregamento por um arquivo corrompido/inacessível
-                    };
-                    img.src = item.signedUrl;
+                    img.onerror = () => { URL.revokeObjectURL(img.src); resolve(false); };
+                    img.src = URL.createObjectURL(blob);
                 });
+            }
+
+            async function loadOne(item) {
+                // 1) Já temos esse arquivo salvo localmente? Usa direto, sem rede.
+                const cached = await _getCachedDropImage(item.path);
+                if (cached) return _drawBlobToPool(item, cached);
+
+                // 2) Sem cache: baixa via Signed URL com fetch() (em vez de
+                // <img src=signedUrl>) só pra conseguirmos guardar os BYTES
+                // no IndexedDB e não precisarmos rebaixar esse arquivo de novo.
+                try {
+                    const resp = await fetch(item.signedUrl);
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    const blob = await resp.blob();
+                    _setCachedDropImage(item.path, blob);
+                    return await _drawBlobToPool(item, blob);
+                } catch (e) {
+                    console.warn('[Pool de drops] Falha ao carregar do bucket:', item.path, e.message || e);
+                    return false; // não trava o carregamento por um arquivo corrompido/inacessível
+                }
             }
 
             // PERF FIX (drop demorando "uma vida" pra rolar): antes, esta
@@ -297,6 +376,7 @@
             // ficando mais variada conforme o resto carrega, e cada drop
             // sorteia dentre o que já estiver pronto naquele momento.
             await loadOne(queue[0]);
+
 
             const rest = queue.slice(1);
             const BATCH_SIZE = 4;
