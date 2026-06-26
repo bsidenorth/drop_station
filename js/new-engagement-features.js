@@ -463,9 +463,13 @@
                 if (!p || !p.new) return;
                 const row = p.new;
                 if (!_extractPayload(row)) return;
-                // Deduplicação: ignora se já foi inserido pelo histórico ou pushFeedCard
-                if (_renderedIds.has(row.id)) return;
+                // Deduplicação: checa UUID do banco E o display_id
+                // pushFeedCard registra "local_#XXXXXX" antes do Realtime chegar
+                const _rtp = _extractPayload(row);
+                const _displayKey = `local_${_rtp && (_rtp.id || _rtp.display_id)}`;
+                if (_renderedIds.has(row.id) || _renderedIds.has(_displayKey)) return;
                 _renderedIds.add(row.id);
+                _renderedIds.add(_displayKey);
                 const grid = document.getElementById('nef-explore-feed');
                 if (!grid) return;
                 grid.querySelector('.nef-empty')?.remove();
@@ -499,7 +503,6 @@
                     card_payload: card,
                     created_at: new Date().toISOString()
                 };
-                // Usa display_id do card como chave local (sem ID de banco)
                 const localKey = `local_${card.id || card.display_id || Date.now()}`;
                 if (!_renderedIds.has(localKey)) {
                     _renderedIds.add(localKey);
