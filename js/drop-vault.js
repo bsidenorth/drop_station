@@ -12,7 +12,7 @@
         return pool[idx];
     }
 
-    const DROP_VISUAL_STYLES = DROP_FILTER_DB.common.map(v => v.name)
+    const DROP_STYLE_NAME_LIST = DROP_FILTER_DB.common.map(v => v.name)
         .concat(DROP_FILTER_DB.epic.map(v => v.name))
         .concat(DROP_FILTER_DB.legendary.map(v => v.name));
 
@@ -127,7 +127,7 @@
         const container = document.getElementById('dropStyleFilterTags');
         if (!container) return;
         const tags = ['<button type="button" class="drop-filter-tag active" data-style="all" onclick="setDropStyleFilter(\'all\')">TODOS</button>']
-            .concat(DROP_VISUAL_STYLES.map(s =>
+            .concat(DROP_STYLE_NAME_LIST.map(s =>
                 `<button type="button" class="drop-filter-tag" data-style="${s}" onclick="setDropStyleFilter('${s}')">${s}</button>`
             ));
         container.innerHTML = tags.join('');
@@ -144,7 +144,7 @@
 
     function _resolveFilteredStyleIndex(naturalIndex) {
         if (dropFilters.style === 'all') return naturalIndex;
-        const idx = DROP_VISUAL_STYLES.indexOf(dropFilters.style);
+        const idx = DROP_STYLE_NAME_LIST.indexOf(dropFilters.style);
         return idx === -1 ? naturalIndex : idx;
     }
 
@@ -222,8 +222,8 @@
             let randRarity = Math.random();
             if (!isPremium && randRarity < 0.15) { shatterAsset(); isRolling = false; return; }
 
-            const visualStylesPT = DROP_VISUAL_STYLES;
-            const visualStylesEN = DROP_VISUAL_STYLES;
+            const visualStylesPT = DROP_STYLE_NAME_LIST;
+            const visualStylesEN = DROP_STYLE_NAME_LIST;
             // visualFilters is now resolved per-rarity from DROP_FILTER_DB
             // styleIndex is kept for backward compat but overridden below
             let styleIndex = _resolveFilteredStyleIndex(Math.floor(Math.random() * 6));
