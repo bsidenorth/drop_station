@@ -150,7 +150,7 @@
                     <div class="price-card"><label data-i18n="lbl-creator">AUTOR DA MINTAGEM</label><div class="price-value" id="meta-owner">DESCONHECIDO</div></div>
                 </div>
 
-                <!-- [ESCOPO 4] Filtros avançados de busca — Free Roll + Premium Drop (oculto visualmente; lógica JS preservada como easter egg) -->
+                <!-- [ESCOPO 4] Filtros avançados de busca — oculto visualmente; lógica JS ativa como easter egg -->
                 <div class="drop-filters-bar" id="dropFiltersBar" style="display:none;">
                     <button type="button" class="drop-filter-toggle" id="dropFilterToggleBtn" onclick="toggleDropFiltersPanel()">
                         <span>▾ FILTROS_AVANÇADOS</span>
@@ -1041,6 +1041,26 @@
             <button type="button" id="globalChatEmoteToggle" class="gc-emote-toggle-btn" onclick="toggleGlobalChatEmotePanel()" title="Emotes">😀</button>
             <input type="text" id="globalChatInput" maxlength="280" placeholder="Mensagem... (15 B$)" onkeydown="if(event.key==='Enter') sendGlobalChatMessage();">
             <button id="globalChatSendBtn" onclick="sendGlobalChatMessage()">ENVIAR</button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         SCREEN: LOJA — MERCADO_NEGRO
+    ════════════════════════════════════════════════════════════════ -->
+    <div id="screen-loja" class="spa-screen">
+        <div class="vault-layout">
+            <div class="vault-header">
+                <h2 style="color:#ffaa00;">LOJA // MERCADO_NEGRO</h2>
+                <p style="font-size:0.65rem; color:#888899;">Itens exclusivos, modificadores de alquimia e cosméticos da rede.</p>
+            </div>
+            <div class="filter-bar" id="lojaFilterBar" style="margin-bottom:16px;">
+                <button class="filter-btn active" data-loja-cat="all"        onclick="setLojaCategory('all')">TODOS</button>
+                <button class="filter-btn"         data-loja-cat="modifiers"  onclick="setLojaCategory('modifiers')">MODIFICADORES</button>
+                <button class="filter-btn"         data-loja-cat="cosmetics"  onclick="setLojaCategory('cosmetics')">COSMÉTICOS</button>
+                <button class="filter-btn"         data-loja-cat="frames"     onclick="setLojaCategory('frames')">MOLDURAS</button>
+                <button class="filter-btn"         data-loja-cat="consumable" onclick="setLojaCategory('consumable')">CONSUMÍVEIS</button>
+            </div>
+            <div id="lojaItemsGrid" class="loja-items-grid"></div>
         </div>
     </div>
 
