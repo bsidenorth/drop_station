@@ -404,6 +404,7 @@
     let _realtimeSub = null;
     let _feedOffset = 0;
     const FEED_PAGE = 24;
+    const _renderedIds = new Set(); // deduplicação: evita que histórico + realtime + pushFeedCard insiram o mesmo evento duas vezes
 
     function _lazyBootFeed() {
         if (_feedBooted) return;
@@ -416,7 +417,6 @@
         const grid = document.getElementById('nef-explore-feed');
         if (!grid) return;
 
-        // Remove placeholder e botão load-more anterior
         grid.querySelector('.nef-empty')?.remove();
         grid.querySelector('.nef-load-more-wrap')?.remove();
 
@@ -429,24 +429,17 @@
             if (error) throw error;
 
             if (!data || data.length === 0) {
-                if (initial) {
-                    grid.innerHTML = '<div class="nef-empty">&gt; NENHUM EVENTO NA REDE AINDA.</div>';
-                }
+                if (initial) grid.innerHTML = '<div class="nef-empty">&gt; NENHUM EVENTO NA REDE AINDA.</div>';
                 return;
             }
 
-            // Filtra só eventos com card_payload (têm arte)
-            const withArt  = data.filter(r => _extractPayload(r));
-            const withoutArt = data.filter(r => !_extractPayload(r));
-
-            // Insere cards com arte no grid
-            withArt.forEach(row => {
-                const el = _buildCardEl(row, false);
-                // Se inicial, insere no final; se realtime, insere no início
-                grid.appendChild(el);
+            // Só eventos com arte, sem duplicatas
+            const fresh = data.filter(r => _extractPayload(r) && !_renderedIds.has(r.id));
+            fresh.forEach(row => {
+                _renderedIds.add(row.id);
+                grid.appendChild(_buildCardEl(row, false));
             });
 
-            // Se tem próxima página, mostra botão
             if (data.length === FEED_PAGE) {
                 _feedOffset += FEED_PAGE;
                 const wrap = document.createElement('div');
@@ -469,14 +462,15 @@
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'eventos_globais' }, p => {
                 if (!p || !p.new) return;
                 const row = p.new;
-                // Só eventos com arte entram no feed visual
                 if (!_extractPayload(row)) return;
+                // Deduplicação: ignora se já foi inserido pelo histórico ou pushFeedCard
+                if (_renderedIds.has(row.id)) return;
+                _renderedIds.add(row.id);
                 const grid = document.getElementById('nef-explore-feed');
                 if (!grid) return;
                 grid.querySelector('.nef-empty')?.remove();
                 const el = _buildCardEl(row, true);
                 grid.insertBefore(el, grid.firstChild);
-                // Remove fresh-card após animação
                 setTimeout(() => el.classList.remove('fresh-card'), 3200);
                 // Limita DOM a 60 cards
                 const cards = grid.querySelectorAll('.nef-feed-card');
@@ -505,14 +499,19 @@
                     card_payload: card,
                     created_at: new Date().toISOString()
                 };
-                const grid = document.getElementById('nef-explore-feed');
-                if (grid) {
-                    grid.querySelector('.nef-empty')?.remove();
-                    const el = _buildCardEl(fakeRow, true);
-                    grid.insertBefore(el, grid.firstChild);
-                    setTimeout(() => el.classList.remove('fresh-card'), 3200);
-                    const cards = grid.querySelectorAll('.nef-feed-card');
-                    if (cards.length > 60) cards[cards.length - 1].remove();
+                // Usa display_id do card como chave local (sem ID de banco)
+                const localKey = `local_${card.id || card.display_id || Date.now()}`;
+                if (!_renderedIds.has(localKey)) {
+                    _renderedIds.add(localKey);
+                    const grid = document.getElementById('nef-explore-feed');
+                    if (grid) {
+                        grid.querySelector('.nef-empty')?.remove();
+                        const el = _buildCardEl(fakeRow, true);
+                        grid.insertBefore(el, grid.firstChild);
+                        setTimeout(() => el.classList.remove('fresh-card'), 3200);
+                        const cards = grid.querySelectorAll('.nef-feed-card');
+                        if (cards.length > 60) cards[cards.length - 1].remove();
+                    }
                 }
                 return result;
             };
