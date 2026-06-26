@@ -206,6 +206,25 @@
             if (avatarOverlayLabel) avatarOverlayLabel.style.display = isOwner ? '' : 'none';
             avatarFrameWrap.style.cursor = isOwner ? 'pointer' : 'default';
             avatarFrameWrap.onclick = isOwner ? openAvatarSelector : null;
+
+            // [FIX AVATAR ANIMADO] Replica EXATAMENTE a mesma lógica de filtro de
+            // movimento usada nos cards normais (ver applyCardMotionAttrs em
+            // fusion.js) na área da imagem do avatar (.cyber-frame). A classe
+            // é aplicada só no .cyber-frame (não no .avatar-container inteiro)
+            // pra animar somente a imagem, sem desalinhar a moldura/cantos.
+            const avatarCyberFrame = avatarFrameWrap.querySelector('.cyber-frame');
+            if (avatarCyberFrame) {
+                const avatarMotionVariant = isOwner
+                    ? (currentUser.avatarMotionFilter || null)
+                    : ((targetProfile && targetProfile.avatar_motion_filter) || null);
+                if (avatarMotionVariant) {
+                    avatarCyberFrame.classList.add('card-motion-active');
+                    avatarCyberFrame.dataset.motionFilter = avatarMotionVariant;
+                } else {
+                    avatarCyberFrame.classList.remove('card-motion-active');
+                    delete avatarCyberFrame.dataset.motionFilter;
+                }
+            }
         }
         // Aplica os 3 efeitos visuais reais (glow de fundo, adereço de card,
         // estante) usando ESTRITAMENTE os cosméticos do perfil exibido.
@@ -417,8 +436,27 @@
             const div = document.createElement('div'); div.className = 'album-card'; div.style.padding = '5px';
             div.onclick = async () => {
                 currentUser.avatar = a.imgSrc;
+                // [FIX AVATAR ANIMADO] Se o card escolhido é "isAnimated", deriva a
+                // MESMA variante de filtro de movimento que ele já exibe no
+                // Inventário/Vitrine (getCardMotionFilter, definida em fusion.js —
+                // é determinística pelo ID do card, então sempre bate igual) e
+                // guarda em currentUser pra persistir junto com o avatar. Se o
+                // card é estático, fica null e o avatar continua estático.
+                const motionVariant = a.isAnimated ? getCardMotionFilter(a) : null;
+                currentUser.avatarMotionFilter = motionVariant;
+
                 document.getElementById('profAvatarImg').src = a.imgSrc;
-                await updateProfileInSupabase(currentUser.id, { avatar: a.imgSrc });
+                const cyberFrameNow = document.querySelector('#avatarFrameWrap .cyber-frame');
+                if (cyberFrameNow) {
+                    if (motionVariant) {
+                        cyberFrameNow.classList.add('card-motion-active');
+                        cyberFrameNow.dataset.motionFilter = motionVariant;
+                    } else {
+                        cyberFrameNow.classList.remove('card-motion-active');
+                        delete cyberFrameNow.dataset.motionFilter;
+                    }
+                }
+                await updateProfileInSupabase(currentUser.id, { avatar: a.imgSrc, avatarMotionFilter: motionVariant });
                 closeAvatarSelector();
             };
             const gifBadge = a.isAnimated ? '<span style="position:absolute;top:3px;right:3px;background:#ff00ff;color:#000;font-size:0.4rem;font-weight:bold;padding:1px 4px;border-radius:2px;z-index:2;">GIF</span>' : '';

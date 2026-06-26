@@ -309,8 +309,10 @@
         if (!list) return;
 
         // Busca todos os perfis (substitui loadRegistry()) + contagem de lendários por usuário
-        // Também busca avatar e avatar_frame pra renderizar a moldura neon de cada operador no Placar.
-        const { data: profilesData, error: profErr } = await sb.from('profiles').select('id, username, bumps, fusion_count, avatar, avatar_frame');
+        // Também busca avatar, avatar_frame e avatar_motion_filter pra renderizar a moldura
+        // neon + o filtro de movimento (quando o avatar é um card "isAnimated") de cada
+        // operador no Placar.
+        const { data: profilesData, error: profErr } = await sb.from('profiles').select('id, username, bumps, fusion_count, avatar, avatar_frame, avatar_motion_filter');
         if (profErr) { console.error('renderLeaderboard (profiles):', profErr.message); list.innerHTML = '<div class="empty-vault-notice">FALHA AO CARREGAR PLACAR.</div>'; return; }
 
         const { data: legendaryRows, error: cardsErr } = await sb.from('cards').select('id_usuario').eq('rarity_type', 'legendary');
@@ -318,12 +320,21 @@
         const legendaryCounts = {};
         (legendaryRows || []).forEach(r => { legendaryCounts[r.id_usuario] = (legendaryCounts[r.id_usuario] || 0) + 1; });
 
+        // [FIX AVATAR RANKING] Antes, todo perfil sem avatar customizado caía no MESMO
+        // placeholder fixo (Homer Simpson) — com vários operadores sem foto própria no
+        // Top 5, a lista toda parecia "puxar o avatar errado" porque mostrava a mesma
+        // imagem repetida pra gente diferente. Agora o fallback é gerado de forma
+        // DETERMINÍSTICA a partir do username (DiceBear), então cada operador sem
+        // avatar customizado ganha um ícone único e estável — sem depender de upload.
+        const fallbackAvatarFor = (username) => `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(username || 'anon')}`;
+
         const rows = (profilesData || []).map(u => ({
             username: u.username,
             bumps: u.bumps || 0,
             legendaryCount: legendaryCounts[u.id] || 0,
-            avatar: u.avatar || 'https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg',
-            avatarFrame: u.avatar_frame || FRAME_DEFAULT_ID
+            avatar: u.avatar || fallbackAvatarFor(u.username),
+            avatarFrame: u.avatar_frame || FRAME_DEFAULT_ID,
+            avatarMotionFilter: u.avatar_motion_filter || null
         }));
 
         rows.sort((a, b) => leaderboardMode === 'bumps' ? (b.bumps - a.bumps) : (b.legendaryCount - a.legendaryCount));
@@ -349,10 +360,16 @@
             const isMe = r.username === currentUser.username ? ' style="color:#00ffff;"' : '';
             // Mostra SOMENTE recompensas em Bumps na coluna de recompensas
             const bumpsReward = ['500 B$', '300 B$', '150 B$', '75 B$', '50 B$'][i] || '—';
-            const avatarSrc = r.avatar || 'https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg';
+            const avatarSrc = r.avatar || fallbackAvatarFor(r.username);
+            const avatarFallback = fallbackAvatarFor(r.username);
+            // [FIX AVATAR ANIMADO] mesma lógica de filtro de movimento do Perfil/Inventário
+            // (card-motion-active + data-motion-filter), aplicada só no .cyber-frame interno
+            // pra não deformar a moldura redonda/quadrada do avatar na linha do ranking.
+            const motionClass = r.avatarMotionFilter ? ' card-motion-active' : '';
+            const motionAttr = r.avatarMotionFilter ? ` data-motion-filter="${r.avatarMotionFilter}"` : '';
             return `<div class="leaderboard-row" onclick="viewExternalProfile('${r.username.replace(/'/g,"\\'")}');"${isMe}>
                 <span>${medal} #${i+1}</span>
-                <span class="avatar-container ${r.avatarFrame}"><span class="cyber-frame"><img src="${avatarSrc}" draggable="false" loading="lazy" onerror="this.src='https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg'"></span></span>
+                <span class="avatar-container ${r.avatarFrame}"><span class="cyber-frame${motionClass}"${motionAttr}><img src="${avatarSrc}" draggable="false" loading="lazy" onerror="this.onerror=null;this.src='${avatarFallback}'"></span></span>
                 <span>${r.username}</span>
                 <span>${value}</span>
                 <span class="lb-rewards">💰 ${bumpsReward}</span>

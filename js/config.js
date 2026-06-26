@@ -306,7 +306,7 @@ let authMode = 'login';
 
 let currentUser = {
     loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
-    bio: "Explorador da rede dr0p_station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
+    bio: "Explorador da rede dr0p_station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", avatarMotionFilter: null, banner: "",
     followers: 12, following: 4, followedByMe: false,
     inventory: [], // populado na Parte 3 (inventário)
     cosmetics: [], // ids dos cosméticos da Loja (molduras/fundos/adereços/estantes/emoticons) já comprados — persistido em profiles.cosmetics
@@ -375,7 +375,12 @@ function secondsLoginLocked() {
 // select('email'). A resolução de e-mail para login passa pela
 // function security definer `email_by_username` (ver fetchEmailByUsername).
 // =========================================================
-const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, banner, status, following, fusion_count, cosmetics, equipped_cosmetics, fragments, created_at, updated_at';
+// [FIX AVATAR ANIMADO] avatar_motion_filter guarda qual variante de
+// filtro de movimento (das mesmas 12 usadas nos cards — ver
+// MOTION_FILTER_VARIANTS em fusion.js) deve ser replicada no Avatar,
+// quando o card escolhido como avatar é um card "isAnimated". É NULL
+// quando o avatar escolhido é um card estático normal.
+const PUBLIC_PROFILE_COLUMNS = 'id, username, bumps, code, bio, avatar, avatar_frame, avatar_motion_filter, banner, status, following, fusion_count, cosmetics, equipped_cosmetics, fragments, created_at, updated_at';
 
 async function fetchProfile(userId) {
     const { data, error } = await sb.from('profiles').select(PUBLIC_PROFILE_COLUMNS).eq('id', userId).single();
@@ -468,7 +473,9 @@ async function fetchProfileByUsername(username) {
 const PROFILE_FIELD_TO_COLUMN = {
     bumps: 'bumps', bio: 'bio', avatar: 'avatar', avatarFrame: 'avatar_frame', banner: 'banner',
     status: 'status', following: 'following', code: 'code', username: 'username',
-    fusion_count: 'fusion_count', cosmetics: 'cosmetics', equippedCosmetics: 'equipped_cosmetics', fragments: 'fragments'
+    fusion_count: 'fusion_count', cosmetics: 'cosmetics', equippedCosmetics: 'equipped_cosmetics', fragments: 'fragments',
+    // [FIX AVATAR ANIMADO] persiste a variante de filtro de movimento junto com o avatar
+    avatarMotionFilter: 'avatar_motion_filter'
 };
 async function updateProfileInSupabase(userId, fieldsCamel) {
     if (!userId) { console.warn('updateProfileInSupabase: userId ausente, ignorando update remoto.'); return false; }
@@ -494,6 +501,9 @@ function applyProfileToCurrentUser(profile) {
         bio: profile.bio,
         avatar: profile.avatar,
         avatarFrame: profile.avatar_frame || 'frame-style-1',
+        // [FIX AVATAR ANIMADO] traz a variante de movimento persistida (ou null
+        // se o avatar atual for um card estático comum).
+        avatarMotionFilter: profile.avatar_motion_filter || null,
         banner: profile.banner,
         status: profile.status || 'online',
         followingList: profile.following || [],
@@ -526,7 +536,7 @@ function applyProfileToCurrentUser(profile) {
 function resetCurrentUserToAnon() {
     currentUser = {
         loggedIn: false, username: "ANON_PLAYER", bumps: 100, code: "#0000",
-        bio: "Explorador da rede dr0p_station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", banner: "",
+        bio: "Explorador da rede dr0p_station.", avatar: "https://i.ibb.co/8Dkmrttv/Homer-Simpson-swag-pfp.jpg", avatarFrame: "frame-style-1", avatarMotionFilter: null, banner: "",
         followers: 12, following: 4, followedByMe: false, inventory: [],
         cosmetics: [], equippedCosmetics: { background: null, prop: null, shelf: null, emoticon: null }, fragments: 0
     };
