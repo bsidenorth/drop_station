@@ -111,6 +111,24 @@
             </div>
         </div>
 
+        <!-- ═══════════════════════════════════════════════════════════
+             TIMELINE REDE GLOBAL — eventos_globais (Realtime Supabase)
+             Mostra drops, fusões, destruições na fornalha ao vivo:
+             nome do operador, raridade e ícone do evento.
+             CSS e subscription gerenciados por new-engagement-features.js
+        ════════════════════════════════════════════════════════════ -->
+        <div id="engine-timeline-panel">
+            <div class="etl-header" onclick="_etlToggleCollapse()">
+                <div class="etl-title">
+                    <span class="etl-dot"></span>REDE_GLOBAL // EVENTOS AO VIVO
+                </div>
+                <span class="etl-toggle-icon"></span>
+            </div>
+            <div id="etl-feed">
+                <div class="etl-empty">&gt; AGUARDANDO TRANSMISSÃO...</div>
+            </div>
+        </div>
+
         <div class="workspace">
             <div class="viewer-side">
                 <div class="target-box" id="target-container">
