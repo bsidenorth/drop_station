@@ -770,4 +770,165 @@ async function deleteInventoryItem(item) {
 
 
 // =========================================================
+// SUPPLY BAR — card_supply (supply_cap + minted_count por style_name)
+// =========================================================
+// Cache em memória pra evitar round-trips repetidos ao Supabase.
+const _supplyCache = {}; // { styleName: { supply_cap, minted_count, loaded } }
+
+// Busca dados de supply de um style_name (com cache).
+async function getSupplyData(styleName) {
+    if (!styleName) return null;
+    if (_supplyCache[styleName] && _supplyCache[styleName].loaded) return _supplyCache[styleName];
+    try {
+        const { data, error } = await sb.from('card_supply')
+            .select('supply_cap, minted_count')
+            .eq('style_name', styleName)
+            .maybeSingle();
+        if (error || !data) { _supplyCache[styleName] = null; return null; }
+        _supplyCache[styleName] = { supply_cap: data.supply_cap, minted_count: data.minted_count, loaded: true };
+        return _supplyCache[styleName];
+    } catch (e) { console.error('[supply]', e); return null; }
+}
+
+// Invalida o cache de um style (chamado após mint bem-sucedido).
+function invalidateSupplyCache(styleName) {
+    if (styleName && _supplyCache[styleName]) delete _supplyCache[styleName];
+}
+
+// Injeta estilos CSS da supply bar (uma única vez).
+function _injectSupplyBarStyles() {
+    if (document.getElementById('supply-bar-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'supply-bar-styles';
+    s.textContent = `
+        .supply-bar-wrap {
+            margin-top: 6px;
+            padding: 4px 0 0 0;
+            border-top: 1px solid #0d0d1e;
+        }
+        .supply-bar-label {
+            font-family: 'Space Mono', monospace;
+            font-size: 0.38rem;
+            color: #333355;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 3px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .supply-bar-label .supply-count {
+            color: #00ffcc88;
+        }
+        .supply-bar-label .supply-count.capped {
+            color: #ff333388;
+        }
+        .supply-bar-track {
+            width: 100%;
+            height: 3px;
+            background: #0d0d1e;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .supply-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            background: linear-gradient(90deg, #00ffcc, #00ff66);
+            transition: width 0.5s ease;
+        }
+        .supply-bar-fill.capped {
+            background: linear-gradient(90deg, #ff3333, #ff0066);
+            box-shadow: 0 0 4px #ff003388;
+        }
+        .supply-bar-fill.near-cap {
+            background: linear-gradient(90deg, #ffaa00, #ff6600);
+        }
+    `;
+    document.head.appendChild(s);
+}
+
+// Gera o HTML de supply bar para injetar num card renderizado.
+// `supply` = { supply_cap, minted_count } | null
+function buildSupplyBarHTML(supply) {
+    if (!supply || !supply.supply_cap) return '';
+    const { supply_cap, minted_count } = supply;
+    const pct = Math.min(100, Math.round((minted_count / supply_cap) * 100));
+    const isCapped = minted_count >= supply_cap;
+    const isNear = !isCapped && pct >= 80;
+    const fillClass = isCapped ? 'capped' : (isNear ? 'near-cap' : '');
+    const countClass = isCapped ? 'capped' : '';
+    return `
+        <div class="supply-bar-wrap">
+            <div class="supply-bar-label">
+                <span>SUPPLY</span>
+                <span class="supply-count ${countClass}">${minted_count} / ${supply_cap}${isCapped ? ' ⬛ ESGOTADO' : ''}</span>
+            </div>
+            <div class="supply-bar-track">
+                <div class="supply-bar-fill ${fillClass}" style="width:${pct}%"></div>
+            </div>
+        </div>
+    `;
+}
+
+// Injeta a supply bar num elemento de card já renderizado no DOM.
+// Procura pelo container do card pelo display_id ou pelo elemento raiz passado.
+async function injectSupplyBarIntoCard(cardEl, styleName) {
+    if (!cardEl || !styleName) return;
+    _injectSupplyBarStyles();
+    // Evita injetar duplicado
+    if (cardEl.querySelector('.supply-bar-wrap')) return;
+    const supply = await getSupplyData(styleName);
+    if (!supply) return;
+    const html = buildSupplyBarHTML(supply);
+    if (!html) return;
+    // Tenta injetar no final do card-body ou no próprio elemento
+    const target = cardEl.querySelector('.card-body, .card-footer, .card-info, .album-card-meta, .market-card-meta') || cardEl;
+    target.insertAdjacentHTML('beforeend', html);
+}
+
+// Enriquece todos os cards visíveis no DOM com supply bars.
+// Chamado após renderVaultGrid / renderMarketGrid / renderAlbumGrid.
+async function enrichAllCardsWithSupplyBars() {
+    _injectSupplyBarStyles();
+    // Seleciona cards em album-grid, market e vault
+    const cardEls = document.querySelectorAll(
+        '.album-card[data-style], .market-card[data-style], .vault-card[data-style], .card-item[data-style]'
+    );
+    const stylesSeen = new Set();
+    // Pré-carrega todos os styles únicos em paralelo
+    const styles = [...new Set([...cardEls].map(el => el.dataset.style).filter(Boolean))];
+    await Promise.all(styles.map(s => getSupplyData(s)));
+    // Injeta nas cards
+    for (const el of cardEls) {
+        const style = el.dataset.style;
+        if (style) await injectSupplyBarIntoCard(el, style);
+    }
+}
+
+// Hook: chame invalidateSupplyCache(card.styleName) logo após um mint bem-sucedido
+// em claimAssetLogic() — o banco já terá o trigger incrementando minted_count.
+// Patch em claimAssetLogic para invalidar cache automaticamente após mint.
+(function _patchClaimForSupplyCache() {
+    const _origClaim = window.claimAssetLogic;
+    if (typeof _origClaim !== 'function' || window._supplyPatchApplied) return;
+    window._supplyPatchApplied = true;
+    window.claimAssetLogic = async function (...args) {
+        const result = await _origClaim.apply(this, args);
+        // Invalida o cache do style recem mintado
+        if (window.activeAssetData && window.activeAssetData.styleName) {
+            invalidateSupplyCache(window.activeAssetData.styleName);
+        }
+        // Re-enriquece o vault após mint
+        setTimeout(() => enrichAllCardsWithSupplyBars(), 600);
+        return result;
+    };
+})();
+
+// Expõe globalmente para chamada após renders
+window.enrichAllCardsWithSupplyBars = enrichAllCardsWithSupplyBars;
+window.buildSupplyBarHTML = buildSupplyBarHTML;
+window.getSupplyData = getSupplyData;
+window.invalidateSupplyCache = invalidateSupplyCache;
+
+
+// =========================================================
 // dr0p_station — PARTE 5/4: FOLLOW REAL + MERCADO REAL (SUPABASE)
