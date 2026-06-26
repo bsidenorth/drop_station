@@ -467,7 +467,12 @@
     // mesmo filtro em Inventário, Vitrine e Modal de Inspect, mesmo sem
     // precisar gravar a variante escolhida em coluna própria no banco.
     // =========================================================
-    const MOTION_FILTER_VARIANTS = ['random-glitch', 'vortex-wave'];
+    // 12 variantes de filtro de movimento — sincronizadas com os @keyframes em config.js
+    const MOTION_FILTER_VARIANTS = [
+        'random-glitch', 'vortex-wave', 'chromatic-pulse', 'scanline-drift',
+        'neon-flicker', 'heat-shimmer', 'rgb-split', 'static-burst',
+        'deep-pulse', 'corruption', 'hologram', 'plasma-burn'
+    ];
 
     function getCardMotionFilter(card) {
         if (!card || !card.isAnimated) return null;
@@ -510,12 +515,12 @@
         const PALETTE_HUE_RANGES = { gold: [40, 55], cyan: [180, 200], magenta: [300, 330] };
         const range = forcedPalette && PALETTE_HUE_RANGES[forcedPalette];
         const hue = range ? (range[0] + Math.floor(Math.random() * (range[1] - range[0]))) : Math.floor(Math.random() * 360);
-        const sat = 120 + Math.floor(Math.random() * 220);     // 120% - 340%
+        const sat = 180 + Math.floor(Math.random() * 180);     // 180% - 360% (sempre vibrante)
         const con = 100 + Math.floor(Math.random() * 140);     // 100% - 240%
-        const bri = 70 + Math.floor(Math.random() * 60);       // 70%  - 130%
-        const doInvert = !forcedPalette && Math.random() < 0.35; // catalisador desativa inversão p/ preservar a cor alvo
+        const bri = 88 + Math.floor(Math.random() * 20);       // 88%  - 108% (anti-preto/branco)
+        const doInvert = false; // DESATIVADO — invert causava preto/branco total; removido por design
         const invertPct = doInvert ? Math.floor(Math.random() * 100) : 0;
-        const doGray = !forcedPalette && Math.random() < 0.2;
+        const doGray = false; // DESATIVADO — grayscale causava imagens sem cor; removido por design
 
         let parts = [
             `hue-rotate(${hue}deg)`,
@@ -737,6 +742,85 @@
         return { resultado: 'sucesso', cardPrincipal, fusionId, roll, ps, pb, forcedPalette };
     }
     
+    // =========================================================
+    // GLOBALS DO SISTEMA GIF/DEV — declarados aqui para garantir que
+    // fuseCards() os encontre sem ReferenceError.
+    // =========================================================
+    if (typeof window._fusionGifModeActive === 'undefined') window._fusionGifModeActive = false;
+    if (typeof window._devForceGifMode     === 'undefined') window._devForceGifMode     = false;
+
+    /** Toggle do modo GIF — ativa isAnimated para a próxima fusão */
+    function toggleFusionGifMode() {
+        window._fusionGifModeActive = !window._fusionGifModeActive;
+        const btn = document.getElementById('_fusionGifBtn');
+        if (btn) btn.style.borderColor = window._fusionGifModeActive ? '#00ff66' : '#333';
+    }
+
+    /** Injeta o botão GIF discreto no painel de alquimia (easter egg) */
+    function _injectFusionGifButtonIfAbsent() {
+        if (document.getElementById('_fusionGifBtn')) return;
+        const anchor = document.querySelector('.alchemy-prob-bar') || document.getElementById('alchFusaoView');
+        if (!anchor) return;
+        const btn = document.createElement('button');
+        btn.id = '_fusionGifBtn';
+        btn.type = 'button';
+        btn.title = 'Modo GIF — card resultante ficará animado';
+        Object.assign(btn.style, {
+            position: 'absolute', bottom: '8px', right: '8px',
+            background: 'transparent', border: '1px solid #333',
+            color: '#555', fontFamily: "'Space Mono', monospace",
+            fontSize: '0.45rem', padding: '3px 7px', cursor: 'pointer',
+            letterSpacing: '1px', zIndex: '10'
+        });
+        btn.textContent = 'GIF';
+        btn.onclick = toggleFusionGifMode;
+        const wrap = document.getElementById('alchFusaoView');
+        if (wrap) { wrap.style.position = 'relative'; wrap.appendChild(btn); }
+    }
+
+    /** Botão DEV CHANGER — oculto, só visível em modo dev */
+    function _injectDevChangerIfAbsent() {
+        if (document.getElementById('_devChangerBtn')) return;
+        const wrap = document.getElementById('alchFusaoView');
+        if (!wrap) return;
+        const btn = document.createElement('button');
+        btn.id = '_devChangerBtn';
+        btn.type = 'button';
+        Object.assign(btn.style, {
+            position: 'absolute', bottom: '8px', left: '8px',
+            background: 'transparent', border: '1px solid #222',
+            color: '#333', fontFamily: "'Space Mono', monospace",
+            fontSize: '0.4rem', padding: '2px 5px', cursor: 'pointer', zIndex: '10'
+        });
+        btn.textContent = 'DEV';
+        btn.onclick = () => { window._devForceGifMode = !window._devForceGifMode; btn.style.color = window._devForceGifMode ? '#ff0044' : '#333'; };
+        wrap.style.position = 'relative';
+        wrap.appendChild(btn);
+    }
+
+    /** Filtro interno aplicado silenciosamente sobre o canvas de fusão */
+    function _getRandomFusionInternalFilter() {
+        const internals = [
+            { filter: 'hue-rotate(45deg) saturate(130%) brightness(96%)' },
+            { filter: 'hue-rotate(120deg) saturate(150%) brightness(94%)' },
+            { filter: 'hue-rotate(270deg) saturate(140%) brightness(97%)' },
+            { filter: 'none' },
+        ];
+        return internals[Math.floor(Math.random() * internals.length)];
+    }
+
+    /** Aplica filtros GIF ao canvas em modo dev (não exibido ao usuário) */
+    function _applyDevGifFilters(canvas, SIZE) {
+        const ctx = canvas.getContext('2d');
+        ctx.filter = 'hue-rotate(30deg) saturate(180%) brightness(95%)';
+        const tmp = document.createElement('canvas');
+        tmp.width = SIZE; tmp.height = SIZE;
+        tmp.getContext('2d').drawImage(canvas, 0, 0);
+        ctx.clearRect(0, 0, SIZE, SIZE);
+        ctx.drawImage(tmp, 0, 0);
+        ctx.filter = 'none';
+    }
+
     async function fuseCards(id1, id2, modificadores = []) {
         if (!id1 || !id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Seleciona 2 cards diferentes.' : 'Select 2 different cards.', 'error'); return; }
         if (id1 === id2) { showCyberAlert('ERRO DE ALQUIMIA', currentLang === 'PT' ? 'Os 2 cards devem ser diferentes.' : 'Both cards must be different.', 'error'); return; }
@@ -779,15 +863,15 @@
         for (const m of modificadores) { await consumeInventoryItem(m.itemId); }
     
         // [DEV CHANGER] Se o modo de GIF forçado estiver ativo, garante sucesso absoluto
-        const roll = _devForceGifMode ? (pb + 0.01) : Math.random(); // pb+0.01 garante que cai no ramo de sucesso
+        const roll = window._devForceGifMode ? (pb + 0.01) : Math.random(); // pb+0.01 garante que cai no ramo de sucesso
     
         // ── FASE 1: animação visual do painel de alquimia ──────────────
         const alchPanel = document.getElementById('alchemyPanel');
         alchPanel.classList.add('alchemy-fusing');
         _injectDevChangerIfAbsent(); // [DEV] injeta botão se ainda não existir
         _injectFusionGifButtonIfAbsent(); // injeta o botão "GIF" se ainda não existir
-        const gifModeForThisFusion = _fusionGifModeActive || _devForceGifMode;
-        if (_fusionGifModeActive) toggleFusionGifMode(); // consome o toggle — vale só para esta fusão
+        const gifModeForThisFusion = window._fusionGifModeActive || window._devForceGifMode;
+        if (window._fusionGifModeActive) toggleFusionGifMode(); // consome o toggle — vale só para esta fusão
         playSynthSound('click');
         speakPhrase("Iniciando fusão. Aguarde a estabilização.", "Initiating fusion sequence. Stand by.");
     

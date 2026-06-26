@@ -33,27 +33,260 @@ const sb = window.supabaseClient;
     const styleTag = document.createElement('style');
     styleTag.id = 'motionFilterStyles';
     styleTag.textContent = `
+        /* ── LOJA SCREEN ─────────────────────────────────────── */
+        .loja-items-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 14px;
+        }
+        .loja-item-card {
+            background: #07070f; border: 1px solid #1c1c28;
+            padding: 14px; display: flex; flex-direction: column; gap: 8px;
+            transition: border-color 0.2s;
+        }
+        .loja-item-card:hover { border-color: #ffaa00; }
+        .loja-item-icon { font-size: 1.8rem; text-align: center; }
+        .loja-item-name { font-size: 0.65rem; font-weight: bold; color: #ffaa00; letter-spacing: 1px; }
+        .loja-item-desc { font-size: 0.55rem; color: #888899; }
+        .loja-item-price { font-size: 0.7rem; color: #00ffff; font-weight: bold; }
+        .loja-item-buy { margin-top: 4px; background: transparent; border: 1px solid #ffaa00;
+            color: #ffaa00; font-family: 'Space Mono', monospace; font-size: 0.55rem;
+            padding: 6px 10px; cursor: pointer; letter-spacing: 1px;
+            transition: background 0.15s, color 0.15s; }
+        .loja-item-buy:hover { background: #ffaa00; color: #000; }
+        .loja-empty-notice { color: #444; font-size: 0.6rem; padding: 24px 0; text-align: center; grid-column: 1/-1; }
+
+        /* ── CARD MOTION: 12 variantes GIF ─────────────────── */
         .card-motion-active { position: relative; overflow: hidden; }
-        .card-motion-active[data-motion-filter="random-glitch"] {
-            animation: motionRandomGlitch 2.4s steps(8) infinite;
-        }
-        .card-motion-active[data-motion-filter="vortex-wave"] {
-            animation: motionVortexWave 3.2s ease-in-out infinite;
-        }
+        .card-motion-active[data-motion-filter="random-glitch"] { animation: motionRandomGlitch 2.4s steps(8) infinite; }
+        .card-motion-active[data-motion-filter="vortex-wave"]   { animation: motionVortexWave 3.2s ease-in-out infinite; }
+        .card-motion-active[data-motion-filter="chromatic-pulse"]{ animation: motionChromaticPulse 1.8s ease-in-out infinite; }
+        .card-motion-active[data-motion-filter="scanline-drift"] { animation: motionScanlineDrift 2.6s linear infinite; }
+        .card-motion-active[data-motion-filter="neon-flicker"]   { animation: motionNeonFlicker 0.9s steps(3) infinite; }
+        .card-motion-active[data-motion-filter="heat-shimmer"]   { animation: motionHeatShimmer 2.0s ease-in-out infinite; }
+        .card-motion-active[data-motion-filter="rgb-split"]      { animation: motionRgbSplit 1.6s steps(5) infinite; }
+        .card-motion-active[data-motion-filter="static-burst"]   { animation: motionStaticBurst 0.5s steps(2) infinite; }
+        .card-motion-active[data-motion-filter="deep-pulse"]     { animation: motionDeepPulse 4.0s ease-in-out infinite; }
+        .card-motion-active[data-motion-filter="corruption"]     { animation: motionCorruption 1.2s steps(6) infinite; }
+        .card-motion-active[data-motion-filter="hologram"]       { animation: motionHologram 2.8s ease-in-out infinite; }
+        .card-motion-active[data-motion-filter="plasma-burn"]    { animation: motionPlasmaBurn 3.5s ease-in-out infinite; }
+
         @keyframes motionRandomGlitch {
-            0%, 100% { filter: hue-rotate(0deg) saturate(100%); transform: translate(0,0); }
+            0%,100% { filter: hue-rotate(0deg) saturate(100%); transform: translate(0,0); }
             20% { filter: hue-rotate(40deg) saturate(180%); transform: translate(-1px,1px); }
             40% { filter: hue-rotate(-30deg) saturate(140%); transform: translate(1px,-1px); }
             60% { filter: hue-rotate(60deg) saturate(200%); transform: translate(-1px,0); }
             80% { filter: hue-rotate(-15deg) saturate(160%); transform: translate(1px,1px); }
         }
         @keyframes motionVortexWave {
-            0%, 100% { filter: hue-rotate(0deg) brightness(100%); transform: rotate(0deg) scale(1); }
+            0%,100% { filter: hue-rotate(0deg) brightness(100%); transform: rotate(0deg) scale(1); }
             50% { filter: hue-rotate(180deg) brightness(115%); transform: rotate(1.5deg) scale(1.015); }
+        }
+        @keyframes motionChromaticPulse {
+            0%,100% { filter: saturate(100%) contrast(100%); }
+            25% { filter: saturate(280%) contrast(140%) hue-rotate(20deg); }
+            50% { filter: saturate(180%) contrast(110%) hue-rotate(90deg); }
+            75% { filter: saturate(320%) contrast(160%) hue-rotate(200deg); }
+        }
+        @keyframes motionScanlineDrift {
+            0%   { filter: brightness(105%) contrast(110%); transform: translateY(0); }
+            25%  { filter: brightness(95%) contrast(125%) hue-rotate(10deg); transform: translateY(-1px); }
+            50%  { filter: brightness(110%) contrast(105%); transform: translateY(1px); }
+            75%  { filter: brightness(90%) contrast(130%) hue-rotate(-10deg); transform: translateY(-1px); }
+            100% { filter: brightness(105%) contrast(110%); transform: translateY(0); }
+        }
+        @keyframes motionNeonFlicker {
+            0%,100% { filter: brightness(100%) saturate(200%); opacity: 1; }
+            33%     { filter: brightness(160%) saturate(300%) hue-rotate(30deg); opacity: 0.88; }
+            66%     { filter: brightness(80%) saturate(150%) hue-rotate(-20deg); opacity: 0.95; }
+        }
+        @keyframes motionHeatShimmer {
+            0%,100% { filter: blur(0px) brightness(100%) saturate(120%); transform: scaleY(1); }
+            30%     { filter: blur(0.4px) brightness(108%) saturate(140%); transform: scaleY(1.005); }
+            60%     { filter: blur(0.2px) brightness(95%) saturate(130%); transform: scaleY(0.997); }
+        }
+        @keyframes motionRgbSplit {
+            0%,100% { filter: hue-rotate(0deg) saturate(150%); transform: translate(0,0); }
+            20% { filter: hue-rotate(120deg) saturate(200%); transform: translate(2px,0); }
+            40% { filter: hue-rotate(240deg) saturate(180%); transform: translate(-2px,0); }
+            60% { filter: hue-rotate(60deg) saturate(220%); transform: translate(0,1px); }
+            80% { filter: hue-rotate(300deg) saturate(170%); transform: translate(0,-1px); }
+        }
+        @keyframes motionStaticBurst {
+            0%,100% { filter: contrast(100%) brightness(100%); }
+            50%     { filter: contrast(200%) brightness(90%) saturate(50%) hue-rotate(180deg); }
+        }
+        @keyframes motionDeepPulse {
+            0%,100% { filter: brightness(100%) saturate(100%); transform: scale(1); }
+            50%     { filter: brightness(120%) saturate(160%) hue-rotate(15deg); transform: scale(1.008); }
+        }
+        @keyframes motionCorruption {
+            0%,100% { filter: hue-rotate(0deg) contrast(100%); transform: translate(0,0) skewX(0deg); }
+            16% { filter: hue-rotate(90deg) contrast(150%); transform: translate(-2px,1px) skewX(1deg); }
+            33% { filter: hue-rotate(180deg) contrast(120%); transform: translate(2px,-1px) skewX(-0.5deg); }
+            50% { filter: hue-rotate(270deg) contrast(160%); transform: translate(-1px,2px) skewX(0.8deg); }
+            66% { filter: hue-rotate(45deg) contrast(110%); transform: translate(1px,-2px) skewX(-1deg); }
+            83% { filter: hue-rotate(315deg) contrast(140%); transform: translate(-1px,0) skewX(0.3deg); }
+        }
+        @keyframes motionHologram {
+            0%,100% { filter: hue-rotate(180deg) brightness(110%) saturate(150%); opacity: 0.95; }
+            25%     { filter: hue-rotate(200deg) brightness(130%) saturate(200%); opacity: 0.82; }
+            50%     { filter: hue-rotate(160deg) brightness(100%) saturate(130%); opacity: 1; }
+            75%     { filter: hue-rotate(210deg) brightness(120%) saturate(170%); opacity: 0.88; }
+        }
+        @keyframes motionPlasmaBurn {
+            0%,100% { filter: hue-rotate(0deg) saturate(180%) brightness(100%); }
+            20% { filter: hue-rotate(30deg) saturate(250%) brightness(115%); }
+            40% { filter: hue-rotate(-20deg) saturate(200%) brightness(105%); }
+            60% { filter: hue-rotate(50deg) saturate(300%) brightness(120%); }
+            80% { filter: hue-rotate(-10deg) saturate(220%) brightness(110%); }
         }
     `;
     document.head.appendChild(styleTag);
 })();
+
+// =========================================================
+// ESTILOS VISUAIS DE DROP — pool expandido (5 originais + 15 novos = 20)
+// rarities: lista de raridades em que cada estilo pode aparecer
+// filter: CSS filter seguro — brightness entre 87-100%, saturate >=180%
+// =========================================================
+const DROP_VISUAL_STYLES = [
+    // ── ORIGINAIS ────────────────────────────────────────────
+    { id:'neon_surge',     namePT:'NEON_SURGE',     nameEN:'NEON_SURGE',
+      filter:'hue-rotate(200deg) saturate(320%) contrast(130%) brightness(95%)',
+      rarities:['common','epic','legendary','ancestral'] },
+    { id:'acid_wash',      namePT:'ACID_WASH',      nameEN:'ACID_WASH',
+      filter:'hue-rotate(80deg) saturate(260%) contrast(120%) brightness(90%)',
+      rarities:['common','epic','legendary'] },
+    { id:'magenta_ghost',  namePT:'MAGENTA_GHOST',  nameEN:'MAGENTA_GHOST',
+      filter:'hue-rotate(300deg) saturate(280%) contrast(115%) brightness(92%)',
+      rarities:['epic','legendary','ancestral'] },
+    { id:'rust_corrupted', namePT:'RUST_CORRUPTED', nameEN:'RUST_CORRUPTED',
+      filter:'hue-rotate(20deg) saturate(240%) contrast(140%) brightness(88%)',
+      rarities:['common','epic'] },
+    { id:'void_signal',    namePT:'VOID_SIGNAL',    nameEN:'VOID_SIGNAL',
+      filter:'hue-rotate(240deg) saturate(180%) contrast(160%) brightness(87%)',
+      rarities:['epic','legendary','ancestral'] },
+    // ── NOVOS 1-15 ───────────────────────────────────────────
+    { id:'infrared_leak',  namePT:'INFRARED_LEAK',  nameEN:'INFRARED_LEAK',
+      filter:'hue-rotate(350deg) saturate(300%) contrast(125%) brightness(93%)',
+      rarities:['common','epic','legendary'] },
+    { id:'cobalt_strike',  namePT:'COBALT_STRIKE',  nameEN:'COBALT_STRIKE',
+      filter:'hue-rotate(215deg) saturate(350%) contrast(120%) brightness(96%)',
+      rarities:['epic','legendary','ancestral'] },
+    { id:'chlorine_burn',  namePT:'CHLORINE_BURN',  nameEN:'CHLORINE_BURN',
+      filter:'hue-rotate(135deg) saturate(290%) contrast(130%) brightness(94%)',
+      rarities:['common','epic'] },
+    { id:'solar_flare',    namePT:'SOLAR_FLARE',    nameEN:'SOLAR_FLARE',
+      filter:'hue-rotate(40deg) saturate(370%) contrast(115%) brightness(100%)',
+      rarities:['legendary','ancestral'] },
+    { id:'deep_violet',    namePT:'DEEP_VIOLET',    nameEN:'DEEP_VIOLET',
+      filter:'hue-rotate(270deg) saturate(310%) contrast(135%) brightness(87%)',
+      rarities:['epic','legendary','ancestral'] },
+    { id:'thermal_static', namePT:'THERMAL_STATIC', nameEN:'THERMAL_STATIC',
+      filter:'hue-rotate(15deg) saturate(200%) contrast(145%) brightness(91%)',
+      rarities:['common','epic'] },
+    { id:'plasma_echo',    namePT:'PLASMA_ECHO',    nameEN:'PLASMA_ECHO',
+      filter:'hue-rotate(320deg) saturate(340%) contrast(118%) brightness(97%)',
+      rarities:['epic','legendary','ancestral'] },
+    { id:'toxic_bloom',    namePT:'TOXIC_BLOOM',    nameEN:'TOXIC_BLOOM',
+      filter:'hue-rotate(100deg) saturate(400%) contrast(110%) brightness(95%)',
+      rarities:['common','epic','legendary'] },
+    { id:'arctic_scan',    namePT:'ARCTIC_SCAN',    nameEN:'ARCTIC_SCAN',
+      filter:'hue-rotate(185deg) saturate(260%) contrast(122%) brightness(100%)',
+      rarities:['epic','legendary'] },
+    { id:'crimson_wave',   namePT:'CRIMSON_WAVE',   nameEN:'CRIMSON_WAVE',
+      filter:'hue-rotate(355deg) saturate(330%) contrast(128%) brightness(90%)',
+      rarities:['common','epic','legendary','ancestral'] },
+    { id:'amber_overload', namePT:'AMBER_OVERLOAD', nameEN:'AMBER_OVERLOAD',
+      filter:'hue-rotate(55deg) saturate(280%) contrast(135%) brightness(96%)',
+      rarities:['legendary','ancestral'] },
+    { id:'ghost_signal',   namePT:'GHOST_SIGNAL',   nameEN:'GHOST_SIGNAL',
+      filter:'hue-rotate(160deg) saturate(220%) contrast(118%) brightness(98%)',
+      rarities:['common','epic'] },
+    { id:'nova_burst',     namePT:'NOVA_BURST',     nameEN:'NOVA_BURST',
+      filter:'hue-rotate(50deg) saturate(400%) contrast(140%) brightness(92%)',
+      rarities:['legendary','ancestral'] },
+    { id:'midnight_hex',   namePT:'MIDNIGHT_HEX',   nameEN:'MIDNIGHT_HEX',
+      filter:'hue-rotate(250deg) saturate(350%) contrast(130%) brightness(89%)',
+      rarities:['epic','legendary','ancestral'] },
+    { id:'bioluminescent', namePT:'BIOLUMINESCENT', nameEN:'BIOLUMINESCENT',
+      filter:'hue-rotate(155deg) saturate(380%) contrast(112%) brightness(100%)',
+      rarities:['ancestral'] },
+];
+
+/**
+ * Sorteia um estilo visual para a raridade dada, com mistura garantida.
+ * Nunca retorna um estilo que não está na lista elegível da raridade.
+ */
+function pickDropVisualStyle(rarityType) {
+    const eligible = DROP_VISUAL_STYLES.filter(s => s.rarities.includes(rarityType));
+    if (!eligible.length) return DROP_VISUAL_STYLES[0];
+    return eligible[Math.floor(Math.random() * eligible.length)];
+}
+
+/**
+ * Aplica filtro CSS de estilo no canvas de drop, com clamp de segurança
+ * para nunca gerar imagens todo-preto (brightness < 85%) ou
+ * todo-branco (brightness > 110%) ou dessaturadas (saturate < 180%).
+ */
+function applyDropStyleFilter(ctx, canvas, styleObj) {
+    if (!styleObj || !styleObj.filter) return;
+    let safe = styleObj.filter
+        .replace(/brightness\((\d+(?:\.\d+)?)%\)/g, (_, v) =>
+            `brightness(${Math.max(87, Math.min(108, parseFloat(v)))}%)`)
+        .replace(/saturate\((\d+(?:\.\d+)?)%\)/g, (_, v) =>
+            `saturate(${Math.max(180, Math.min(420, parseFloat(v)))}%)`);
+    const tmp = document.createElement('canvas');
+    tmp.width = canvas.width; tmp.height = canvas.height;
+    const tCtx = tmp.getContext('2d');
+    tCtx.filter = safe;
+    tCtx.drawImage(canvas, 0, 0);
+    tCtx.filter = 'none';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(tmp, 0, 0);
+}
+
+window.DROP_VISUAL_STYLES   = DROP_VISUAL_STYLES;
+window.pickDropVisualStyle  = pickDropVisualStyle;
+window.applyDropStyleFilter = applyDropStyleFilter;
+
+// =========================================================
+// LOJA: renderização e filtro de categoria
+// =========================================================
+let _lojaCategoryActive = 'all';
+
+function setLojaCategory(cat) {
+    _lojaCategoryActive = cat;
+    document.querySelectorAll('#lojaFilterBar .filter-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.lojaCat === cat);
+    });
+    renderLojaGrid();
+}
+
+function renderLojaGrid() {
+    const grid = document.getElementById('lojaItemsGrid');
+    if (!grid) return;
+    const catalog = (typeof ITEMS_DB !== 'undefined') ? Object.values(ITEMS_DB) : [];
+    const filtered = _lojaCategoryActive === 'all'
+        ? catalog
+        : catalog.filter(item => (item.category || 'misc') === _lojaCategoryActive);
+    if (!filtered.length) {
+        grid.innerHTML = '<div class="loja-empty-notice">Nenhum item disponível nesta categoria.</div>';
+        return;
+    }
+    grid.innerHTML = filtered.map(item => `
+        <div class="loja-item-card">
+            <div class="loja-item-icon">${item.icon || '📦'}</div>
+            <div class="loja-item-name">${item.name || item.nameEN || '—'}</div>
+            <div class="loja-item-desc">${item.description || item.desc || ''}</div>
+            <div class="loja-item-price">${item.price || 0} B$</div>
+            <button class="loja-item-buy" onclick="buyLojaItem('${item.id}')">⚡ ADQUIRIR</button>
+        </div>
+    `).join('');
+}
+
+
 
 // ── CONSTANTES GLOBAIS: SISTEMA DE FRAGMENTOS DE SUCATA ──────────────
 const FRAGMENTS_PER_CORRUPTED_CARD = 5;
