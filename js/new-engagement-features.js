@@ -1,323 +1,563 @@
 // =========================================================
 // dr0p_station — MÓDULO: new-engagement-features.js
-// PATCH 6 — TIMELINE INTEGRADA NA ENGINE + SUPPLY BAR
+// PATCH 6 — FEED VISUAL EXPLORAR (estilo Instagram/stories)
 //
-// REMOVIDO:
-//   • Aba EXPLORAR do nav
-//   • #screen-explorar (SPA separada)
-//   • Breach Protocol mini-game
+// • Aba EXPLORAR no nav (mantida)
+// • #screen-explorar com feed de cards visuais em grid
+//   mostrando a arte real (imgSrc do card_payload), operador,
+//   raridade, tipo de evento (drop/fusão/purge)
+// • Cards purged com o mesmo efeito is-purged do cofre
+// • Subscription Supabase Realtime em eventos_globais
+// • Tab LORE mantida
+// • Breach Protocol REMOVIDO
 //
-// ADICIONADO:
-//   • Timeline de eventos_globais injetada dentro de #screen-engine
-//     (abaixo do .stories-panel, dentro de #engine-timeline-panel)
-//   • Subscription Supabase Realtime mostrando drops, fusões,
-//     destruições na fornalha com nome do operador, raridade, ícone
-//   • Supply Bar helpers (ver cards-inventory-db.js) hookados nas
-//     funções de render do vault/market/album
-//
-// Carregado por último na lista de <script> do index.html.
+// Reutiliza as classes CSS já existentes:
+//   .album-card .album-preview-wrapper .album-meta
+//   .album-rarity .rare-* .is-purged
 // =========================================================
 
 (function () {
     'use strict';
 
-    // ─── GUARD: espera sb e currentUser estarem disponíveis ───────────
     function _waitReady(fn) {
-        if (typeof sb !== 'undefined' && typeof currentUser !== 'undefined') {
-            fn();
-        } else {
-            setTimeout(() => _waitReady(fn), 150);
-        }
+        if (typeof sb !== 'undefined' && typeof currentUser !== 'undefined') fn();
+        else setTimeout(() => _waitReady(fn), 150);
     }
 
     // =========================================================
-    // ESTILOS CSS — TIMELINE INLINE NA ENGINE
+    // ESTILOS — só o que não existe ainda no style.css
     // =========================================================
     function _injectStyles() {
         if (document.getElementById('nef-styles')) return;
         const s = document.createElement('style');
         s.id = 'nef-styles';
         s.textContent = `
-            /* ── ENGINE TIMELINE PANEL ── */
-            #engine-timeline-panel {
-                padding: 0 0 18px 0;
-                border-top: 1px solid #0d0d1e;
-                margin-top: 0;
+            /* ── SCREEN EXPLORAR ── */
+            #screen-explorar .vault-layout { max-width: 960px; }
+
+            /* ── TABS INTERNAS ── */
+            .nef-inner-tabs {
+                display: flex;
+                gap: 0;
+                border-bottom: 1px solid #1a1a2e;
+                margin-bottom: 20px;
             }
-            .etl-header {
+            .nef-itab-btn {
+                background: none; border: none;
+                border-bottom: 2px solid transparent;
+                color: #444466;
+                font-family: 'Space Mono', monospace;
+                font-size: 0.55rem; letter-spacing: 2px;
+                padding: 9px 18px; cursor: pointer;
+                text-transform: uppercase;
+                margin-bottom: -1px;
+                transition: color 0.2s, border-color 0.2s;
+            }
+            .nef-itab-btn:hover { color: #00ffcc; }
+            .nef-itab-btn.active { color: #00ffcc; border-bottom-color: #00ffcc; }
+            .nef-itab-panel { display: none; }
+            .nef-itab-panel.active { display: block; animation: nef-fin 0.22s ease; }
+            @keyframes nef-fin { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+
+            /* ── FEED GRID (Explorar) ── */
+            #nef-explore-feed {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                gap: 16px;
+                padding-bottom: 20px;
+            }
+            @media (max-width: 600px) {
+                #nef-explore-feed {
+                    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                    gap: 10px;
+                }
+            }
+
+            /* ── CARD DO FEED — estende .album-card com contexto de evento ── */
+            .nef-feed-card {
+                position: relative;
+                cursor: pointer;
+                animation: nef-card-in 0.35s cubic-bezier(0.16,1,0.3,1);
+            }
+            @keyframes nef-card-in {
+                from { opacity:0; transform: scale(0.92) translateY(8px); }
+                to   { opacity:1; transform: none; }
+            }
+
+            /* Badge de evento (DROP / FUSÃO / PURGE) no topo do card */
+            .nef-event-badge {
+                position: absolute;
+                top: 6px; left: 6px;
+                z-index: 10;
+                font-family: 'Space Mono', monospace;
+                font-size: 0.38rem;
+                font-weight: 700;
+                letter-spacing: 1.5px;
+                padding: 2px 6px;
+                text-transform: uppercase;
+                pointer-events: none;
+            }
+            .nef-event-badge.drop   { background: #00ffcc22; color: #00ffcc; border: 1px solid #00ffcc55; }
+            .nef-event-badge.fuse   { background: #ff00ff22; color: #ff00ff; border: 1px solid #ff00ff55; }
+            .nef-event-badge.purge  { background: #ff003322; color: #ff0033; border: 1px solid #ff003355; }
+            .nef-event-badge.market { background: #ffaa0022; color: #ffaa00; border: 1px solid #ffaa0055; }
+
+            /* Operador (@username) abaixo da arte */
+            .nef-card-operator {
+                font-family: 'Space Mono', monospace;
+                font-size: 0.44rem;
+                color: #555577;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                margin-top: 2px;
+                letter-spacing: 0.5px;
+            }
+            .nef-card-operator span { color: #00ffcc88; }
+
+            /* Card sem imagem — placeholder */
+            .nef-no-art {
+                width: 100%;
+                aspect-ratio: 1/1;
+                background: #07070f;
+                border: 1px dashed #1c1c28;
                 display: flex;
                 align-items: center;
-                justify-content: space-between;
-                padding: 10px 0 8px 0;
-                cursor: pointer;
-                user-select: none;
-            }
-            .etl-title {
+                justify-content: center;
                 font-family: 'Space Mono', monospace;
                 font-size: 0.42rem;
-                color: #333355;
-                letter-spacing: 3px;
-                text-transform: uppercase;
+                color: #222233;
+                letter-spacing: 2px;
             }
-            .etl-title .etl-dot {
+
+            /* NEW badge piscando em cards frescos */
+            .nef-feed-card.fresh-card .nef-event-badge {
+                animation: nef-badge-blink 0.8s steps(1) 4;
+            }
+            @keyframes nef-badge-blink {
+                0%,100% { opacity:1; } 50% { opacity:0; }
+            }
+
+            /* ESTADO VAZIO */
+            .nef-empty {
+                grid-column: 1 / -1;
+                text-align: center;
+                padding: 60px 20px;
+                font-family: 'Space Mono', monospace;
+                font-size: 0.55rem;
+                color: #1a1a33;
+                border: 2px dashed #0d0d1e;
+            }
+
+            /* ── LORE ── */
+            .nef-lore-card {
+                border-left: 2px solid #00ffcc22;
+                padding: 10px 0 10px 12px;
+                margin-bottom: 14px;
+            }
+            .nef-lore-style {
+                font-family: 'Archivo Black', sans-serif;
+                font-size: 0.75rem; color: #00ffcc; margin-bottom: 5px;
+            }
+            .nef-lore-body {
+                font-family: 'Space Mono', monospace;
+                font-size: 0.51rem; color: #777799; line-height: 1.9;
+            }
+            .nef-lore-lvl { font-size: 0.42rem; color: #333355; letter-spacing: 1px; margin-bottom: 3px; }
+            .nef-empty-feed {
+                font-family: 'Space Mono', monospace;
+                font-size: 0.5rem; color: #222244; padding: 20px 0;
+            }
+
+            /* ── LOAD MORE ── */
+            .nef-load-more-wrap {
+                grid-column: 1 / -1;
+                text-align: center;
+                padding: 10px 0 4px;
+            }
+            .nef-load-more {
+                background: none;
+                border: 1px solid #1a1a2e;
+                color: #333355;
+                font-family: 'Space Mono', monospace;
+                font-size: 0.48rem;
+                padding: 8px 20px;
+                cursor: pointer;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+                transition: border-color 0.2s, color 0.2s;
+            }
+            .nef-load-more:hover { border-color: #00ffcc44; color: #00ffcc88; }
+
+            /* Dot realtime no header da tab */
+            .nef-live-dot {
                 display: inline-block;
-                width: 5px;
-                height: 5px;
+                width: 5px; height: 5px;
                 border-radius: 50%;
                 background: #00ff66;
-                margin-right: 6px;
+                margin-left: 6px;
                 vertical-align: middle;
                 animation: etl-blink 1.4s ease-in-out infinite;
             }
-            @keyframes etl-blink { 0%,100% { opacity:1; } 50% { opacity:0.2; } }
-            .etl-toggle-icon {
-                font-family: 'Space Mono', monospace;
-                font-size: 0.4rem;
-                color: #222244;
-                transition: color 0.2s;
-            }
-            .etl-header:hover .etl-toggle-icon { color: #00ffcc55; }
-
-            #etl-feed {
-                max-height: 220px;
-                overflow-y: auto;
-                scrollbar-width: thin;
-                scrollbar-color: #00ffcc22 transparent;
-                padding-right: 4px;
-            }
-            #etl-feed::-webkit-scrollbar { width: 3px; }
-            #etl-feed::-webkit-scrollbar-thumb { background: #00ffcc22; border-radius:2px; }
-
-            .etl-line {
-                font-family: 'Space Mono', monospace;
-                font-size: 0.44rem;
-                line-height: 1.8;
-                border-left: 2px solid #00ff6622;
-                padding: 3px 0 3px 8px;
-                margin-bottom: 2px;
-                color: #00ff6666;
-                word-break: break-word;
-                transition: border-color 0.5s, color 0.5s, background 0.5s;
-                border-radius: 0 2px 2px 0;
-            }
-            .etl-line.drop   { border-left-color: #00ffcc55; color: #00ffccaa; }
-            .etl-line.fuse   { border-left-color: #ff00ff44; color: #ff00ffaa; }
-            .etl-line.purge  { border-left-color: #ff333344; color: #ff3333aa; }
-            .etl-line.ledger { border-left-color: #00ffcc33; color: #00ffcc88; }
-            .etl-line.feed   { border-left-color: #ffaa0033; color: #ffaa0088; }
-            .etl-line.sys    { border-left-color: #9933ff33; color: #9933ff88; }
-            .etl-line.fresh  {
-                background: #00ff660a;
-                border-left-color: #00ff66 !important;
-                color: #00ff66 !important;
-            }
-            .etl-ts { color: #1a1a33; margin-right: 5px; font-size: 0.38rem; }
-            .etl-icon { margin-right: 4px; }
-            .etl-rarity {
-                font-size: 0.37rem;
-                letter-spacing: 1px;
-                opacity: 0.65;
-                margin-left: 4px;
-            }
-            .etl-empty {
-                font-family: 'Space Mono', monospace;
-                font-size: 0.44rem;
-                color: #1a1a33;
-                padding: 14px 0 4px 0;
-                text-align: center;
-            }
-            /* Collapsed state */
-            #engine-timeline-panel.collapsed #etl-feed { display: none; }
-            #engine-timeline-panel.collapsed .etl-toggle-icon::before { content: '▸'; }
-            #engine-timeline-panel:not(.collapsed) .etl-toggle-icon::before { content: '▾'; }
+            @keyframes etl-blink { 0%,100% { opacity:1; } 50% { opacity:0.15; } }
         `;
         document.head.appendChild(s);
     }
 
     // =========================================================
-    // INJEÇÃO DO PAINEL DE TIMELINE NA #screen-engine
+    // INJEÇÃO DO BOTÃO EXPLORAR NO HEADER NAV
     // =========================================================
-    function _injectTimelinePanel() {
-        if (document.getElementById('engine-timeline-panel')) return;
+    function _injectNavButton() {
+        const navWrapper = document.getElementById('navMenuWrapper');
+        if (!navWrapper || document.getElementById('navExplorBtn')) return;
+        const btn = document.createElement('button');
+        btn.className = 'btn-navigation';
+        btn.id = 'navExplorBtn';
+        btn.onclick = () => { if (typeof navigateTo === 'function') navigateTo('explorar'); };
+        btn.innerHTML = `<span>EXPLORAR</span><span class="btn-sub-nav">FEED · LORE</span>`;
+        const authBtn = document.getElementById('navAuthBtn');
+        if (authBtn) navWrapper.insertBefore(btn, authBtn);
+        else navWrapper.appendChild(btn);
+    }
 
-        const engineScreen = document.getElementById('screen-engine');
-        if (!engineScreen) return;
-
-        const panel = document.createElement('div');
-        panel.id = 'engine-timeline-panel';
-        // Começa expandido
-        panel.innerHTML = `
-            <div class="etl-header" onclick="_etlToggleCollapse()">
-                <div class="etl-title">
-                    <span class="etl-dot"></span>REDE_GLOBAL // EVENTOS AO VIVO
+    // =========================================================
+    // INJEÇÃO DA SPA #screen-explorar
+    // =========================================================
+    function _injectScreen() {
+        if (document.getElementById('screen-explorar')) return;
+        const screen = document.createElement('div');
+        screen.id = 'screen-explorar';
+        screen.className = 'spa-screen';
+        screen.innerHTML = `
+            <div class="vault-layout">
+                <div class="vault-header">
+                    <h2 style="color:#00ffcc;">EXPLORAR // REDE_GLOBAL</h2>
+                    <p style="font-size:0.6rem; color:#888899;">Cards ao vivo — drops, fusões e destruições da rede.</p>
                 </div>
-                <span class="etl-toggle-icon"></span>
-            </div>
-            <div id="etl-feed">
-                <div class="etl-empty">&gt; AGUARDANDO TRANSMISSÃO...</div>
+
+                <div class="nef-inner-tabs">
+                    <button class="nef-itab-btn active" data-panel="feed" onclick="nefSwitchTab('feed')">
+                        ▸ FEED<span class="nef-live-dot"></span>
+                    </button>
+                    <button class="nef-itab-btn" data-panel="lore" onclick="nefSwitchTab('lore')">▸ LORE</button>
+                </div>
+
+                <!-- PAINEL: FEED VISUAL -->
+                <div class="nef-itab-panel active" id="nef-panel-feed">
+                    <div id="nef-explore-feed">
+                        <div class="nef-empty">&gt; AGUARDANDO TRANSMISSÃO DA REDE...</div>
+                    </div>
+                </div>
+
+                <!-- PAINEL: LORE -->
+                <div class="nef-itab-panel" id="nef-panel-lore">
+                    <div class="nef-section-label" style="font-family:'Space Mono',monospace;font-size:0.45rem;color:#333355;letter-spacing:3px;margin-bottom:10px;text-transform:uppercase;">&gt; FRAGMENTOS_DE_LORE // DESBLOQUEADOS PELO SEU NÍVEL</div>
+                    <div id="nef-lore-content">
+                        <div class="nef-empty-feed">&gt; INICIALIZANDO...</div>
+                    </div>
+                </div>
             </div>
         `;
-
-        // Insere após o .stories-panel (antes do .workspace ou no final do screen)
-        const storiesPanel = engineScreen.querySelector('.stories-panel');
-        if (storiesPanel && storiesPanel.nextSibling) {
-            engineScreen.insertBefore(panel, storiesPanel.nextSibling);
-        } else if (storiesPanel) {
-            engineScreen.appendChild(panel);
-        } else {
-            // Fallback: insere como primeiro filho
-            engineScreen.insertBefore(panel, engineScreen.firstChild);
-        }
+        const firstModal = document.querySelector('.modal-overlay');
+        if (firstModal) document.body.insertBefore(screen, firstModal);
+        else document.body.appendChild(screen);
     }
 
-    window._etlToggleCollapse = function () {
-        const panel = document.getElementById('engine-timeline-panel');
-        if (panel) panel.classList.toggle('collapsed');
+    // =========================================================
+    // PATCH navigateTo para reconhecer 'explorar'
+    // =========================================================
+    function _patchNavigateTo() {
+        const _orig = window.navigateTo;
+        if (!_orig || window._nefNavigatePatched) return;
+        window._nefNavigatePatched = true;
+        window.navigateTo = function (screenId) {
+            if (screenId === 'explorar') {
+                document.querySelectorAll('.spa-screen').forEach(s => s.classList.remove('active'));
+                const target = document.getElementById('screen-explorar');
+                if (target) target.classList.add('active');
+                _lazyBootFeed();
+                return;
+            }
+            return _orig.apply(this, arguments);
+        };
+    }
+
+    // =========================================================
+    // TAB SWITCHER
+    // =========================================================
+    const _tabRendered = { lore: false };
+    window.nefSwitchTab = function (panelId) {
+        document.querySelectorAll('.nef-itab-btn').forEach(b => b.classList.toggle('active', b.dataset.panel === panelId));
+        document.querySelectorAll('.nef-itab-panel').forEach(p => p.classList.toggle('active', p.id === `nef-panel-${panelId}`));
+        if (panelId === 'lore' && !_tabRendered.lore) { _tabRendered.lore = true; _renderLore(); }
     };
 
     // =========================================================
-    // TIMELINE REALTIME — eventos_globais
+    // HELPERS — tipo de evento, raridade, classes
     // =========================================================
-    const _cache = [];
-    let _realtimeSub = null;
-    let _timelineBooted = false;
-
-    function _ts(iso) {
-        try {
-            const d = new Date(iso);
-            return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
-        } catch { return '--:--'; }
-    }
-
-    // Determina tipo visual (drop, fuse, purge, ledger, feed, sys) da linha
-    function _lineClass(row) {
+    function _eventType(row) {
         const tipo = (row.tipo || row.event_type || '').toLowerCase();
-        const msg  = (row.mensagem || (row.payload && (row.payload.message || row.payload.text)) || '').toLowerCase();
-
-        if (tipo === 'drop' || msg.includes('resgatou') || msg.includes('rescued') || msg.includes('claim')) return 'drop';
-        if (tipo === 'fusao' || tipo === 'fusion' || msg.includes('fusão') || msg.includes('fundiu') || msg.includes('fus')) return 'fuse';
-        if (tipo === 'purge' || tipo === 'fornalha' || msg.includes('destruiu') || msg.includes('purged') || msg.includes('fornalha')) return 'purge';
-        if (tipo === 'ledger' || msg.startsWith('ledger')) return 'ledger';
-        if (tipo === 'feed') return 'feed';
-        return 'sys';
+        const msg  = (row.mensagem || '').toLowerCase();
+        if (tipo === 'drop'   || msg.includes('resgatou') || msg.includes('drop'))    return 'drop';
+        if (tipo === 'fusao'  || tipo === 'fusion' || msg.includes('fundiu') || msg.includes('fus')) return 'fuse';
+        if (tipo === 'purge'  || msg.includes('destruiu') || msg.includes('fornalha')) return 'purge';
+        if (tipo === 'market' || msg.includes('vendeu') || msg.includes('comprou'))   return 'market';
+        return 'drop'; // fallback mais comum
     }
 
-    // Ícone visual por tipo
-    const _ICONS = {
-        drop:   '⬇',
-        fuse:   '⚗',
-        purge:  '🔥',
-        ledger: '▸',
-        feed:   '◈',
-        sys:    '◆',
-    };
+    const EVENT_LABEL = { drop: '⬇ DROP', fuse: '⚗ FUSÃO', purge: '🔥 PURGE', market: '◈ TRADE' };
 
-    // Extrai texto legível da linha
-    function _lineText(row) {
-        return row.mensagem
-            || (row.payload && (row.payload.message || row.payload.text || row.payload.label))
-            || (row.username && row.tipo ? `${row.username} [${row.tipo}]` : null)
-            || `[${(row.tipo || row.event_type || 'EVT').toUpperCase()}]`;
+    function _rarityClass(r) {
+        const v = (r || '').toLowerCase();
+        if (v.includes('ancestral')) return 'rare-ancestral';
+        if (v.includes('legendary') || v.includes('lendário')) return 'rare-legendary';
+        if (v.includes('epic')      || v.includes('épico'))    return 'rare-epic';
+        return 'rare-common';
     }
 
-    // Extrai raridade do payload se existir
-    function _lineRarity(row) {
-        const p = row.card_payload || (row.payload && row.payload.card_payload) || {};
-        return p.rarityNameEN || p.rarity_name_en || p.rarityName || p.rarity_name || '';
+    function _rarityColor(r) {
+        const v = (r || '').toLowerCase();
+        if (v.includes('ancestral')) return '#ff007f';
+        if (v.includes('legendary') || v.includes('lendário')) return '#00ffff';
+        if (v.includes('epic')      || v.includes('épico'))    return '#ffaa00';
+        return '#555566';
+    }
+
+    function _extractPayload(row) {
+        // card_payload pode estar na raiz ou dentro de payload
+        return row.card_payload
+            || (row.payload && typeof row.payload === 'object' && row.payload.card_payload)
+            || null;
+    }
+
+    function _operatorName(row) {
+        return row.username
+            || (row.payload && row.payload.username)
+            || row.id_usuario
+            || '???';
     }
 
     function _esc(s) {
-        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
-    function _addToFeed(row, fresh) {
-        const cls  = _lineClass(row);
-        const text = _lineText(row);
-        const ts   = row.created_at || new Date().toISOString();
-        const rarity = _lineRarity(row);
-        const icon = _ICONS[cls] || '◆';
+    // =========================================================
+    // CONSTRUÇÃO DO CARD VISUAL
+    // =========================================================
+    function _buildCardEl(row, fresh) {
+        const evType  = _eventType(row);
+        const payload = _extractPayload(row);
+        const imgSrc  = payload && (payload.imgSrc || payload.img_src);
+        const rarity  = payload && (payload.rarityNameEN || payload.rarity_name_en || payload.rarityName || payload.rarity_name || '');
+        const styleNm = payload && (payload.styleName  || payload.style_name  || '');
+        const cardId  = payload && (payload.id || payload.display_id || '');
+        const isPurged= payload && (payload.isPurged || payload.is_purged);
+        const operator= _operatorName(row);
 
-        const entry = { ts, cls, text, rarity, icon, fresh };
-        _cache.unshift(entry);
-        if (_cache.length > 100) _cache.pop();
+        const rarClass = _rarityClass(rarity);
+        const rarColor = _rarityColor(rarity);
 
-        const feed = document.getElementById('etl-feed');
-        if (!feed) return;
+        const wrapper = document.createElement('div');
+        wrapper.className = `nef-feed-card album-card ${rarClass}${isPurged ? ' is-purged' : ''}${fresh ? ' fresh-card' : ''}`;
+        if (isPurged) {
+            // Aplica variável CSS para texto PURGED/DETONADA igual ao cofre
+            const lang = (typeof currentLang !== 'undefined' && currentLang === 'EN') ? 'PURGED' : 'DETONADA';
+            wrapper.style.setProperty('--purge-label', `"${lang}"`);
+        }
 
-        const empty = feed.querySelector('.etl-empty');
-        if (empty) empty.remove();
+        const artHTML = imgSrc
+            ? `<div class="album-preview-wrapper"><img src="${_esc(imgSrc)}" alt="${_esc(styleNm || cardId)}" loading="lazy" draggable="false"></div>`
+            : `<div class="nef-no-art">SEM_ARTE</div>`;
 
-        const line = document.createElement('div');
-        line.className = `etl-line ${cls}${fresh ? ' fresh' : ''}`;
-        line.innerHTML = `<span class="etl-ts">[${_ts(ts)}]</span><span class="etl-icon">${icon}</span>${_esc(text)}${rarity ? `<span class="etl-rarity">[${_esc(rarity)}]</span>` : ''}`;
-        feed.insertBefore(line, feed.firstChild);
-        if (fresh) setTimeout(() => line.classList.remove('fresh'), 3000);
+        const rarLabel = rarity
+            ? `<div class="album-rarity" style="color:${rarColor};">${_esc(rarity)}</div>`
+            : '';
 
-        // Limita DOM a 60 linhas
-        while (feed.children.length > 60) feed.removeChild(feed.lastChild);
+        const idLabel = cardId
+            ? `<div class="album-id" style="font-size:0.7rem;">${_esc(cardId)}</div>`
+            : (styleNm ? `<div class="album-id" style="font-size:0.65rem;color:#888899;">${_esc(styleNm)}</div>` : '');
+
+        wrapper.innerHTML = `
+            <div class="nef-event-badge ${evType}">${EVENT_LABEL[evType] || '◆'}</div>
+            ${artHTML}
+            <div class="album-meta">
+                ${rarLabel}
+                ${idLabel}
+                <div class="nef-card-operator"><span>@</span>${_esc(operator)}</div>
+            </div>
+        `;
+
+        // Clique abre inspect se disponível
+        wrapper.addEventListener('click', () => {
+            if (payload && typeof window.openInspectModal === 'function') {
+                window.openInspectModal(payload);
+            }
+        });
+
+        return wrapper;
     }
 
-    async function _subscribeTimeline() {
-        if (_timelineBooted) return;
-        _timelineBooted = true;
+    // =========================================================
+    // FEED REALTIME
+    // =========================================================
+    let _feedBooted = false;
+    let _realtimeSub = null;
+    let _feedOffset = 0;
+    const FEED_PAGE = 24;
 
-        // Histórico inicial (últimos 40 eventos)
+    function _lazyBootFeed() {
+        if (_feedBooted) return;
+        _feedBooted = true;
+        _loadFeedPage(true);
+        _subscribeRealtime();
+    }
+
+    async function _loadFeedPage(initial) {
+        const grid = document.getElementById('nef-explore-feed');
+        if (!grid) return;
+
+        // Remove placeholder e botão load-more anterior
+        grid.querySelector('.nef-empty')?.remove();
+        grid.querySelector('.nef-load-more-wrap')?.remove();
+
         try {
-            const { data } = await sb.from('eventos_globais')
+            const { data, error } = await sb.from('eventos_globais')
                 .select('*')
                 .order('created_at', { ascending: false })
-                .limit(40);
-            (data || []).reverse().forEach(r => _addToFeed(r, false));
-        } catch (e) { console.error('[etl/timeline]', e); }
+                .range(_feedOffset, _feedOffset + FEED_PAGE - 1);
 
-        // Subscription Realtime
+            if (error) throw error;
+
+            if (!data || data.length === 0) {
+                if (initial) {
+                    grid.innerHTML = '<div class="nef-empty">&gt; NENHUM EVENTO NA REDE AINDA.</div>';
+                }
+                return;
+            }
+
+            // Filtra só eventos com card_payload (têm arte)
+            const withArt  = data.filter(r => _extractPayload(r));
+            const withoutArt = data.filter(r => !_extractPayload(r));
+
+            // Insere cards com arte no grid
+            withArt.forEach(row => {
+                const el = _buildCardEl(row, false);
+                // Se inicial, insere no final; se realtime, insere no início
+                grid.appendChild(el);
+            });
+
+            // Se tem próxima página, mostra botão
+            if (data.length === FEED_PAGE) {
+                _feedOffset += FEED_PAGE;
+                const wrap = document.createElement('div');
+                wrap.className = 'nef-load-more-wrap';
+                wrap.innerHTML = '<button class="nef-load-more" onclick="nefLoadMoreFeed()">▾ CARREGAR MAIS</button>';
+                grid.appendChild(wrap);
+            }
+
+        } catch (e) {
+            console.error('[nef/feed]', e);
+            if (initial) grid.innerHTML = '<div class="nef-empty">&gt; ERRO AO CARREGAR O FEED. TENTE NOVAMENTE.</div>';
+        }
+    }
+
+    window.nefLoadMoreFeed = function () { _loadFeedPage(false); };
+
+    function _subscribeRealtime() {
         if (_realtimeSub) try { sb.removeChannel(_realtimeSub); } catch {}
-        _realtimeSub = sb.channel('etl-global-events')
+        _realtimeSub = sb.channel('nef-explorar-realtime')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'eventos_globais' }, p => {
-                if (p && p.new) _addToFeed(p.new, true);
+                if (!p || !p.new) return;
+                const row = p.new;
+                // Só eventos com arte entram no feed visual
+                if (!_extractPayload(row)) return;
+                const grid = document.getElementById('nef-explore-feed');
+                if (!grid) return;
+                grid.querySelector('.nef-empty')?.remove();
+                const el = _buildCardEl(row, true);
+                grid.insertBefore(el, grid.firstChild);
+                // Remove fresh-card após animação
+                setTimeout(() => el.classList.remove('fresh-card'), 3200);
+                // Limita DOM a 60 cards
+                const cards = grid.querySelectorAll('.nef-feed-card');
+                if (cards.length > 60) cards[cards.length - 1].remove();
             })
             .subscribe();
     }
 
-    // API global para outros módulos empurrarem eventos na timeline
+    // API global — outros módulos podem empurrar eventos manualmente
     window._nefPushTimeline = function (message, type) {
-        _addToFeed({ created_at: new Date().toISOString(), tipo: type || 'sys', mensagem: message }, true);
+        // Compatibilidade com chamadas legadas (não empurra no feed visual sem arte)
     };
 
-    // Compatibilidade com pushLedger / pushFeedCard (monkey-patch)
+    // Monkey-patches pushLedger / pushFeedCard para injetar no feed visual
     function _hookGlobals() {
-        ['pushLedger', 'pushFeedCard'].forEach((fn, i) => {
-            const type = i === 0 ? 'ledger' : 'feed';
-            const orig = window[fn];
-            if (typeof orig !== 'function') return;
-            window[fn] = function (...args) {
-                const msg = typeof args[0] === 'string' ? args[0] : (args[0] && (args[0].text || args[0].message)) || null;
-                if (msg) window._nefPushTimeline(msg, type);
-                return orig.apply(this, args);
+        // pushFeedCard recebe o card diretamente — injeta no feed se explorar estiver aberto
+        const origPush = window.pushFeedCard;
+        if (typeof origPush === 'function' && !window._nefHookedPushFeedCard) {
+            window._nefHookedPushFeedCard = true;
+            window.pushFeedCard = function (card, evType) {
+                const result = origPush.apply(this, arguments);
+                // Monta row fake para o feed visual
+                const fakeRow = {
+                    tipo: evType || 'drop',
+                    username: (typeof currentUser !== 'undefined' && currentUser.username) || '???',
+                    card_payload: card,
+                    created_at: new Date().toISOString()
+                };
+                const grid = document.getElementById('nef-explore-feed');
+                if (grid) {
+                    grid.querySelector('.nef-empty')?.remove();
+                    const el = _buildCardEl(fakeRow, true);
+                    grid.insertBefore(el, grid.firstChild);
+                    setTimeout(() => el.classList.remove('fresh-card'), 3200);
+                    const cards = grid.querySelectorAll('.nef-feed-card');
+                    if (cards.length > 60) cards[cards.length - 1].remove();
+                }
+                return result;
             };
-        });
+        }
     }
 
     // =========================================================
-    // HOOK NAS FUNÇÕES DE RENDER PARA SUPPLY BARS
+    // LORE
     // =========================================================
-    function _hookRenderForSupplyBars() {
-        const renderFns = ['renderVaultGrid', 'renderMarketGrid', 'renderAlbumGrid', 'renderShowcaseInventory'];
-        renderFns.forEach(fnName => {
-            const orig = window[fnName];
-            if (typeof orig !== 'function' || window[`_supplyHooked_${fnName}`]) return;
-            window[`_supplyHooked_${fnName}`] = true;
-            window[fnName] = function (...args) {
-                const result = orig.apply(this, args);
-                // Aguarda render terminar, depois injeta supply bars
-                setTimeout(() => {
-                    if (typeof window.enrichAllCardsWithSupplyBars === 'function') {
-                        window.enrichAllCardsWithSupplyBars();
-                    }
-                }, 120);
-                return result;
-            };
-        });
+    function _operatorLevel(bumps) {
+        if (bumps >= 10000) return 10;
+        if (bumps >= 5000)  return 7;
+        if (bumps >= 2000)  return 5;
+        if (bumps >= 1000)  return 3;
+        if (bumps >= 300)   return 2;
+        return 1;
+    }
+
+    async function _renderLore() {
+        const el = document.getElementById('nef-lore-content');
+        if (!el) return;
+        el.innerHTML = '<div class="nef-empty-feed">&gt; CARREGANDO ARQUIVOS...</div>';
+        try {
+            const level = _operatorLevel((currentUser && currentUser.bumps) || 0);
+            const { data, error } = await sb.from('drop_station_lore')
+                .select('style_name, lore_text_pt, min_level')
+                .lte('min_level', level)
+                .order('min_level', { ascending: false })
+                .limit(4);
+            if (error) throw error;
+            if (!data || data.length === 0) {
+                el.innerHTML = '<div class="nef-empty-feed">&gt; NENHUM FRAGMENTO ACESSÍVEL NO SEU NÍVEL. CONTINUE OPERANDO.</div>';
+                return;
+            }
+            el.innerHTML = data.map(r => `
+                <div class="nef-lore-card">
+                    <div class="nef-lore-lvl">NÍVEL MÍNIMO: ${r.min_level}</div>
+                    <div class="nef-lore-style">${_esc(r.style_name)}</div>
+                    <div class="nef-lore-body">${_esc(r.lore_text_pt)}</div>
+                </div>
+            `).join('');
+        } catch (e) {
+            console.error('[nef/lore]', e);
+            el.innerHTML = '<div class="nef-empty-feed">&gt; ERRO AO CARREGAR LORE.</div>';
+        }
     }
 
     // =========================================================
@@ -325,10 +565,10 @@
     // =========================================================
     function _boot() {
         _injectStyles();
-        _injectTimelinePanel();
-        _subscribeTimeline();
+        _injectNavButton();
+        _injectScreen();
+        _patchNavigateTo();
         _hookGlobals();
-        _hookRenderForSupplyBars();
     }
 
     if (document.readyState === 'loading') {
