@@ -4,7 +4,17 @@
 //
 // Parte 7 de 14 do script.js original (split automático,
 // ORDEM DE CARREGAMENTO PRESERVADA — não mudar a ordem dos <script> no HTML).
+//
+// [PATCH 5_MECANICAS] Adicionado: preflight + overlay de Terminal Overflow
+// pro teto global de 500 cartas ativas. Ver SQL_PATCH_5_MECANICAS.sql pra
+// trigger/RPC do banco. IMPORTANTE: claimAssetLogic (em
+// cards-inventory-db.js, ainda não patchado nesta rodada) precisa, no seu
+// catch de erro do insertCardToSupabase, chamar
+// `if (window.handleSupabaseCardError(error)) return;` ANTES de seguir
+// com o throw genérico — assim o erro 'NETWORK_LIMIT_REACHED' vindo da
+// trigger do banco também aciona o overlay aqui definido.
 // =========================================================
+
 
     function _getRandomDropVariant(rarityKey) {
         const pool = DROP_FILTER_DB[rarityKey] || DROP_FILTER_DB.common;
@@ -148,10 +158,133 @@
         return idx === -1 ? naturalIndex : idx;
     }
 
+    // =========================================================
+    // [ESCOPO 5_MECANICAS] TETO GLOBAL DE 500 CARTAS — BLINDAGEM CLIENT-SIDE
+    // O teto de verdade é garantido no banco (trigger
+    // verify_card_limit_and_lock() + LOCK TABLE EXCLUSIVE em
+    // SQL_PATCH_5_MECANICAS.sql), que é a ÚNICA fonte de verdade contra
+    // race conditions reais (dois cliques síncronos de usuários
+    // diferentes). Esta checagem aqui no client é só uma camada de UX:
+    // evita iniciar a animação de roll (1.2s+1.5s de SFX/TTS) quando já
+    // sabemos de antemão que o INSERT vai ser rejeitado, e overlay de
+    // "Terminal Overflow" sempre é a mesma função renderizada nos dois
+    // casos (preflight aqui OU erro vindo do banco).
+    // =========================================================
+    async function _getActiveCardCountFromNetwork() {
+        const { count, error } = await sb
+            .from('cards')
+            .select('id', { count: 'exact', head: true })
+            .eq('is_purged', false);
+        if (error) {
+            console.error('_getActiveCardCountFromNetwork:', error.message);
+            return null; // indisponível — não bloqueia o roll por falha de leitura
+        }
+        return count;
+    }
+
+    /**
+     * Overlay temático de "Terminal Overflow" — cobre a tela inteira,
+     * impede novos drops e empurra o usuário pra Fornalha (único jeito de
+     * abrir espaço na rede: queimar ativos existentes). Usado tanto pelo
+     * preflight de executeHardwareRoll quanto por qualquer outro módulo
+     * que capture o erro customizado 'NETWORK_LIMIT_REACHED' do Postgres
+     * (ex: claimAssetLogic em cards-inventory-db.js, ao tentar gravar o
+     * card resgatado) — basta chamar window.renderNetworkLimitOverlay().
+     */
+    function renderNetworkLimitOverlay() {
+        if (document.getElementById('networkLimitOverlay')) return; // já visível
+        playSynthSound('shatter');
+        speakPhrase(
+            "Rede saturada. Teto de quinhentas cartas atingido. Use a Fornalha para liberar espaço.",
+            "Network saturated. Five hundred card cap reached. Use the Furnace to free up space."
+        );
+
+        const overlay = document.createElement('div');
+        overlay.id = 'networkLimitOverlay';
+        Object.assign(overlay.style, {
+            position: 'fixed', inset: '0', zIndex: '10000',
+            background: 'rgba(5, 0, 0, 0.96)', display: 'flex',
+            flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            gap: '16px', padding: '24px', textAlign: 'center',
+            fontFamily: '"Space Mono", monospace'
+        });
+
+        overlay.innerHTML = `
+            <div class="loading-glitch loading-glitch-cursor" data-text="[ TERMINAL_OVERFLOW ]" style="font-size:1.4rem; letter-spacing:4px; color:#ff0033;">[ TERMINAL_OVERFLOW ]</div>
+            <div style="font-size:0.65rem; color:#ff003399; letter-spacing:2px; max-width:420px;">
+                ${currentLang === 'PT'
+                    ? 'TETO_GLOBAL_DA_REDE ATINGIDO: 500/500 CARTAS ATIVAS.<br>NENHUM NOVO DROP PODE SER MINTADO ATÉ A REDE LIBERAR ESPAÇO.'
+                    : 'NETWORK_GLOBAL_CAP REACHED: 500/500 ACTIVE CARDS.<br>NO NEW DROP CAN BE MINTED UNTIL THE NETWORK FREES UP SPACE.'}
+            </div>
+            <div style="font-size:0.6rem; color:#aaaaaa; max-width:420px;">
+                ${currentLang === 'PT'
+                    ? 'Use a FORNALHA para queimar ativos existentes e abrir espaço na rede.'
+                    : 'Use the FURNACE to burn existing assets and free up network space.'}
+            </div>
+            <button id="networkLimitGoFurnaceBtn" class="btn-action" style="border-color:#ff5500; color:#ff5500; margin-top:8px; padding:10px 24px;">
+                ${currentLang === 'PT' ? '🔥 IR PARA A FORNALHA' : '🔥 GO TO FURNACE'}
+            </button>
+            <button id="networkLimitCloseBtn" class="btn-action" style="border-color:#555; color:#888; padding:8px 20px;">
+                ${currentLang === 'PT' ? 'FECHAR' : 'CLOSE'}
+            </button>
+        `;
+
+        document.body.appendChild(overlay);
+
+        document.getElementById('networkLimitGoFurnaceBtn').addEventListener('click', () => {
+            overlay.remove();
+            toggleAlchemyPanel();
+            setAlchemyMode('fornalha');
+        });
+        document.getElementById('networkLimitCloseBtn').addEventListener('click', () => overlay.remove());
+
+        // Trava os botões de drop enquanto o overlay estiver de pé —
+        // evita novos cliques de roll empilhando animações por baixo.
+        const btnFree = document.getElementById('btnFree');
+        const btnPremium = document.getElementById('btnPremium');
+        if (btnFree) btnFree.classList.add('disabled');
+        if (btnPremium) btnPremium.classList.add('disabled');
+    }
+    // Exposto globalmente — outros módulos (claimAssetLogic, fusion.js,
+    // etc.) podem chamar window.renderNetworkLimitOverlay() ao capturar
+    // 'NETWORK_LIMIT_REACHED' vindo de qualquer INSERT em `cards`.
+    window.renderNetworkLimitOverlay = renderNetworkLimitOverlay;
+
+    /**
+     * Handler genérico pra erro customizado do Postgres. Qualquer chamada
+     * Supabase (insert em `cards`) que dispare a trigger
+     * verify_card_limit_and_lock() retorna error.message contendo
+     * 'NETWORK_LIMIT_REACHED' — esta função centraliza a detecção pra não
+     * espalhar string-matching por todos os módulos que fazem insert.
+     * Retorna true se o erro era de teto de rede (e já tratou o overlay).
+     */
+    function handleSupabaseCardError(error) {
+        if (!error) return false;
+        const msg = (error.message || '') + ' ' + (error.details || '') + ' ' + (error.hint || '');
+        if (msg.includes('NETWORK_LIMIT_REACHED')) {
+            renderNetworkLimitOverlay();
+            return true;
+        }
+        return false;
+    }
+    window.handleSupabaseCardError = handleSupabaseCardError;
+
     async function executeHardwareRoll(isPremium) {
         if (isRolling) return;
         // Garante que o pool de imagens foi carregado (lazy load — só na primeira chamada)
         await ensurePoolLoaded();
+
+        // ── [ESCOPO 5_MECANICAS] PREFLIGHT DO TETO GLOBAL ──
+        // Verifica o count ANTES de iniciar a animação/cobrar bumps.
+        // A garantia real contra concorrência continua sendo a trigger no
+        // banco (ver nota acima) — isto aqui só evita UX ruim (cobrar 50
+        // bumps premium e animar 2.7s pra no final descobrir que a rede
+        // está saturada).
+        const activeCount = await _getActiveCardCountFromNetwork();
+        if (activeCount !== null && activeCount >= 500) {
+            renderNetworkLimitOverlay();
+            return;
+        }
         // PREMIUM_DROP_PASS: bloqueia imediatamente se deslogado
         if (isPremium && !currentUser.loggedIn) {
             showCyberAlert('ACESSO_NEGADO:', currentLang === 'PT'

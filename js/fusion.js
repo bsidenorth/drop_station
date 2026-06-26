@@ -4,6 +4,13 @@
 //
 // Parte 9 de 14 do script.js original (split automático,
 // ORDEM DE CARREGAMENTO PRESERVADA — não mudar a ordem dos <script> no HTML).
+//
+// [PATCH 5_MECANICAS] startOverload() (Fornalha) reescrita: o sorteio
+// 80/20, a checagem de custódia de mercado e o soft-purge das
+// cartas-mãe saíram do client e agora são decididos atomicamente pela
+// RPC execute_furnace_transmutation (ver SQL_PATCH_5_MECANICAS.sql).
+// O modo de Fusão normal (fuseCards) NÃO foi alterado neste patch —
+// continua client-side, fora do escopo desta rodada.
 // =========================================================
 
     function toggleAlchemyPanel() {
@@ -268,20 +275,35 @@
     }
 
     /**
-     * Executa a Sobrecarga: anima o reator, sorteia o resultado (80/20) e
-     * reflete a queima ou a mutação máxima diretamente no Supabase.
+     * Executa a Sobrecarga: anima o reator e despacha a queima das cartas
+     * selecionadas para a RPC atômica execute_furnace_transmutation no
+     * Postgres — o sorteio 80/20, a checagem de custódia (mercado) e o
+     * soft-purge das cartas-mãe agora são decididos e gravados em UMA
+     * ÚNICA transação no servidor (ver SQL_PATCH_5_MECANICAS.sql),
+     * eliminando o cálculo de roleta puramente client-side que existia
+     * antes. O client só:
+     *   1) dispara a RPC e aguarda o veredito;
+     *   2) sincroniza a animação de instabilidade de tela
+     *      (.furnace-screen-shake) com o RETORNO da transação, não com
+     *      um timer fixo arbitrário;
+     *   3) em caso de SUCESSO, gera o visual da carta mitológica e faz o
+     *      upload pro Storage SÓ NESSE MOMENTO (a carta já existe na
+     *      linha do banco sem imagem) — evita gastar Egress/Storage
+     *      gerando e subindo arte pras 80% das tentativas que falham.
      */
     async function startOverload() {
         if (!currentUser.loggedIn) { showCyberAlert('ACESSO NEGADO', currentLang === 'PT' ? 'Precisas de estar logado para aceder à Fornalha.' : 'Login required to access the Furnace.', 'error'); return; }
         if (_furnSelected.length === 0) return;
-        if (_furnSelected.some(c => c.isListed)) { showCyberAlert('🔒 CUSTÓDIA ATIVA', currentLang === 'PT' ? 'Ativos em custódia no mercado não podem ser sobrecarregados.' : 'Assets listed on market cannot be overloaded.', 'error'); return; }
+        if (_furnSelected.some(c => c.isListed || c.forSale)) { showCyberAlert('🔒 CUSTÓDIA ATIVA', currentLang === 'PT' ? 'Ativos em custódia no mercado não podem ser sobrecarregados.' : 'Assets listed on market cannot be overloaded.', 'error'); return; }
+        if (_furnSelected.some(c => !c._dbId)) { showCyberAlert('ERRO', currentLang === 'PT' ? 'Um dos ativos selecionados não tem registro remoto válido. Recarregue o cofre.' : 'One of the selected assets has no valid remote record. Reload the vault.', 'error'); return; }
 
         const overloadBtn = document.getElementById('furnOverloadBtn');
         overloadBtn.disabled = true;
 
         // Snapshot dos cards selecionados ANTES de qualquer alteração
         const snaps = _furnSelected.map(c => ({...c}));
-        const idsConsumidos = snaps.map(c => c.id);
+        const idsConsumidos = snaps.map(c => c.id);          // display_id (#XXXXXX) — só pra mensagens
+        const dbIdsConsumidos = snaps.map(c => c._dbId);     // ids reais da tabela `cards` — vão pra RPC
 
         const furnacePanel = document.getElementById('alchFornalhaView');
         furnacePanel.classList.add('furnace-charging');
@@ -291,7 +313,11 @@
         setTimeout(() => {
             furnacePanel.classList.remove('furnace-charging');
 
-            // ── Overlay de glitch/reator por 1500ms ───────────────────────
+            // ── Overlay de glitch/reator — agora roda EM PARALELO com a
+            // chamada à RPC (não em sequência com um timer fixo), e só se
+            // resolve quando o veredito do banco já chegou. Isso garante
+            // que a animação nunca "termina" mostrando um resultado que na
+            // verdade ainda não foi confirmado pelo servidor.
             const glitchOverlay = document.createElement('div');
             glitchOverlay.id = 'furnaceGlitchOverlay';
             Object.assign(glitchOverlay.style, {
@@ -310,7 +336,7 @@
             playTerminalSound('alchemy');
             playFusionShockSound();
             const glitchSoundTimer = setInterval(() => playSynthSound('click'), 280);
-            const flashTimers = [250, 550, 850, 1100, 1350].map(delay =>
+            const flashTimers = [250, 550, 850, 1100, 1350, 1600, 1850].map(delay =>
                 setTimeout(() => {
                     flashLayer.classList.add('flash-pulse');
                     setTimeout(() => flashLayer.classList.remove('flash-pulse'), 90);
@@ -331,8 +357,12 @@
                 'TEMPERATURA CRÍTICA ATINGIDA...',
                 'CALCULANDO PROBABILIDADE DE DERRETIMENTO...',
                 'SOBRECARGA EM ANDAMENTO...',
+                'SINCRONIZANDO COM O LEDGER REMOTO...',
             ];
             glitchSub.textContent = subMessages[Math.floor(Math.random() * subMessages.length)];
+            const glitchSubCycler = setInterval(() => {
+                glitchSub.textContent = subMessages[Math.floor(Math.random() * subMessages.length)];
+            }, 600);
 
             const glitchBar = document.createElement('span');
             glitchBar.className = 'loading-glitch-bar furnace-glitch-bar';
@@ -347,57 +377,77 @@
             glitchOverlay.appendChild(glitchBar);
             document.body.appendChild(glitchOverlay);
 
-            setTimeout(async () => {
+            // ── DISPARA A TRANSAÇÃO ATÔMICA NO SERVIDOR ───────────────────
+            // Roda em paralelo com a animação acima; o resultado só é
+            // processado depois do mínimo de 1500ms de glitch (pra nunca
+            // parecer instantâneo/sem peso), usando Promise.all.
+            const minAnimDelay = new Promise(resolve => setTimeout(resolve, 1500));
+            const rpcCall = sb.rpc('execute_furnace_transmutation', {
+                p_user_id: currentUser.id,
+                p_card_ids: dbIdsConsumidos,
+                p_fragments_per_fail: FRAGMENTS_PER_FURNACE_FAIL
+            });
+
+            Promise.all([rpcCall, minAnimDelay]).then(async ([rpcResult]) => {
+                const { data: furnaceResult, error: furnaceError } = rpcResult;
+
                 clearInterval(glitchSoundTimer);
+                clearInterval(glitchSubCycler);
+                flashTimers.forEach(t => clearTimeout(t));
                 document.body.classList.remove('furnace-screen-shake');
                 glitchOverlay.remove();
 
-                // BUGFIX (cards purgados sumindo do cofre): antes, os cards
-                // consumidos eram removidos de savedAssets aqui e o selo
-                // PURGED/DETONADA era aplicado só nas cópias soltas em
-                // `snaps` (que nunca voltavam pro array) — resultado: o
-                // ativo desaparecia do cofre pra sempre em vez de continuar
-                // visível, marcado como detonado. Agora os originais
-                // permanecem no array; só fica marcado isPurged=true.
-                const purgeOriginaisDaFornalha = async (reason) => {
-                    for (const id of idsConsumidos) {
-                        const original = savedAssets.find(a => a.id === id);
-                        if (!original) continue;
-                        if (original._dbId) await purgeCardInSupabase(original._dbId, reason);
-                        markCardPurgedLocally(original, reason);
-                    }
-                };
-
-                const roll = Math.random();
                 let alertTitle, alertMsg, alertType;
 
-                if (roll < 0.80) {
-                    // ── FALHA (80%): marca todos os cards selecionados como purged
-                    // (continuam existindo como registro histórico/inspecionável,
-                    // em vez de serem apagados sem deixar rastro) ──
-                    await purgeOriginaisDaFornalha('fornalha_falha');
-                    // Concede Fragmentos de Sucata como compensação
-                    const furnFragments = snaps.length * FRAGMENTS_PER_FURNACE_FAIL;
-                    currentUser.fragments = (currentUser.fragments || 0) + furnFragments;
-                    await updateProfileInSupabase(currentUser.id, { fragments: currentUser.fragments });
+                // ── ERRO: pode ser o teto global de 500 cartas (em caso de
+                // SUCESSO da fornalha tentando inserir a nova carta), custódia
+                // de mercado, posse inválida, etc. Tudo decidido/validado
+                // atomicamente dentro da RPC. ──
+                if (furnaceError) {
+                    console.error('execute_furnace_transmutation:', furnaceError.message);
 
-                    alertTitle = '[ERRO] FALHA DE CONTENÇÃO';
-                    alertMsg = currentLang === 'PT'
-                        ? `[ERRO] COMPONENTES DERRETIDOS NA FORNALHA. ATIVOS DESTRUÍDOS.<br><small style="color:#ff550099">${idsConsumidos.join(', ')}</small><br><span style="color:#aaa;">+${furnFragments} Fragmentos de Sucata concedidos como compensação. (Total: ${currentUser.fragments})</span>`
-                        : `[ERROR] COMPONENTS MELTED IN THE FURNACE. ASSETS DESTROYED.<br><small style="color:#ff550099">${idsConsumidos.join(', ')}</small><br><span style="color:#aaa;">+${furnFragments} Scrap Fragments granted as compensation. (Total: ${currentUser.fragments})</span>`;
-                    alertType = 'error';
-                    triggerAncestralFlash('#ff5500');
-                    playSynthSound('shatter');
-                    speakPhrase("Fornalha falhou. Ativos derretidos. Fragmentos de sucata concedidos.", "Furnace failed. Assets melted. Scrap fragments granted.");
-                    pushLedger(`${currentUser.username} sobrecarregou a Fornalha com ${idsConsumidos.join('+')} — DERRETIMENTO TOTAL (+${furnFragments} FRAG)`);
+                    if (typeof handleSupabaseCardError === 'function' && handleSupabaseCardError(furnaceError)) {
+                        // NETWORK_LIMIT_REACHED já tratado pelo overlay de
+                        // Terminal Overflow (drop-vault.js). Os cards-mãe NÃO
+                        // foram purgados (a RPC fez ROLLBACK da transação
+                        // inteira), então o cofre local não precisa de
+                        // nenhuma correção aqui.
+                        _furnSelected = [];
+                        _renderFurnGallery();
+                        _updateFurnPreview();
+                        overloadBtn.disabled = false;
+                        return;
+                    }
 
-                } else {
-                    // ── SUCESSO (20%): marca originais como purged (consumidos pela
-                    // mutação) + gera 1 card novo de alta raridade ──
-                    await purgeOriginaisDaFornalha('fornalha_mutacao');
+                    const errCode = furnaceError.message || '';
+                    const errMap = {
+                        FURNACE_CARD_LISTED_ON_MARKET: currentLang === 'PT' ? 'Um dos ativos está em custódia no mercado. Remova o anúncio antes de sobrecarregar.' : 'One of the assets is listed on the market. Remove the listing before overloading.',
+                        FURNACE_CARD_ALREADY_PURGED: currentLang === 'PT' ? 'Um dos ativos já foi detonado anteriormente.' : 'One of the assets was already purged.',
+                        FURNACE_CARD_NOT_OWNED_OR_MISSING: currentLang === 'PT' ? 'Um dos ativos não pertence a este operador ou não existe mais.' : 'One of the assets does not belong to this operator or no longer exists.',
+                        FURNACE_TOO_MANY_CARDS: currentLang === 'PT' ? 'Máximo de 3 ativos por sobrecarga.' : 'Maximum of 3 assets per overload.',
+                        FURNACE_EMPTY_SELECTION: currentLang === 'PT' ? 'Nenhum ativo selecionado.' : 'No assets selected.'
+                    };
+                    const friendly = Object.keys(errMap).find(k => errCode.includes(k));
+                    showCyberAlert(
+                        'ERRO_DE_TRANSAÇÃO',
+                        friendly ? errMap[friendly] : (currentLang === 'PT' ? 'Falha ao processar a sobrecarga. Tenta novamente.' : 'Failed to process the overload.'),
+                        'error'
+                    );
+                    overloadBtn.disabled = false;
+                    return;
+                }
 
-                    const rarityRoll = Math.random();
-                    const newRarity = rarityRoll < 0.55 ? 'ancestral' : 'legendary';
+                // ── A transação no banco já aconteceu (cartas-mãe soft-purgadas
+                // e, em caso de sucesso, a nova carta já está inserida — só sem
+                // imagem ainda). Agora sincronizamos o estado LOCAL. ──
+                snaps.forEach(snap => {
+                    const original = savedAssets.find(a => a.id === snap.id);
+                    if (!original) return;
+                    markCardPurgedLocally(original, 'fornalha_transmutacao');
+                });
+
+                if (furnaceResult.result === 'success') {
+                    const newRarity = furnaceResult.rarity; // 'ancestral' | 'legendary'
                     const rN   = newRarity === 'ancestral' ? 'ANCESTRAL' : 'LENDÁRIO';
                     const rNEN = newRarity === 'ancestral' ? 'ANCESTRAL' : 'LEGENDARY';
                     const wc   = newRarity === 'ancestral' ? '#ff007f' : '#00ffff';
@@ -406,11 +456,12 @@
                     const fusedVisual = await renderFusedCardVisual(baseSnap.imgSrc, 'gold');
                     if (newRarity === 'ancestral') triggerAncestralFlash('#ff007f');
 
-                    const newId = "#" + Math.floor(100000 + Math.random() * 900000);
                     const inheritedFusionCount = Math.max(...snaps.map(s => s.fusion_count || 0)) + 1;
+                    const newDisplayId = furnaceResult.new_card_display_id;
 
                     const newCard = {
-                        id: newId, rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
+                        id: newDisplayId, _dbId: furnaceResult.new_card_id,
+                        rarityType: newRarity, rarityName: rN, rarityNameEN: rNEN,
                         styleName: 'OVERLOAD MUTATION', styleNameEN: 'OVERLOAD MUTATION',
                         creator: currentUser.username, registered: true, exposed: false,
                         forSale: false, isListed: false, price: 0,
@@ -420,31 +471,53 @@
                             fusionId: `FRN-${inheritedFusionCount.toString().padStart(4, '0')}`,
                             ts: Date.now(),
                             sacrificedCardId: idsConsumidos.join('+'),
-                            survivalRollResult: roll,
+                            survivalRollResult: furnaceResult.roll,
                             mutation: { huePalette: 'gold', source: 'fornalha' }
                         }]),
                         eliteEligible: inheritedFusionCount >= 3
                     };
                     attachProvenance(newCard);
                     newCard.provenance.parentIds = idsConsumidos;
-                    // Upload imagem pro Storage antes de gravar no banco
+
+                    // ── UPLOAD DO VISUAL SÓ AGORA (a linha já existe no banco,
+                    // criada pela RPC sem imagem) — evita gastar Storage/Egress
+                    // gerando arte pra tentativas que teriam falhado. ──
                     if (newCard.imgSrc && newCard.imgSrc.startsWith('data:')) {
                         newCard.imgSrc = await uploadCardImageToBucket(newCard.imgSrc, newCard.id);
                     }
-                    savedAssets.push(newCard);
+                    const { error: imgUpdateErr } = await sb.from('cards')
+                        .update({ img_src: newCard.imgSrc, provenance_hash: newCard.provenance?.hash, provenance_timestamp: newCard.provenance?.timestamp, provenance_origin: newCard.provenance?.origin, parent_ids: newCard.provenance.parentIds, genetic_history: newCard.genetic_history })
+                        .eq('id', newCard._dbId);
+                    if (imgUpdateErr) console.error('startOverload: falha ao gravar imagem/proveniência da mutação:', imgUpdateErr.message);
 
-                    const inserted = await insertCardToSupabase(newCard, currentUser.id);
-                    if (!inserted) console.error('startOverload: falha ao gravar card mutado no Supabase.');
+                    savedAssets.push(newCard);
 
                     alertTitle = '[SOBRECARGA BEM SUCEDIDA]';
                     alertMsg = currentLang === 'PT'
-                        ? `[SOBRECARGA BEM SUCEDIDA] NOVO ATIVO GERADO NA REDE.<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span>`
-                        : `[OVERLOAD SUCCESSFUL] NEW ASSET GENERATED ON THE NETWORK.<br><b>${newId}</b> — <span style="color:${wc}">${rNEN}</span>`;
+                        ? `[SOBRECARGA BEM SUCEDIDA] NOVO ATIVO GERADO NA REDE.<br><b>${newDisplayId}</b> — <span style="color:${wc}">${rNEN}</span>`
+                        : `[OVERLOAD SUCCESSFUL] NEW ASSET GENERATED ON THE NETWORK.<br><b>${newDisplayId}</b> — <span style="color:${wc}">${rNEN}</span>`;
                     alertType = 'success';
                     playTerminalSound('alchemy');
                     registerFusionForBadges();
                     pushFeedCard({...newCard});
-                    pushLedger(`${currentUser.username} sobrecarregou a Fornalha com ${idsConsumidos.join('+')} → ${newCard.id} [${newCard.rarityNameEN}]`);
+                    pushLedger(`${currentUser.username} sobrecarregou a Fornalha com ${idsConsumidos.join('+')} → ${newDisplayId} [${rNEN}]`);
+
+                } else {
+                    // ── FALHA (80%) — fragments já creditados atomicamente
+                    // pela RPC; só sincroniza o número local/perfil. ──
+                    currentUser.fragments = furnaceResult.fragments_total;
+                    const fragmentsEl = document.getElementById('profFragments');
+                    if (fragmentsEl) fragmentsEl.innerText = `${currentUser.fragments}`;
+
+                    alertTitle = '[ERRO] FALHA DE CONTENÇÃO';
+                    alertMsg = currentLang === 'PT'
+                        ? `[ERRO] COMPONENTES DERRETIDOS NA FORNALHA. ATIVOS DESTRUÍDOS.<br><small style="color:#ff550099">${idsConsumidos.join(', ')}</small><br><span style="color:#aaa;">+${furnaceResult.fragments_granted} Fragmento(s) de Sucata concedido(s) como compensação. (Total: ${currentUser.fragments})</span>`
+                        : `[ERROR] COMPONENTS MELTED IN THE FURNACE. ASSETS DESTROYED.<br><small style="color:#ff550099">${idsConsumidos.join(', ')}</small><br><span style="color:#aaa;">+${furnaceResult.fragments_granted} Scrap Fragments granted as compensation. (Total: ${currentUser.fragments})</span>`;
+                    alertType = 'error';
+                    triggerAncestralFlash('#ff5500');
+                    playSynthSound('shatter');
+                    speakPhrase("Fornalha falhou. Ativos derretidos. Fragmentos de sucata concedidos.", "Furnace failed. Assets melted. Scrap fragments granted.");
+                    pushLedger(`${currentUser.username} sobrecarregou a Fornalha com ${idsConsumidos.join('+')} — DERRETIMENTO TOTAL (+${furnaceResult.fragments_granted} FRAG)`);
                 }
 
                 _furnSelected = [];
@@ -452,8 +525,19 @@
                 _updateFurnPreview();
                 renderVaultGrid();
                 showCyberAlert(alertTitle, alertMsg, alertType);
+                overloadBtn.disabled = false;
 
-            }, 1500);
+            }).catch(err => {
+                console.error('startOverload: erro inesperado na transmutação:', err);
+                clearInterval(glitchSoundTimer);
+                clearInterval(glitchSubCycler);
+                flashTimers.forEach(t => clearTimeout(t));
+                document.body.classList.remove('furnace-screen-shake');
+                glitchOverlay.remove();
+                showCyberAlert('ERRO_DE_REDE', currentLang === 'PT' ? 'Falha de comunicação com o servidor. A Fornalha não foi acionada.' : 'Communication failure with the server. The Furnace was not triggered.', 'error');
+                overloadBtn.disabled = false;
+            });
+
         }, 1200);
     }
 

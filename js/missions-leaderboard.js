@@ -4,6 +4,12 @@
 //
 // Parte 6 de 14 do script.js original (split automático,
 // ORDEM DE CARREGAMENTO PRESERVADA — não mudar a ordem dos <script> no HTML).
+//
+// [PATCH 5] INJEÇÃO: computeBadges e renderProfileBadges agora lêem e gravam
+// dinamicamente na tabela `operator_badges` (SQL_PATCH_5_MECANICAS.sql).
+// A lógica estática de arrays foi mantida como fallback de hidratação inicial
+// mas a fonte de verdade é o banco. registerFusionForBadges foi estendida para
+// disparar syncBadgesToDb() após cada fusão.
 // =========================================================
 
     function loadDailyMissions() {
@@ -25,7 +31,6 @@
         const data = loadDailyMissions();
         const now = Date.now();
         if (now - data.lastReset >= 86400000) {
-            // Reseta painel após 24h
             saveDailyMissions({ lastReset: now, completed: [] });
             return { lastReset: now, completed: [] };
         }
@@ -40,7 +45,6 @@
         const data = checkDailyMissionsReset();
         if (data.completed.includes(missionId)) return;
 
-        // Verifica requisito: conta cards da raridade no cofre
         const count = savedAssets.filter(a => a.rarityType === mission.reqRarity).length;
         if (count < mission.reqCount) {
             showCyberAlert('MISSÃO NÃO CONCLUÍDA',
@@ -48,7 +52,6 @@
             return;
         }
 
-        // Log de terminal antes de creditar
         const logLines = [
             `> INICIANDO PROCESSO DE VERIFICAÇÃO...`,
             `> MISSÃO [${missionId}]: ${mission.name.toUpperCase()}`,
@@ -58,15 +61,12 @@
             `> OPERAÇÃO CONCLUÍDA. +${mission.reward} B$ ADICIONADOS.`
         ];
 
-        // Credita recompensa
         currentUser.bumps += mission.reward;
         await updateProfileInSupabase(currentUser.id, { bumps: currentUser.bumps });
 
-        // Marca missão como concluída
         data.completed.push(missionId);
         saveDailyMissions(data);
 
-        // Atualiza badge de saldo
         const profBumpsEl = document.getElementById('profBumps');
         if (profBumpsEl) profBumpsEl.innerText = `${currentUser.bumps} B$`;
 
@@ -81,6 +81,9 @@
         );
 
         renderDailyMissions();
+
+        // [PATCH 5] Re-sincroniza badges após missão concluída (bumps podem ter mudado)
+        if (currentUser.id) await syncBadgesToDb(currentUser.id);
     }
 
     function renderDailyMissions() {
@@ -99,7 +102,6 @@
         const h = Math.floor(remaining / 3600000);
         const m = Math.floor((remaining % 3600000) / 60000);
 
-        // Header com reset timer
         const header = document.createElement('div');
         header.style.cssText = 'font-size:0.55rem; color:#555566; letter-spacing:1px; margin-bottom:12px;';
         header.innerText = `> MISSÕES_DIÁRIAS // RESET EM ${String(h).padStart(2,'0')}h${String(m).padStart(2,'0')}m`;
@@ -109,7 +111,6 @@
             const isDone = data.completed.includes(mission.id);
             const isAncestral = mission.reqRarity === 'ancestral';
 
-            // Missão concluída some da lista
             if (isDone) return;
 
             const card = document.createElement('div');
@@ -138,7 +139,6 @@
             container.appendChild(card);
         });
 
-        // Se todas concluídas
         if (container.querySelectorAll('div[style]').length <= 1) {
             const done = document.createElement('div');
             done.className = 'empty-vault-notice';
@@ -149,60 +149,36 @@
 
     // =========================================================
     // PROVENIÊNCIA — ID Único, Hash Criptográfico e Timestamp
-    // Sistema interno de prova de origem: todo card gerado no
-    // dr0p_station carrega uma assinatura imutável. Mesmo sem
-    // blockchain, o registro no localStorage funciona como
-    // "ata de nascimento" do ativo. Útil para detectar cópias
-    // e como base para tokenização futura (Web3).
     // =========================================================
 
-    /**
-     * Hash leve e determinístico (DJB2) a partir dos dados do card.
-     * Roda de forma síncrona e offline, sem depender de SubtleCrypto.
-     * O resultado muda se qualquer campo-semente do card mudar.
-     */
     function _djb2Hash(str) {
         let h = 5381;
         for (let i = 0; i < str.length; i++) {
             h = ((h << 5) + h) ^ str.charCodeAt(i);
-            h |= 0; // força inteiro 32 bits
+            h |= 0;
         }
         return (h >>> 0).toString(16).padStart(8, '0').toUpperCase();
     }
 
-    /**
-     * Gera o objeto de proveniência para um card.
-     * @param {object} cardData  Objeto parcial ou completo do card (precisa de id, rarityType, styleName, creator)
-     * @returns {{ hash: string, timestamp: number, origin: string }}
-     */
     function generateProvenance(cardData) {
         const ts   = Date.now();
         const seed = [cardData.id, cardData.rarityType, cardData.styleName, cardData.creator, ts].join('|');
         return {
-            hash:      `DS-${_djb2Hash(seed)}`,   // ex: DS-4A2F9C1B
+            hash:      `DS-${_djb2Hash(seed)}`,
             timestamp: ts,
             origin:    'DROP_STATION_INTERNAL'
         };
     }
 
-    /**
-     * Injeta proveniência + flag Web3 no objeto do card SE ainda não tiver.
-     * Cards do feed global legado ou demo ficam sem — comportamento esperado.
-     * A partir desta versão, também inicializa o Survival Counter (fusion_count),
-     * o histórico genético (genetic_history) e a assinatura visual do QR Code.
-     * @param {object} cardObj  Objeto do card (mutado in-place e retornado)
-     */
     function attachProvenance(cardObj) {
-        if (cardObj.provenance) return cardObj; // já tem — nunca sobrescrever
+        if (cardObj.provenance) return cardObj;
         cardObj.provenance  = generateProvenance(cardObj);
-        cardObj.isTokenized = false; // preparação para fluxo Web3
+        cardObj.isTokenized = false;
 
-        // ── ALQUIMIA: contador de sobrevivência + linhagem genética ──
         if (typeof cardObj.fusion_count !== 'number') cardObj.fusion_count = 0;
         if (!Array.isArray(cardObj.genetic_history)) cardObj.genetic_history = [];
         cardObj.eliteEligible = cardObj.fusion_count >= 3;
 
-        // ── Resoluções: UI leve (500px) sempre disponível; HD só sob demanda ──
         if (!cardObj.resolutions) {
             cardObj.resolutions = { ui: { w: 500, h: 500 }, hd: { w: 4000, h: 4000, src: null } };
         }
@@ -211,30 +187,18 @@
         return cardObj;
     }
 
-    /**
-     * Regera a assinatura visual do QR Code de um card sempre que seu estado muda:
-     * criação, transferência de propriedade ou sobrevivência a uma fusão.
-     * O hash base (provenance.hash) nunca muda — só o sufixo de estado "-Fxx".
-     */
     function regenerateQrSignature(cardObj) {
         const suffix = `F${cardObj.fusion_count || 0}`;
         cardObj.qr_code_hash   = `${cardObj.provenance.hash}-${suffix}`;
-        // URL pública de inspeção direta do card
         const cardDisplayId = encodeURIComponent(cardObj.id || cardObj.qr_code_hash);
         cardObj.qr_payload_url = `${location.origin}${location.pathname}?card=${cardDisplayId}&hash=${encodeURIComponent(cardObj.qr_code_hash)}`;
         return cardObj;
     }
 
-    /**
-     * Desenha o QR Code dinâmico de um card num container do DOM.
-     * Usa a lib QRCode (qrcodejs) carregada no <head> do index.html.
-     * Sempre limpa o container antes de redesenhar (necessário pois o
-     * QR muta a cada novo estado do card).
-     */
     function renderQRCode(cardObj, containerId) {
         const el = document.getElementById(containerId);
         if (!el || typeof QRCode === 'undefined' || !cardObj.qr_payload_url) return;
-        el.innerHTML = ''; // limpa render anterior — o QR é regenerado, não acumulado
+        el.innerHTML = '';
         new QRCode(el, {
             text: cardObj.qr_payload_url,
             width: 120,
@@ -245,10 +209,8 @@
         });
     }
 
-    // ITEMS_DB, getUserInventory e consumeInventoryItem agora vêm da Parte 3 (Supabase), no final do arquivo.
-
-    // DAILY DROPS — Recompensa diária (cooldown de 24h)
-    const DAILY_DROP_REWARD_BUMPS = 30; // 30 B$ garantidos — nunca trava o usuário
+    // DAILY DROPS
+    const DAILY_DROP_REWARD_BUMPS = 30;
 
     function getDailyDropKey() {
         return `cyber_daily_drop_${currentUser.username}`;
@@ -268,6 +230,9 @@
         showCyberAlert('PROCESSO_CONCLUÍDO:', `Subsídio de rede coletado! +${DAILY_DROP_REWARD_BUMPS} B$ creditados na conta.`, 'success');
         playTerminalSound('claim');
         renderDailyDropButton();
+
+        // [PATCH 5] Re-sincroniza badges após subsídio (bumps sobem)
+        if (currentUser.id) await syncBadgesToDb(currentUser.id);
     }
 
     function renderDailyDropButton() {
@@ -308,10 +273,6 @@
         const list = document.getElementById('leaderboardList');
         if (!list) return;
 
-        // Busca todos os perfis (substitui loadRegistry()) + contagem de lendários por usuário
-        // Também busca avatar, avatar_frame e avatar_motion_filter pra renderizar a moldura
-        // neon + o filtro de movimento (quando o avatar é um card "isAnimated") de cada
-        // operador no Placar.
         const { data: profilesData, error: profErr } = await sb.from('profiles').select('id, username, bumps, fusion_count, avatar, avatar_frame, avatar_motion_filter');
         if (profErr) { console.error('renderLeaderboard (profiles):', profErr.message); list.innerHTML = '<div class="empty-vault-notice">FALHA AO CARREGAR PLACAR.</div>'; return; }
 
@@ -320,18 +281,19 @@
         const legendaryCounts = {};
         (legendaryRows || []).forEach(r => { legendaryCounts[r.id_usuario] = (legendaryCounts[r.id_usuario] || 0) + 1; });
 
-        // [FIX AVATAR RANKING] Antes, todo perfil sem avatar customizado caía no MESMO
-        // placeholder fixo (Homer Simpson) — com vários operadores sem foto própria no
-        // Top 5, a lista toda parecia "puxar o avatar errado" porque mostrava a mesma
-        // imagem repetida pra gente diferente. Agora o fallback é gerado de forma
-        // DETERMINÍSTICA a partir do username (DiceBear), então cada operador sem
-        // avatar customizado ganha um ícone único e estável — sem depender de upload.
+        // [PATCH 5] Carrega contagem de badges por usuário para exibir no leaderboard
+        const { data: badgeRows } = await sb.from('operator_badges').select('user_id, badge_slug');
+        const badgeCounts = {};
+        (badgeRows || []).forEach(r => { badgeCounts[r.user_id] = (badgeCounts[r.user_id] || 0) + 1; });
+
         const fallbackAvatarFor = (username) => `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(username || 'anon')}`;
 
         const rows = (profilesData || []).map(u => ({
+            id: u.id,
             username: u.username,
             bumps: u.bumps || 0,
             legendaryCount: legendaryCounts[u.id] || 0,
+            badgeCount: badgeCounts[u.id] || 0,
             avatar: u.avatar || fallbackAvatarFor(u.username),
             avatarFrame: u.avatar_frame || FRAME_DEFAULT_ID,
             avatarMotionFilter: u.avatar_motion_filter || null
@@ -345,32 +307,23 @@
             return;
         }
 
-        // Recompensas sazonais (simuladas, sem valor real) atreladas a cada posição do Placar Global.
-        const SEASON_REWARDS = [
-            '+500 B$ + Caixa Lendária',
-            '+300 B$ + Caixa Épica',
-            '+150 B$ + Caixa Épica',
-            '+75 B$ + Caixa Comum',
-            '+50 B$ + Caixa Comum'
-        ];
-
         list.innerHTML = top5.map((r, i) => {
             const medal = ['🥇','🥈','🥉','🎖️','🎖️'][i] || '▫️';
             const value = leaderboardMode === 'bumps' ? `${r.bumps} B$` : `${r.legendaryCount} LENDÁRIOS`;
             const isMe = r.username === currentUser.username ? ' style="color:#00ffff;"' : '';
-            // Mostra SOMENTE recompensas em Bumps na coluna de recompensas
             const bumpsReward = ['500 B$', '300 B$', '150 B$', '75 B$', '50 B$'][i] || '—';
             const avatarSrc = r.avatar || fallbackAvatarFor(r.username);
             const avatarFallback = fallbackAvatarFor(r.username);
-            // [FIX AVATAR ANIMADO] mesma lógica de filtro de movimento do Perfil/Inventário
-            // (card-motion-active + data-motion-filter), aplicada só no .cyber-frame interno
-            // pra não deformar a moldura redonda/quadrada do avatar na linha do ranking.
             const motionClass = r.avatarMotionFilter ? ' card-motion-active' : '';
             const motionAttr = r.avatarMotionFilter ? ` data-motion-filter="${r.avatarMotionFilter}"` : '';
+            // [PATCH 5] Badge count inline no leaderboard
+            const badgeLabel = r.badgeCount > 0
+                ? `<span style="font-size:0.45rem; color:#9933ff; margin-left:4px;">⬡ ${r.badgeCount} BADGE${r.badgeCount > 1 ? 'S' : ''}</span>`
+                : '';
             return `<div class="leaderboard-row" onclick="viewExternalProfile('${r.username.replace(/'/g,"\\'")}');"${isMe}>
                 <span>${medal} #${i+1}</span>
                 <span class="avatar-container ${r.avatarFrame}"><span class="cyber-frame${motionClass}"${motionAttr}><img src="${avatarSrc}" draggable="false" loading="lazy" onerror="this.onerror=null;this.src='${avatarFallback}'"></span></span>
-                <span>${r.username}</span>
+                <span>${r.username}${badgeLabel}</span>
                 <span>${value}</span>
                 <span class="lb-rewards">💰 ${bumpsReward}</span>
             </div>`;
@@ -378,41 +331,209 @@
     }
 
     // =========================================================
-    // BADGES DE CONQUISTA
+    // [PATCH 5] BADGES DE CONQUISTA — DINÂMICOS VIA operator_badges
+    //
+    // CATÁLOGO MESTRE DE BADGES
+    // Define as regras de elegibilidade de cada badge no client.
+    // O banco (operator_badges) é a fonte de verdade do estado atual;
+    // este catálogo define QUANDO um badge é ganho pela primeira vez
+    // e é usado por syncBadgesToDb() para hidratar o banco.
     // =========================================================
+    const BADGE_CATALOG = [
+        {
+            slug:      'alchemist_master',
+            icon:      '⚗️',
+            title:     'MESTRE ALQUIMISTA',
+            desc:      'Realizou 10 ou mais fusões na Fornalha.',
+            tier:      2,
+            check:     (ud) => (ud.fusionCount || 0) >= 10
+        },
+        {
+            slug:      'network_whale',
+            icon:      '🐋',
+            title:     'BALEIA DA REDE',
+            desc:      'Acumulou 1.000 B$ ou mais na conta.',
+            tier:      2,
+            check:     (ud) => (ud.bumps || 0) >= 1000
+        },
+        {
+            slug:      'legend_hunter',
+            icon:      '💎',
+            title:     'CAÇADOR DE LENDAS',
+            desc:      'Possui 3 ou mais cards Lendários no cofre.',
+            tier:      3,
+            check:     (ud) => ((ud.savedAssets || []).filter(a => a.rarityType === 'legendary').length) >= 3
+        },
+        {
+            slug:      'first_drop',
+            icon:      '📡',
+            title:     'PRIMEIRO SINAL',
+            desc:      'Realizou seu primeiro drop na rede.',
+            tier:      1,
+            check:     (ud) => (ud.totalDrops || 0) >= 1
+        },
+        {
+            slug:      'ancestral_touched',
+            icon:      '🌑',
+            title:     'TOCADO PELO ANCESTRAL',
+            desc:      'Possui ao menos 1 card Ancestral no cofre.',
+            tier:      3,
+            check:     (ud) => ((ud.savedAssets || []).filter(a => a.rarityType === 'ancestral').length) >= 1
+        },
+        {
+            slug:      'furnace_veteran',
+            icon:      '🔥',
+            title:     'VETERANO DA FORNALHA',
+            desc:      'Sobreviveu a 25 rodadas de transmutação.',
+            tier:      3,
+            check:     (ud) => (ud.fusionCount || 0) >= 25
+        },
+        {
+            slug:      'scrap_hoarder',
+            icon:      '🔩',
+            title:     'ACUMULADOR DE SUCATA',
+            desc:      'Coletou 500 fragmentos de sucata.',
+            tier:      1,
+            check:     (ud) => (ud.fragments || 0) >= 500
+        }
+    ];
+
+    /**
+     * computeBadges — calcula quais badges o usuário MERECE localmente.
+     * Mantido como função pura (sem side effects) para ser chamado tanto
+     * pelo fluxo de sincronização quanto pela renderização de perfil.
+     * @param {object} userData  { fusionCount, bumps, savedAssets, totalDrops, fragments }
+     * @returns {Array<object>}  Subset de BADGE_CATALOG que o usuário atingiu.
+     */
     function computeBadges(userData) {
-        const badges = [];
-        const fusionCount = (userData && userData.fusionCount) || 0;
-        const bumps = (userData && userData.bumps) || 0;
-        if (fusionCount >= 10) badges.push({ icon: '⚗️', label: 'MESTRE ALQUIMISTA' });
-        if (bumps >= 1000) badges.push({ icon: '🐋', label: 'BALEIA DA REDE' });
-        const legendaryCount = ((userData && userData.savedAssets) || []).filter(a => a.rarityType === 'legendary').length;
-        if (legendaryCount >= 3) badges.push({ icon: '💎', label: 'CAÇADOR DE LENDAS' });
-        return badges;
+        return BADGE_CATALOG.filter(b => b.check(userData));
     }
 
+    /**
+     * syncBadgesToDb — compara badges merecidos (computeBadges) com os já
+     * gravados em operator_badges e faz INSERT somente dos novos (upsert
+     * idempotente via UNIQUE(user_id, badge_slug)).
+     * Chamado após cada evento que pode desbloquear um badge:
+     *   - drop bem-sucedido (drop-vault.js)
+     *   - fusão (registerFusionForBadges)
+     *   - resgate de missão diária (claimDailyMission)
+     *   - coleta de subsídio (claimDailyDrop)
+     * @param {string} userId  UUID do operador (currentUser.id)
+     */
+    async function syncBadgesToDb(userId) {
+        if (!userId) return;
+
+        try {
+            // 1. Busca perfil + cards do operador para montar userData
+            const { data: profile } = await sb.from('profiles').select('fusion_count, bumps, fragments').eq('id', userId).single();
+            const { data: cards } = await sb.from('cards').select('rarity_type').eq('id_usuario', userId).eq('is_purged', false);
+
+            const userData = {
+                fusionCount:  (profile && profile.fusion_count) || 0,
+                bumps:        (profile && profile.bumps) || 0,
+                fragments:    (profile && profile.fragments) || 0,
+                savedAssets:  (cards || []).map(c => ({ rarityType: c.rarity_type })),
+                totalDrops:   (cards || []).length
+            };
+
+            const earned = computeBadges(userData);
+            if (earned.length === 0) return;
+
+            // 2. Busca badges já gravados no banco para este usuário
+            const { data: existing } = await sb.from('operator_badges').select('badge_slug').eq('user_id', userId);
+            const existingSlugs = new Set((existing || []).map(r => r.badge_slug));
+
+            // 3. Filtra apenas os novos (não existentes ainda)
+            const toInsert = earned.filter(b => !existingSlugs.has(b.slug));
+            if (toInsert.length === 0) return;
+
+            // 4. Insere novos badges — UNIQUE(user_id, badge_slug) garante idempotência
+            const rows = toInsert.map(b => ({
+                user_id:    userId,
+                badge_slug: b.slug,
+                badge_title: `${b.icon} ${b.title}`,
+                badge_desc: b.desc,
+                tier:       b.tier
+            }));
+
+            const { error: insertErr } = await sb.from('operator_badges').insert(rows);
+            if (insertErr) {
+                // Ignora conflito de unicidade (23505) — significa que o badge
+                // já foi inserido por outra tab/request concorrente, o que é OK.
+                if (!insertErr.code || insertErr.code !== '23505') {
+                    console.error('[badges] syncBadgesToDb insert error:', insertErr.message);
+                }
+            }
+        } catch(e) {
+            console.error('[badges] syncBadgesToDb exception:', e);
+        }
+    }
+
+    /**
+     * renderProfileBadges — lê os badges de um operador diretamente de
+     * operator_badges (fonte de verdade) e renderiza no DOM.
+     * @param {string} username  Username do operador cujo perfil está sendo visualizado.
+     */
     async function renderProfileBadges(username) {
         const zone = document.getElementById('profBadgesZone');
         if (!zone) return;
-        const profile = await fetchProfileByUsername(username);
-        if (!profile) { zone.innerHTML = '<span class="badge-tag badge-empty">SEM INSÍGNIAS REGISTRADAS</span>'; return; }
-        const { data: legendaryRows } = await sb.from('cards').select('id').eq('id_usuario', profile.id).eq('rarity_type', 'legendary');
-        const userData = {
-            fusionCount: profile.fusion_count || 0,
-            bumps: profile.bumps || 0,
-            savedAssets: (legendaryRows || []).map(() => ({ rarityType: 'legendary' }))
-        };
-        const badges = computeBadges(userData);
-        zone.innerHTML = badges.length === 0
-            ? '<span class="badge-tag badge-empty">SEM INSÍGNIAS REGISTRADAS</span>'
-            : badges.map(b => `<span class="badge-tag">${b.icon} ${b.label}</span>`).join('');
+
+        zone.innerHTML = '<span class="badge-tag badge-empty" style="color:#444; font-size:0.5rem;">⟳ CARREGANDO INSÍGNIAS...</span>';
+
+        try {
+            const profile = await fetchProfileByUsername(username);
+            if (!profile) {
+                zone.innerHTML = '<span class="badge-tag badge-empty">SEM INSÍGNIAS REGISTRADAS</span>';
+                return;
+            }
+
+            // Busca badges do banco — fonte de verdade pós-PATCH 5
+            const { data: badgeRows, error: badgeErr } = await sb
+                .from('operator_badges')
+                .select('badge_slug, badge_title, badge_desc, tier, earned_at')
+                .eq('user_id', profile.id)
+                .order('earned_at', { ascending: true });
+
+            if (badgeErr) {
+                console.error('[badges] renderProfileBadges fetch error:', badgeErr.message);
+                zone.innerHTML = '<span class="badge-tag badge-empty">ERRO AO CARREGAR INSÍGNIAS</span>';
+                return;
+            }
+
+            if (!badgeRows || badgeRows.length === 0) {
+                zone.innerHTML = '<span class="badge-tag badge-empty">SEM INSÍGNIAS REGISTRADAS</span>';
+                return;
+            }
+
+            // Mapeia tier para cor da borda do badge
+            const tierColor = (tier) => tier >= 3 ? '#ff007f' : tier === 2 ? '#ffaa00' : '#00ff66';
+
+            zone.innerHTML = badgeRows.map(b => {
+                const color = tierColor(b.tier || 1);
+                const earnedDate = b.earned_at ? new Date(b.earned_at).toLocaleDateString('pt-BR') : '';
+                return `<span class="badge-tag" title="${b.badge_desc || ''}${earnedDate ? ' · conquistado em ' + earnedDate : ''}"
+                    style="border-color:${color}; color:${color}; cursor:default;">
+                    ${b.badge_title}
+                </span>`;
+            }).join('');
+
+        } catch(e) {
+            console.error('[badges] renderProfileBadges exception:', e);
+            zone.innerHTML = '<span class="badge-tag badge-empty">ERRO AO CARREGAR INSÍGNIAS</span>';
+        }
     }
 
+    /**
+     * registerFusionForBadges — chamado por fusion.js após cada fusão.
+     * Incrementa o contador local + persiste no banco + dispara sync de badges.
+     */
     async function registerFusionForBadges() {
         if (!currentUser.id) return;
         const newCount = (currentUser.fusionCount || 0) + 1;
         currentUser.fusionCount = newCount;
         await updateProfileInSupabase(currentUser.id, { fusion_count: newCount });
+        // [PATCH 5] Sincroniza badges após fusão (pode desbloquear alchemist_master, furnace_veteran)
+        await syncBadgesToDb(currentUser.id);
     }
 
     // =========================================================
@@ -421,8 +542,8 @@
     let networkOverloadActive = false;
     const NETWORK_OVERLOAD_EPIC_MULTIPLIER = 2.5;
     const NETWORK_OVERLOAD_DURATION_MS = 5 * 60 * 1000;
-    const NETWORK_OVERLOAD_CHECK_INTERVAL_MS = 90 * 1000; // checa a cada 90s
-    const NETWORK_OVERLOAD_CHANCE_PER_CHECK = 0.12; // 12% de chance por checagem
+    const NETWORK_OVERLOAD_CHECK_INTERVAL_MS = 90 * 1000;
+    const NETWORK_OVERLOAD_CHANCE_PER_CHECK = 0.12;
 
     function triggerNetworkOverload() {
         if (networkOverloadActive) return;
@@ -486,7 +607,7 @@
     }
 
     // =========================================================
-    // FX — FLASH DE TELA ANCESTRAL (rosa se sucesso, vermelho se quebrar)
+    // FX — FLASH DE TELA ANCESTRAL
     // =========================================================
     function triggerAncestralFlash(color) {
         const flash = document.createElement('div');
@@ -497,7 +618,6 @@
             transition: opacity 0.08s ease;
         `;
         document.body.appendChild(flash);
-        // Pulsa 3 vezes
         let count = 0;
         const pulse = () => {
             flash.style.opacity = '0.35';
@@ -513,10 +633,6 @@
 
     // =========================================================
     // WEB3 — Modal Simulado de Tokenização (Pré-Mint)
-    // Nenhuma transação real acontece aqui. O objetivo é mostrar
-    // ao usuário o fluxo e educá-lo sobre custos de gas, mantendo
-    // controle e custo do lado dele. O card já tem isTokenized:false
-    // como placeholder para integração futura com MetaMask/ERC-721.
     // =========================================================
     function showTokenizeModal(cardId) {
         closeInspectModal();
@@ -529,7 +645,6 @@
             : card.rarityType === 'epic'      ? '#ffaa00'
             : '#aaaaaa';
 
-        // Injeta modal de tokenização como overlay temporário
         const overlay = document.createElement('div');
         overlay.id = 'tokenizeOverlay';
         overlay.style.cssText = `
@@ -541,13 +656,11 @@
         overlay.innerHTML = `
             <div style="max-width:480px; width:100%; background:#070712; border:1px solid #9933ff;
                         padding:28px; font-family:'Space Mono',monospace; position:relative;">
-                <!-- Header -->
                 <div style="color:#9933ff; font-size:0.65rem; letter-spacing:3px; margin-bottom:4px;">⬡ TOKENIZAÇÃO WEB3 // SIMULAÇÃO</div>
                 <div style="color:#fff; font-family:'Archivo Black',sans-serif; font-size:1rem; margin-bottom:16px;">
                     Transformar em NFT
                 </div>
 
-                <!-- Info do card -->
                 <div style="background:#0d0020; border:1px solid #9933ff33; padding:12px; margin-bottom:16px; font-size:0.52rem; line-height:2; color:#aaaacc;">
                     <div>CARD &nbsp;&nbsp;&nbsp;: <span style="color:${rarityColor};">${card.id}</span></div>
                     <div>RARIDADE: <span style="color:${rarityColor};">${card.rarityNameEN}</span></div>
@@ -555,7 +668,6 @@
                     <div>EMITIDO : <span style="color:#fff;">${new Date(prov.timestamp).toLocaleString('pt-BR')}</span></div>` : ''}
                 </div>
 
-                <!-- Explicação do fluxo -->
                 <div style="font-size:0.53rem; color:#888899; line-height:1.8; margin-bottom:18px;">
                     <p style="margin:0 0 8px;">Para transformar este card num <b style="color:#9933ff;">NFT ERC-721</b> na blockchain, você precisará:</p>
                     <div style="padding-left:8px; border-left:2px solid #9933ff44;">
@@ -567,13 +679,11 @@
                     <p style="margin:10px 0 0; color:#555566; font-size:0.48rem;">O controle e o custo são <b style="color:#fff;">inteiramente seus</b>. O dr0p_station nunca cobra taxas de mint — apenas o gás da rede Ethereum.</p>
                 </div>
 
-                <!-- Aviso de simulação -->
                 <div style="background:#1a0033; border:1px dashed #9933ff55; padding:8px 12px; margin-bottom:18px; font-size:0.48rem; color:#9933ff88; text-align:center;">
                     ⚠ MODO SIMULAÇÃO — Nenhuma transação real será executada.
                     <br>A integração com MetaMask será ativada em breve.
                 </div>
 
-                <!-- Botões -->
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
                     <button class="btn-action" style="border-color:#9933ff; color:#9933ff; flex:1;"
                         onclick="simulateMintAttempt('${cardId}')">
@@ -594,7 +704,6 @@
         const overlay = document.getElementById('tokenizeOverlay');
         if (overlay) overlay.remove();
 
-        // Abre o modal de inspect novamente com confirmação simulada
         showCyberAlert(
             '⬡ METAMASK // SIMULAÇÃO',
             `<div style="font-family:'Space Mono',monospace; font-size:0.55rem; line-height:2; text-align:left;">
@@ -622,23 +731,13 @@
 
     function startLogoGlitchLoop() {
         setInterval(() => {
-            // dispara aleatoriamente, em média a cada ~20-40s
             if (Math.random() < 0.35) triggerLogoGlitch();
         }, 12000);
     }
     startLogoGlitchLoop();
 
     // =========================================================
-    // [ESCOPO 6] FILTROS AVANÇADOS DO DROP HUB — Free Roll / Premium Drop
-    // Permite o jogador restringir o pool de raridade, estilo visual e/ou
-    // modo (free/premium) antes de girar. Em vez de re-rolar até bater
-    // (caro e impreciso), os filtros restringem diretamente os arrays de
-    // candidatos usados por executeHardwareRoll — ver _applyDropFilters().
-    // =========================================================
-    // =========================================================
-    // [ESCOPO 6] BANCO DE DADOS DE FILTROS — 15+ VARIAÇÕES POR RARIDADE
-    // Cada raridade tem um pool de variações estéticas (sub-raças) que são
-    // embaralhadas aleatoriamente no momento da dropagem.
+    // [ESCOPO 6] FILTROS AVANÇADOS DO DROP HUB
     // =========================================================
     const DROP_FILTER_DB = {
         common: [
