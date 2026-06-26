@@ -1962,7 +1962,11 @@
 }
 @media (max-width: 768px) {
     .leaderboard-row {
-        grid-template-columns: 36px 50px 1fr 80px;
+        /* [FIX RANKING MOBILE] tinha só 4 colunas no grid, mas a linha
+           renderiza 5 spans (posição, avatar, nome, saldo, recompensa) —
+           o 5º item ficava sem coluna definida e "quebrava" pra uma
+           linha implícita torta. Agora as 5 colunas batem com o markup. */
+        grid-template-columns: 36px 50px 1fr 80px 70px;
         gap: 6px;
         padding: 8px 10px;
         font-size: 0.65rem;
@@ -1974,7 +1978,9 @@
 }
 @media (max-width: 480px) {
     .leaderboard-row {
-        grid-template-columns: 30px 40px 1fr 70px;
+        /* [FIX RANKING MOBILE] mesmo problema do breakpoint acima — faltava
+           a 5ª coluna (recompensa). */
+        grid-template-columns: 30px 40px 1fr 70px 60px;
         gap: 5px;
         padding: 7px 8px;
         font-size: 0.58rem;
