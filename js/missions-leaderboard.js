@@ -275,9 +275,20 @@
 
         // Tenta view pública primeiro; fallback na tabela profiles
         let profilesData = null, profErr = null;
-        const { data: _pubData, error: _pubErr } = await sb.from('leaderboard_public').select('id, username, bumps, fusion_count, avatar, avatar_frame, avatar_motion_filter').catch(() => ({ data: null, error: { message: 'view_not_found' } }));
-        if (!_pubErr && _pubData) { profilesData = _pubData; }
-        else { const { data: _fd, error: _fe } = await sb.from('profiles').select('id, username, bumps, fusion_count, avatar, avatar_frame, avatar_motion_filter'); profilesData = _fd; profErr = _fe; }
+        try {
+            const { data: _pubData, error: _pubErr } = await sb.from('leaderboard_public').select('id, username, bumps, fusion_count, avatar, avatar_frame, avatar_motion_filter');
+            if (!_pubErr && _pubData) {
+                profilesData = _pubData;
+            } else {
+                const { data: _fd, error: _fe } = await sb.from('profiles').select('id, username, bumps, fusion_count, avatar, avatar_frame, avatar_motion_filter');
+                profilesData = _fd;
+                profErr = _fe;
+            }
+        } catch (e) {
+            const { data: _fd, error: _fe } = await sb.from('profiles').select('id, username, bumps, fusion_count, avatar, avatar_frame, avatar_motion_filter');
+            profilesData = _fd;
+            profErr = _fe;
+        }
         if (profErr) { console.error('renderLeaderboard (profiles):', profErr.message); list.innerHTML = '<div class="empty-vault-notice">PLACAR INDISPONÍVEL — PERMISSÃO NEGADA.<br><small style="color:#444;font-size:0.5rem;">Ajuste as policies de RLS no Supabase ou crie uma view `leaderboard_public`.</small></div>'; return; }
         const { data: legendaryRows, error: cardsErr } = await sb.from('cards').select('id_usuario').eq('rarity_type', 'legendary');
         if (cardsErr) console.error('renderLeaderboard (cards):', cardsErr.message);
