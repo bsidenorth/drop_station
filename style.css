@@ -5872,17 +5872,32 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
     .viewer-side {
         /* Padding lateral mínimo — 6px é suficiente para o glow
            do neon não colar na borda do container, mas elimina
-           a fresta perceptível à esquerda da imagem */
+           a fresta perceptível à esquerda da imagem.
+           overflow: hidden (não visible) evita que o conteúdo
+           interno (canvas) vaze e gere scroll horizontal — era
+           isso que empurrava os price-cards do painel inferior
+           para a extrema esquerda. */
         padding: 6px 6px 16px 6px !important;
         align-items: stretch !important; /* target-box estica de ponta a ponta */
-        overflow: visible !important;
+        box-sizing: border-box !important;
+        max-width: 100% !important;
+        overflow: hidden !important;
     }
     .target-box {
         width: 100% !important;
         max-width: 100% !important;
         margin: 0 !important;
+        box-sizing: border-box !important; /* width:100% já inclui a border de 1px */
+        overflow: hidden !important; /* conteúdo interno (canvas) não vaza da borda ciano */
+    }
+    /* Canvas interno: box-sizing garante que 100%/100% nunca
+       excede a área do target-box, eliminando o deslocamento
+       para fora da borda azul/ciano à esquerda */
+    .target-box canvas#pfp-canvas {
         box-sizing: border-box !important;
-        overflow: visible !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100% !important;
     }
     /* Cantos decorativos na posição outset original */
     .target-box::before {
@@ -5907,8 +5922,8 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
 /* Base: remove height fixo de qualquer versão anterior */
 #globalChatPanel {
     height: auto !important;
-    min-height: 420px !important;
-    max-height: calc(100vh - 120px) !important;
+    min-height: 560px !important;
+    max-height: calc(100vh - 80px) !important;
     display: none;
     flex-direction: column;
 }
@@ -5920,7 +5935,7 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
 #globalChatMessages,
 .global-chat-messages-expanded {
     flex: 1 1 0 !important;
-    min-height: 180px !important;
+    min-height: 320px !important;
     overflow-y: auto !important;
 }
 
@@ -5942,15 +5957,15 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
 /* Mobile específico */
 @media (max-width: 768px) {
     #globalChatPanel {
-        min-height: 380px !important;
-        max-height: 65vh !important;
+        min-height: 460px !important;
+        max-height: 80vh !important;
         bottom: 76px !important;
         right: 10px !important;
         width: calc(100vw - 20px) !important;
     }
     #globalChatMessages,
     .global-chat-messages-expanded {
-        min-height: 160px !important;
+        min-height: 280px !important;
     }
 }
 
