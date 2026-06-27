@@ -5956,6 +5956,18 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
         text-align: left !important;
         margin: 0 !important;
     }
+    /* Cronômetro de estabilidade ("EXPIRA EM...") e botão de resgate:
+       ambos têm max-width:400px no CSS base, mas sem margin:0 auto —
+       em telas onde o .viewer-side é mais largo que 400px, eles ficam
+       colados à esquerda em vez de centralizados sob a imagem. */
+    #stability-wrapper {
+        width: 100% !important;
+        max-width: 400px !important;
+        margin: 0 auto !important;
+    }
+    .download-trigger {
+        margin: 0 auto !important;
+    }
 }
 
 
