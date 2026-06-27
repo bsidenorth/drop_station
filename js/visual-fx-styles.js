@@ -600,3 +600,133 @@ window.applyInspectStyleFx = applyInspectStyleFx;
 })();
 
 console.log('[visual-fx-styles] Módulo carregado — HALFTONE_MATRIX, SCANLINES_OVERDRIVE, MONOCHROME_STAMP, RGB_SPLIT_GLITCH, CYBER_HOLOGRAM, RETRO_MOSAIC.');
+
+
+// =========================================================
+// ── 7. TERMINAL DE CALIBRAÇÃO — lógica de interação ─────
+// selectCalibrationFilter: chamado ao clicar em cada opção
+// =========================================================
+
+// Mapeia fx-id → custo em fragmentos
+const CAL_FILTER_COSTS = {
+    'all':                 0,
+    'HALFTONE_MATRIX':    25,
+    'SCANLINES_OVERDRIVE':25,
+    'MONOCHROME_STAMP':   25,
+    'RGB_SPLIT_GLITCH':   50,
+    'CYBER_HOLOGRAM':     50,
+    'RETRO_MOSAIC':       25,
+};
+
+// Mapeia fx-id → label de exibição
+const CAL_FILTER_LABELS = {
+    'all':                 'ALEATÓRIO_NORMAL',
+    'HALFTONE_MATRIX':    'HALFTONE_MATRIX',
+    'SCANLINES_OVERDRIVE':'SCANLINES_OVERDRIVE',
+    'MONOCHROME_STAMP':   'MONOCHROME_STAMP',
+    'RGB_SPLIT_GLITCH':   'RGB_SPLIT_GLITCH',
+    'CYBER_HOLOGRAM':     'CYBER_HOLOGRAM',
+    'RETRO_MOSAIC':       'RETRO_MOSAIC',
+};
+
+function selectCalibrationFilter(el) {
+    if (!el) return;
+    const fx   = el.dataset.fx   || 'all';
+    const cost = parseInt(el.dataset.cost || '0');
+
+    // Remove --selected de todas as opções
+    document.querySelectorAll('.cal-option').forEach(o => {
+        o.classList.remove('cal-option--selected');
+    });
+
+    // Marca esta como selecionada
+    el.classList.add('cal-option--selected');
+
+    // Flash visual + som
+    el.classList.add('cal-option--flash');
+    setTimeout(() => el.classList.remove('cal-option--flash'), 380);
+    if (typeof playSynthSound === 'function') playSynthSound('click');
+
+    // Atualiza o dropFilters.style (usado por drop-vault.js)
+    if (typeof dropFilters !== 'undefined') {
+        dropFilters.style = fx === 'all' ? 'all' : fx;
+    }
+
+    // Atualiza o status bar
+    const labelEl = document.getElementById('calActiveLabel');
+    const costEl  = document.getElementById('calActiveCost');
+    if (labelEl) labelEl.textContent = CAL_FILTER_LABELS[fx] || fx;
+    if (costEl)  costEl.innerHTML    = cost > 0
+        ? `CUSTO ADICIONAL: <b>${cost} ฿</b>`
+        : `CUSTO ADICIONAL: <b>0 ฿</b> <span style="color:#00ff6666; font-size:0.38rem;">SORTE PURA</span>`;
+
+    // Atualiza o texto dos tickets de roll
+    _updateTicketLabelsForFilter(fx, cost);
+
+    // Efeito de glitch no terminal ao selecionar volatil
+    if (cost >= 50) {
+        const term = document.getElementById('calibrationTerminal');
+        if (term) {
+            term.style.boxShadow = '0 0 18px rgba(255,0,102,0.15)';
+            term.style.borderColor = '#ff006644';
+            setTimeout(() => {
+                term.style.boxShadow = '';
+                term.style.borderColor = '';
+            }, 600);
+        }
+    } else if (fx !== 'all') {
+        const term = document.getElementById('calibrationTerminal');
+        if (term) {
+            term.style.boxShadow = '0 0 14px rgba(0,255,200,0.1)';
+            setTimeout(() => { term.style.boxShadow = ''; }, 500);
+        }
+    }
+}
+window.selectCalibrationFilter = selectCalibrationFilter;
+
+/**
+ * Atualiza o texto/label dos botões FREE e PREMIUM para refletir
+ * o filtro ativo — dá feedback imediato ao jogador sobre o custo.
+ */
+function _updateTicketLabelsForFilter(fx, cost) {
+    const btnFree    = document.getElementById('btnFree');
+    const btnPremium = document.getElementById('btnPremium');
+
+    // Badge de sobrecarga abaixo do ticket
+    let badgeFree = document.getElementById('calTicketBadgeFree');
+    let badgePrem = document.getElementById('calTicketBadgePrem');
+
+    if (!badgeFree && btnFree) {
+        badgeFree = document.createElement('div');
+        badgeFree.id = 'calTicketBadgeFree';
+        badgeFree.className = 'ticket-overload-badge';
+        btnFree.appendChild(badgeFree);
+    }
+    if (!badgePrem && btnPremium) {
+        badgePrem = document.createElement('div');
+        badgePrem.id = 'calTicketBadgePrem';
+        badgePrem.className = 'ticket-overload-badge';
+        btnPremium.appendChild(badgePrem);
+    }
+
+    if (fx === 'all' || cost === 0) {
+        // Reset — filtro padrão
+        const freeTitle = btnFree?.querySelector('.ticket-title');
+        const premTitle = btnPremium?.querySelector('.ticket-title');
+        if (freeTitle) freeTitle.textContent = 'FREE_ROLL_TICKET';
+        if (premTitle) premTitle.textContent  = 'PREMIUM_DROP_PASS';
+        if (badgeFree) badgeFree.classList.remove('visible');
+        if (badgePrem) badgePrem.classList.remove('visible');
+    } else {
+        // Filtro ativo — muda label dos tickets
+        const label = `// ROLL COM SOBRECARGA //`;
+        const freeTitle = btnFree?.querySelector('.ticket-title');
+        const premTitle = btnPremium?.querySelector('.ticket-title');
+        if (freeTitle) freeTitle.textContent = label;
+        if (premTitle) premTitle.textContent  = label;
+
+        const badgeText = `⚡ -${cost} ฿ FRAGMENTOS`;
+        if (badgeFree) { badgeFree.textContent = badgeText; badgeFree.classList.add('visible'); }
+        if (badgePrem) { badgePrem.textContent = badgeText; badgePrem.classList.add('visible'); }
+    }
+}
