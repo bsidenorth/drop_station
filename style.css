@@ -5859,33 +5859,36 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
 }
 .ticket-overload-badge.visible { opacity: 1; }
 
+
 /* =========================================================
-   PATCH — CORREÇÕES VISUAIS E UX MOBILE (27/06/2026)
-   1. Chat Global — alinhamento do input + bloqueio de autofocus
-   2. Avatares do Ranking — contenção no leaderboard-row
-   3. Target-box — cantos ::before/::after contidos em mobile
+   PATCH — CORREÇÕES VISUAIS E UX MOBILE (27/06/2026 v3)
+   1. Chat Global — alinhamento do input + sem degrau visual
+   2. Avatares do Ranking — override com especificidade correta
+   3. Target-box — cantos alinhados à esquerda em mobile
    ========================================================= */
 
-/* ── 1. CHAT GLOBAL — input row sempre em linha única, nunca quebra ── */
+/* ── 1. CHAT GLOBAL ─────────────────────────────────────── */
+
+/* Input row: nunca quebra linha, sempre na base do painel */
 .global-chat-input-row {
     flex-wrap: nowrap !important;
     align-items: center;
     flex-shrink: 0;
+    flex: 0 0 auto;
     min-height: 44px;
 }
 .global-chat-input-row input {
     min-width: 0;
     word-break: break-word;
-    /* Garante que mensagens longas não estourem o container */
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
-/* Texto das mensagens não quebra o layout horizontal */
+
+/* Texto das mensagens não estoura o container */
 .gc-msg .gc-text {
     word-break: break-word;
     overflow-wrap: anywhere;
 }
-/* Chat panel em mobile: input fixo na base, nunca flutua no meio */
+
+/* Estrutura flex do painel: mensagens crescem, input fica fixo na base */
 #globalChatPanel {
     display: none;
     flex-direction: column;
@@ -5893,76 +5896,121 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
 #globalChatPanel.open {
     display: flex !important;
 }
-/* Força a área de mensagens a encolher antes do input row */
 #globalChatMessages,
 .global-chat-messages-expanded {
     flex: 1 1 0;
     min-height: 0;
     overflow-y: auto;
 }
-.global-chat-input-row {
-    flex: 0 0 auto;
-}
 
-/* ── 2. AVATARES DO RANKING — contenção e alinhamento corretos ── */
-.leaderboard-row .avatar-container {
-    /* Sobrescreve o frame-style-1 hexagonal que não cabe no ranking */
-    clip-path: none !important;
-    border-radius: 4px;
-    overflow: hidden;
-    position: relative;
+/* Remove o "degrau" visual: cost-note e emote-panel sem borda dupla */
+.global-chat-cost-note {
     flex-shrink: 0;
 }
-.leaderboard-row .avatar-container::before,
-.leaderboard-row .avatar-container::after {
-    /* Remove os cantos decorativos do frame-style-1 no contexto do ranking */
-    display: none !important;
+.gc-emote-panel {
+    flex-shrink: 0;
 }
-.leaderboard-row .cyber-frame {
+
+/* Mobile: painel não cobre a tela toda nem sobrepõe o conteúdo */
+@media (max-width: 768px) {
+    #globalChatPanel {
+        max-height: 60vh;
+        bottom: 76px;
+        right: 10px;
+        width: calc(100vw - 20px);
+    }
+}
+
+
+/* ── 2. AVATARES DO RANKING ─────────────────────────────── */
+
+/* Especificidade correta: inclui .frame-style-1 no seletor para vencer
+   a regra .avatar-container.frame-style-1 .cyber-frame do arquivo base */
+.leaderboard-row .avatar-container.frame-style-1 .cyber-frame,
+.leaderboard-row .avatar-container .cyber-frame {
+    clip-path: none !important;
+    border-radius: 3px !important;
+    border: 1px solid #2a2a40 !important;
+    box-shadow: none !important;
     width: 100% !important;
     height: 100% !important;
     overflow: hidden !important;
-    clip-path: none !important;
-    border-radius: 4px !important;
 }
-.leaderboard-row .cyber-frame img {
+.leaderboard-row .avatar-container.frame-style-1 .cyber-frame img,
+.leaderboard-row .avatar-container .cyber-frame img {
     width: 100% !important;
     height: 100% !important;
     object-fit: cover !important;
     display: block !important;
+    filter: none !important;
+}
+/* Remove cantos decorativos do frame no contexto do ranking */
+.leaderboard-row .avatar-container.frame-style-1::before,
+.leaderboard-row .avatar-container.frame-style-1::after,
+.leaderboard-row .avatar-container::before,
+.leaderboard-row .avatar-container::after {
+    display: none !important;
+    content: none !important;
+}
+/* Container do avatar no ranking: dimensão fixa, sem clip */
+.leaderboard-row .avatar-container {
+    clip-path: none !important;
+    overflow: hidden !important;
+    border-radius: 3px !important;
+    flex-shrink: 0 !important;
+    padding: 0 !important;
 }
 
-/* ── 3. TARGET-BOX — cantos decorativos corrigidos em mobile ── */
+/* O mesmo fix para os avatares do chat global */
+.gc-avatar-wrap {
+    flex-shrink: 0;
+    overflow: hidden;
+    border-radius: 50%;
+}
+.gc-avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    border-radius: 50%;
+}
+
+
+/* ── 3. TARGET-BOX — alinhamento e cantos em mobile ─────── */
+
 @media (max-width: 768px) {
+    /* viewer-side: padding lateral dá espaço pros cantos do target-box
+       sem que eles saiam da viewport */
     .viewer-side {
-        padding: 16px !important;
-        overflow: visible;
-        align-items: center;
+        padding: 20px 20px !important;
+        align-items: center !important;
+        overflow: visible !important;
     }
-    /* Em mobile o target-box ocupa quase toda a largura.
-       Os cantos ::before/::after com valores negativos (-4px)
-       ficam desalinhados porque o container pai corta o overflow.
-       Solução: reposicionar os cantos para DENTRO da borda do box
-       (valores positivos) — efeito visual idêntico mas sempre contido. */
+
+    /* target-box: ocupa toda a largura disponível do viewer-side,
+       centralizado, com margem interna suficiente pros pseudo-elementos */
     .target-box {
-        overflow: visible;
-        /* Sem margin extra — o viewer-side padding já dá o respiro */
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        /* Os ::before/::after ficam a -4px da borda — o padding do
+           viewer-side de 20px absorve isso sem cortar */
+        overflow: visible !important;
+        margin: 0 !important;
     }
+
+    /* Cantos decorativos: mantém posição outset (-4px) que é o design
+       correto, mas agora o viewer-side tem padding suficiente pra acomodar */
     .target-box::before {
-        top: 4px !important;
-        left: 4px !important;
-        width: 18px !important;
-        height: 18px !important;
+        top: -4px !important;
+        left: -4px !important;
+        width: 20px !important;
+        height: 20px !important;
     }
     .target-box::after {
-        bottom: 4px !important;
-        right: 4px !important;
-        width: 18px !important;
-        height: 18px !important;
-    }
-    /* Chat: altura máxima reduzida pra não cobrir o teclado todo */
-    #globalChatPanel {
-        max-height: 55vh;
-        bottom: 76px;
+        bottom: -4px !important;
+        right: -4px !important;
+        width: 20px !important;
+        height: 20px !important;
     }
 }
