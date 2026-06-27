@@ -156,14 +156,27 @@
                      TERMINAL DE CALIBRAÇÃO DE FREQUÊNCIA
                      Painel interativo de filtros de injeção visual
                 ════════════════════════════════════════════════════ -->
-                <div id="calibrationTerminal" class="calibration-terminal">
+                <div id="calibrationTerminal" class="calibration-terminal" style="margin-bottom:8px;">
 
-                    <div class="cal-header">
+                    <!-- Toggle discreto para abrir/fechar o terminal de filtros -->
+                    <button type="button" id="calToggleBtn" onclick="toggleCalibrationTerminal()" style="
+                        width:100%; background:transparent; border:none; border-bottom:1px solid #00ffcc22;
+                        color:#00ffcc88; font-family:'Space Mono',monospace; font-size:0.42rem;
+                        letter-spacing:2px; padding:6px 8px; cursor:pointer; text-align:left;
+                        display:flex; align-items:center; justify-content:space-between;
+                    ">
+                        <span>// TERMINAL DE CALIBRAÇÃO DE FREQUÊNCIA //</span>
+                        <span id="calToggleArrow" style="font-size:0.6rem; transition:transform 0.2s;">▸</span>
+                    </button>
+
+                    <!-- Corpo do terminal — colapsado por padrão para não obstruir o avatar -->
+                    <div id="calTerminalBody" style="display:none;">
+
+                    <div class="cal-header" style="margin-top:8px;">
                         <span class="cal-header-line"></span>
-                        <span class="cal-header-label">// TERMINAL DE CALIBRAÇÃO DE FREQUÊNCIA //</span>
+                        <span class="cal-header-label">[ SELECIONAR FILTRO DE INJEÇÃO VISUAL ]</span>
                         <span class="cal-header-line"></span>
                     </div>
-                    <div class="cal-subheader">[ SELECIONAR FILTRO DE INJEÇÃO VISUAL ]</div>
 
                     <div class="cal-options" id="calOptions">
 
@@ -171,49 +184,49 @@
                             <span class="cal-radio"></span>
                             <span class="cal-name">ALEATÓRIO_NORMAL</span>
                             <span class="cal-arrow">-&gt;</span>
-                            <span class="cal-cost">Taxa: 0 ฿ <span class="cal-tag cal-tag--free">SORTE PURA</span></span>
+                            <span class="cal-cost">Taxa: 0 B$ <span class="cal-tag cal-tag--free">SORTE PURA</span></span>
                         </label>
 
                         <label class="cal-option" id="calOpt_halftone_matrix" data-fx="HALFTONE_MATRIX" data-cost="25" onclick="selectCalibrationFilter(this)">
                             <span class="cal-radio"></span>
                             <span class="cal-name">HALFTONE_MATRIX</span>
                             <span class="cal-arrow">-&gt;</span>
-                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> ฿ <span class="cal-tag">PONTOS/PIXELATE</span></span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> B$ <span class="cal-tag">PONTOS/PIXELATE</span></span>
                         </label>
 
                         <label class="cal-option" id="calOpt_scanlines_overdrive" data-fx="SCANLINES_OVERDRIVE" data-cost="25" onclick="selectCalibrationFilter(this)">
                             <span class="cal-radio"></span>
                             <span class="cal-name">SCANLINES_OVERDRIVE</span>
                             <span class="cal-arrow">-&gt;</span>
-                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> ฿ <span class="cal-tag">LINHAS_NEON</span></span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> B$ <span class="cal-tag">LINHAS_NEON</span></span>
                         </label>
 
                         <label class="cal-option" id="calOpt_monochrome_stamp" data-fx="MONOCHROME_STAMP" data-cost="25" onclick="selectCalibrationFilter(this)">
                             <span class="cal-radio"></span>
                             <span class="cal-name">MONOCHROME_STAMP</span>
                             <span class="cal-arrow">-&gt;</span>
-                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> ฿ <span class="cal-tag">SILHUETA_P&amp;B</span></span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> B$ <span class="cal-tag">SILHUETA_P&amp;B</span></span>
                         </label>
 
                         <label class="cal-option cal-option--volatile" id="calOpt_rgb_split_glitch" data-fx="RGB_SPLIT_GLITCH" data-cost="50" onclick="selectCalibrationFilter(this)">
                             <span class="cal-radio"></span>
                             <span class="cal-name">RGB_SPLIT_GLITCH</span>
                             <span class="cal-arrow">-&gt;</span>
-                            <span class="cal-cost">Taxa: <span class="cal-cost-val">50</span> ฿ <span class="cal-tag cal-tag--danger">ALTA VOLATILIDADE</span></span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">50</span> B$ <span class="cal-tag cal-tag--danger">ALTA VOLATILIDADE</span></span>
                         </label>
 
                         <label class="cal-option cal-option--volatile" id="calOpt_cyber_hologram" data-fx="CYBER_HOLOGRAM" data-cost="50" onclick="selectCalibrationFilter(this)">
                             <span class="cal-radio"></span>
                             <span class="cal-name">CYBER_HOLOGRAM</span>
                             <span class="cal-arrow">-&gt;</span>
-                            <span class="cal-cost">Taxa: <span class="cal-cost-val">50</span> ฿ <span class="cal-tag cal-tag--holo">HOLOGRAMA NEON</span></span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">50</span> B$ <span class="cal-tag cal-tag--holo">HOLOGRAMA NEON</span></span>
                         </label>
 
                         <label class="cal-option" id="calOpt_retro_mosaic" data-fx="RETRO_MOSAIC" data-cost="25" onclick="selectCalibrationFilter(this)">
                             <span class="cal-radio"></span>
                             <span class="cal-name">RETRO_MOSAIC</span>
                             <span class="cal-arrow">-&gt;</span>
-                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> ฿ <span class="cal-tag">MOSAICO_RETRÔ</span></span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> B$ <span class="cal-tag">MOSAICO_RETRÔ</span></span>
                         </label>
                     </div>
 
@@ -221,8 +234,10 @@
                         <span class="cal-status-label">FILTRO ATIVO:</span>
                         <span class="cal-status-value" id="calActiveLabel">ALEATÓRIO_NORMAL</span>
                         <span class="cal-status-sep">//</span>
-                        <span class="cal-status-cost" id="calActiveCost">CUSTO ADICIONAL: <b>0 ฿</b></span>
+                        <span class="cal-status-cost" id="calActiveCost">CUSTO: <b>0 B$</b></span>
                     </div>
+
+                    </div><!-- /calTerminalBody -->
 
                     <!-- IDs preservados para compatibilidade com JS existente -->
                     <div style="display:none;">
@@ -767,7 +782,7 @@
             <div class="set-price-term-header">// LISTAR_NO_MERCADO //</div>
             <div class="set-price-card-id" id="setPriceCardLabel">#000000</div>
             <div class="set-price-input-row">
-                <input type="number" id="setPriceInput" class="set-price-input" min="1" placeholder="0" autocomplete="off">
+                <input type="number" inputmode="numeric" id="setPriceInput" class="set-price-input" min="1" placeholder="0" autocomplete="off">
                 <span class="set-price-suffix">B$</span>
             </div>
             <div class="set-price-actions">
@@ -1099,7 +1114,7 @@
 
         <div class="global-chat-input-row">
             <button type="button" id="globalChatEmoteToggle" class="gc-emote-toggle-btn" onclick="toggleGlobalChatEmotePanel()" title="Emotes">😀</button>
-            <input type="text" id="globalChatInput" maxlength="280" placeholder="Mensagem... (15 B$)" onkeydown="if(event.key==='Enter') sendGlobalChatMessage();">
+            <input type="text" id="globalChatInput" maxlength="280" placeholder="Mensagem... (15 B$)" autocomplete="off" onkeydown="if(event.key==='Enter') sendGlobalChatMessage();">
             <button id="globalChatSendBtn" onclick="sendGlobalChatMessage()">ENVIAR</button>
         </div>
     </div>
@@ -1148,5 +1163,20 @@
     <script src="js/loja-shop.js"></script>
     <script src="js/broadcast-extras.js"></script>
     <script src="js/new-engagement-features.js"></script>
+    <script>
+    // ── TERMINAL DE CALIBRAÇÃO — Toggle colapsável ─────────────────────────
+    // O terminal inicia OCULTO por padrão para não obstruir o avatar no Roll.
+    // O botão toggle abre/fecha sem disparar autofocus de teclado mobile.
+    function toggleCalibrationTerminal() {
+        const body = document.getElementById('calTerminalBody');
+        const arrow = document.getElementById('calToggleArrow');
+        if (!body) return;
+        const isOpen = body.style.display !== 'none';
+        body.style.display = isOpen ? 'none' : 'block';
+        if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(90deg)';
+    }
+    // Expõe globalmente caso outros módulos precisem verificar o estado
+    window.toggleCalibrationTerminal = toggleCalibrationTerminal;
+    </script>
 </body>
 </html>
