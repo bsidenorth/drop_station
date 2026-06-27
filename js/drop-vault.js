@@ -287,31 +287,45 @@
         }
         // ── [FILTRO CONDICIONAL] CALIBRAÇÃO DE TERMINAL ──────────────────
         // Se o jogador selecionou um estilo específico (dropFilters.style !== 'all'),
-        // o drop forçará esse style_name — custo: 25 fragmentos de sucata.
+        // o drop forçará esse style_name — custo em BUMPS (B$) debitado do perfil.
+        // Fragmentos de Sucata (scrap) são acumulados separadamente pra troca
+        // por consumíveis ou Bumps na Loja — não são mais consumidos aqui.
         const _styleFilterActive = dropFilters.style && dropFilters.style !== 'all';
         if (_styleFilterActive) {
-            const _scrapCost = 25;
-            const _currentScrap = (currentUser.scrap_fragments ?? currentUser.scrapFragments ?? 0);
-            if (_currentScrap < _scrapCost) {
-                showCyberAlert('RECURSOS INSUFICIENTES', 'Recursos Insuficientes para Calibração de Terminal', 'error');
+            // Lê custo do filtro selecionado via data-cost no DOM (25 ou 50 B$)
+            const _activeOpt = document.querySelector('.cal-option--selected');
+            const _bumpCost = _activeOpt ? parseInt(_activeOpt.dataset.cost || '25', 10) : 25;
+            if (!currentUser.loggedIn) {
+                showCyberAlert('ACESSO_NEGADO', 'Faça login para usar filtros de calibração.', 'error');
                 return;
             }
-            const _newScrap = _currentScrap - _scrapCost;
-            currentUser.scrap_fragments = _newScrap;
-            currentUser.scrapFragments  = _newScrap;
-            const _scrapEl = document.getElementById('scrapFragmentsDisplay') || document.getElementById('scrapDisplay');
-            if (_scrapEl) _scrapEl.innerText = _newScrap;
-            if (currentUser.loggedIn && currentUser.id) {
+            const _currentBumps = currentUser.bumps ?? 0;
+            if (_currentBumps < _bumpCost) {
+                showCyberAlert('BUMPS INSUFICIENTES', `Calibração requer ${_bumpCost} B$. Recarregue sua carteira.`, 'error');
+                openDepositModal();
+                return;
+            }
+            const _newBumps = _currentBumps - _bumpCost;
+            currentUser.bumps = _newBumps;
+            // Atualiza displays de saldo na UI
+            const _bumpsEl = document.getElementById('profBumps');
+            if (_bumpsEl) _bumpsEl.innerText = _newBumps + ' B$';
+            const _walletEl = document.getElementById('walletBalanceDisplay');
+            if (_walletEl) _walletEl.innerText = _newBumps + ' B$';
+            const _walletBadge = document.getElementById('wallet-balance-badge');
+            if (_walletBadge) _walletBadge.innerText = _newBumps + ' B$';
+            if (currentUser.id) {
                 sb.from('profiles')
-                    .update({ scrap_fragments: _newScrap })
+                    .update({ bumps: _newBumps })
                     .eq('id', currentUser.id)
-                    .then(({ error: _scrapErr }) => {
-                        if (_scrapErr) {
-                            console.error('[DropFilter] Falha ao debitar fragmentos:', _scrapErr.message);
-                            currentUser.scrap_fragments = _currentScrap;
-                            currentUser.scrapFragments  = _currentScrap;
-                            if (_scrapEl) _scrapEl.innerText = _currentScrap;
-                            showCyberAlert('ERRO_DE_REDE', 'Falha ao debitar fragmentos. Tenta novamente.', 'error');
+                    .then(({ error: _bumpsErr }) => {
+                        if (_bumpsErr) {
+                            console.error('[DropFilter] Falha ao debitar Bumps:', _bumpsErr.message);
+                            currentUser.bumps = _currentBumps;
+                            if (_bumpsEl) _bumpsEl.innerText = _currentBumps + ' B$';
+                            if (_walletEl) _walletEl.innerText = _currentBumps + ' B$';
+                            if (_walletBadge) _walletBadge.innerText = _currentBumps + ' B$';
+                            showCyberAlert('ERRO_DE_REDE', 'Falha ao debitar Bumps. Tenta novamente.', 'error');
                         }
                     });
             }
@@ -702,9 +716,10 @@
 
     function renderVaultGrid() {
         const grid = document.getElementById('albumGrid'); if(!grid) return;
-        const freshGrid = grid.cloneNode(false);
-        grid.parentNode.replaceChild(freshGrid, grid);
-        const g = document.getElementById('albumGrid');
+        // Limpa completamente o grid antes de renderizar — previne duplicação
+        // de cards quando renderVaultGrid é chamado múltiplas vezes seguidas.
+        grid.innerHTML = '';
+        const g = grid;
 
         document.getElementById('vault-count-badge').innerText = `${savedAssets.length} ATIVOS`;
 
@@ -807,7 +822,7 @@
             <div class="ipp-title">set_price ${asset.id} [${asset.rarityType.toUpperCase()}]</div>
             <div class="ipp-prompt-row">
                 <span class="ipp-prefix">&gt;</span>
-                <input id="ippInput" class="ipp-input" type="number" min="1" max="999999" value="${suggested}" placeholder="valor...">
+                <input id="ippInput" class="ipp-input" type="number" inputmode="numeric" min="1" max="999999" value="${suggested}" placeholder="valor...">
                 <span class="ipp-unit">B$</span>
             </div>
             <div class="ipp-actions">
@@ -818,7 +833,8 @@
 
         card.appendChild(panel);
         setTimeout(() => panel.classList.add('ipp-visible'), 10);
-        document.getElementById('ippInput').focus();
+        // NÃO chamar .focus() aqui — em mobile abre o teclado automaticamente
+        // sobrepondo a tela. O usuário deve clicar no campo manualmente.
     }
 
     async function confirmMarketList(index) {
