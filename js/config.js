@@ -213,6 +213,26 @@ const DROP_VISUAL_STYLES = [
     { id:'bioluminescent', namePT:'BIOLUMINESCENT', nameEN:'BIOLUMINESCENT',
       filter:'hue-rotate(155deg) saturate(380%) contrast(112%) brightness(100%)',
       rarities:['ancestral'] },
+
+    // ── ESTILOS DE ARTE DIRECIONAL (canvas-fx) ────────────────
+    { id:'halftone_matrix',     namePT:'HALFTONE_MATRIX',     nameEN:'HALFTONE_MATRIX',
+      filter:'contrast(180%) brightness(92%) saturate(0%)',
+      canvasFx:'halftone_matrix', rarities:['common','epic','legendary','ancestral'] },
+    { id:'scanlines_overdrive', namePT:'SCANLINES_OVERDRIVE', nameEN:'SCANLINES_OVERDRIVE',
+      filter:'contrast(140%) brightness(88%) saturate(200%) hue-rotate(180deg)',
+      canvasFx:'scanlines_overdrive', rarities:['common','epic','legendary','ancestral'] },
+    { id:'monochrome_stamp',    namePT:'MONOCHROME_STAMP',    nameEN:'MONOCHROME_STAMP',
+      filter:'grayscale(100%) contrast(300%) brightness(90%)',
+      canvasFx:'monochrome_stamp', rarities:['common','epic','legendary','ancestral'] },
+    { id:'rgb_split_glitch',    namePT:'RGB_SPLIT_GLITCH',    nameEN:'RGB_SPLIT_GLITCH',
+      filter:'saturate(300%) contrast(150%) hue-rotate(10deg)',
+      canvasFx:'rgb_split_glitch', rarities:['epic','legendary','ancestral'] },
+    { id:'cyber_hologram',      namePT:'CYBER_HOLOGRAM',      nameEN:'CYBER_HOLOGRAM',
+      filter:'hue-rotate(175deg) saturate(400%) brightness(110%) contrast(120%)',
+      canvasFx:'cyber_hologram', rarities:['epic','legendary','ancestral'] },
+    { id:'retro_mosaic',        namePT:'RETRO_MOSAIC',        nameEN:'RETRO_MOSAIC',
+      filter:'saturate(250%) contrast(130%) brightness(95%)',
+      canvasFx:'retro_mosaic', rarities:['common','epic','legendary','ancestral'] },
 ];
 
 /**
