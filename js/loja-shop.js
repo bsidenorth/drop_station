@@ -8,7 +8,7 @@
 
 // ID da div onde a Loja será injetada. Troque para o id real da sua
 // div de conteúdo principal se ela já existir (ex: 'screen-loja').
-const LOJA_TARGET_ID = 'lojaScreen';
+const LOJA_TARGET_ID = 'screen-loja';
 
 // Estado local de cosméticos comprados. Fonte de verdade é o Supabase
 // (coluna profiles.cosmetics) — currentUser.cosmetics já vem populado dali
@@ -660,6 +660,37 @@ function renderRelicInventoryModal() {
     });
 }
 
+
+function equipmentInventoryItemMarkup(item) {
+    const eq = (currentUser && currentUser.equippedCosmetics) || {};
+    const slot = cosmeticSlotForCategory(item.category);
+    const isMoldura = item.category === 'moldura';
+    const isEquipped = isMoldura
+        ? (currentUser && currentUser.avatarFrame === item.id)
+        : (slot && eq[slot] === item.id);
+
+    const btnLabel = isEquipped ? 'EQUIPADO' : 'EQUIPAR';
+    const btnStyle = isEquipped
+        ? `border-color:${item.accent}; color:${item.accent}; opacity:0.6; cursor:default;`
+        : `border-color:${item.accent}; color:${item.accent}; cursor:pointer;`;
+
+    return `
+        <div class="equip-inv-item" style="border-color:${isEquipped ? item.accent : '#222233'}; ${isEquipped ? `box-shadow:0 0 10px ${item.accent}44;` : ''}">
+            <div class="equip-inv-item-header">
+                <span class="equip-inv-cat" style="color:${item.accent};">${item.category.toUpperCase()}</span>
+                ${isEquipped ? `<span class="equip-inv-active-dot" style="background:${item.accent}; box-shadow:0 0 6px ${item.accent};"></span>` : ''}
+            </div>
+            <div class="equip-inv-name">${item.name}</div>
+            <div class="equip-inv-tagline">${item.tagline}</div>
+            <button class="btn-action equip-inv-btn"
+                style="${btnStyle}"
+                ${isEquipped ? 'disabled' : ''}
+                onclick="lojaEquipItem('${item.id}', '${item.category}')">
+                ${btnLabel}
+            </button>
+        </div>
+    `;
+}
 
 function renderEquipmentInventory(isOwner) {
     const target = document.getElementById(EQUIPMENT_INVENTORY_TARGET_ID);
