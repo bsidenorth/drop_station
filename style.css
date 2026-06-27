@@ -5932,24 +5932,33 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
     display: block !important;
 }
 
-/* ── 3. TARGET-BOX — cantos contidos, sem overflow em mobile ── */
+/* ── 3. TARGET-BOX — cantos decorativos corrigidos em mobile ── */
 @media (max-width: 768px) {
-    /* O container pai precisa de overflow visible pra exibir
-       os cantos decorativos mas sem sair da tela */
     .viewer-side {
-        padding: 12px !important;
+        padding: 16px !important;
         overflow: visible;
+        align-items: center;
     }
+    /* Em mobile o target-box ocupa quase toda a largura.
+       Os cantos ::before/::after com valores negativos (-4px)
+       ficam desalinhados porque o container pai corta o overflow.
+       Solução: reposicionar os cantos para DENTRO da borda do box
+       (valores positivos) — efeito visual idêntico mas sempre contido. */
     .target-box {
-        /* Garante que os ::before/::after não saiam da viewport */
-        margin: 6px;
-        box-sizing: border-box;
+        overflow: visible;
+        /* Sem margin extra — o viewer-side padding já dá o respiro */
     }
-    .target-box::before,
+    .target-box::before {
+        top: 4px !important;
+        left: 4px !important;
+        width: 18px !important;
+        height: 18px !important;
+    }
     .target-box::after {
-        /* Cantos menores em mobile — encaixam sem sair do container */
-        width: 16px !important;
-        height: 16px !important;
+        bottom: 4px !important;
+        right: 4px !important;
+        width: 18px !important;
+        height: 18px !important;
     }
     /* Chat: altura máxima reduzida pra não cobrir o teclado todo */
     #globalChatPanel {
