@@ -5892,12 +5892,17 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
     }
     /* Canvas interno: box-sizing garante que 100%/100% nunca
        excede a área do target-box, eliminando o deslocamento
-       para fora da borda azul/ciano à esquerda */
+       para fora da borda azul/ciano à esquerda.
+       max-width/max-height são uma segunda blindagem: mesmo que
+       canvas.width (resolução interna, JS) fique desencontrado do
+       tamanho real do container por qualquer motivo, o elemento
+       visual nunca ultrapassa a caixa do .target-box. */
     .target-box canvas#pfp-canvas {
         box-sizing: border-box !important;
         width: 100% !important;
         height: 100% !important;
         max-width: 100% !important;
+        max-height: 100% !important;
     }
     /* Cantos decorativos na posição outset original */
     .target-box::before {
