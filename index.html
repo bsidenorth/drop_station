@@ -116,6 +116,8 @@
                 <div class="target-box" id="target-container">
                     <div class="scan-line"></div>
                     <canvas id="pfp-canvas"></canvas>
+                    <!-- [HACK-MINIGAME] Badge de coleção temática do drop atual -->
+                    <div id="dropCollectionBadge" style="padding:0 8px;"></div>
                 </div>
 
                 <div id="stability-wrapper">
@@ -423,7 +425,7 @@
                         <div class="prob-row"><span class="prob-common"> ITEM COMUM</span><span id="probCommon">—</span></div>
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
-                        <button class="btn-action" style="border-color:#ff00ff; background:#ff00ff; color:#000; font-weight:bold;" onclick="fuseCards(document.getElementById('fuseCard1').value, document.getElementById('fuseCard2').value)">⚡ EXECUTAR FUSÃO</button>
+                        <button class="btn-action" style="border-color:#ff00ff; background:#ff00ff; color:#000; font-weight:bold;" onclick="openFusionHackMinigame(document.getElementById('fuseCard1').value, document.getElementById('fuseCard2').value)">⚡ EXECUTAR FUSÃO</button>
                     </div>
                 </div>
 
@@ -1083,6 +1085,7 @@
     <script src="js/profile-extra.js"></script>
     <script src="js/cards-inventory-db.js"></script>
     <script src="js/market-social-db.js"></script>
+    <script src="js/hack-minigame.js"></script>
     <script src="js/loja-shop.js"></script>
     <script src="js/broadcast-extras.js"></script>
     <script src="js/new-engagement-features.js"></script>
