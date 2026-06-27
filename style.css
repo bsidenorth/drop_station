@@ -5625,3 +5625,236 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
     pointer-events: auto;
     -webkit-user-drag: auto;
 }
+
+/* =========================================================
+   TERMINAL DE CALIBRAÇÃO DE FREQUÊNCIA
+   Painel de seleção de filtros visuais de drop
+   ========================================================= */
+
+.calibration-terminal {
+    border: 1px solid #00ffcc33;
+    background: linear-gradient(180deg, #030d08 0%, #020208 100%);
+    padding: 14px 12px 10px;
+    margin-bottom: 12px;
+    position: relative;
+    overflow: hidden;
+}
+/* Linha de scan animada de fundo */
+.calibration-terminal::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #00ffcc44, transparent);
+    animation: calScanMove 4s linear infinite;
+    pointer-events: none;
+}
+@keyframes calScanMove {
+    0%   { top: 0%; opacity: 0; }
+    5%   { opacity: 1; }
+    95%  { opacity: 1; }
+    100% { top: 100%; opacity: 0; }
+}
+
+/* Header */
+.cal-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+.cal-header-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #00ffcc55);
+}
+.cal-header-line:last-child {
+    background: linear-gradient(90deg, #00ffcc55, transparent);
+}
+.cal-header-label {
+    font-size: 0.42rem;
+    color: #00ffcc88;
+    letter-spacing: 2px;
+    white-space: nowrap;
+}
+.cal-subheader {
+    font-size: 0.48rem;
+    color: #00ffcc;
+    letter-spacing: 2px;
+    text-align: center;
+    margin-bottom: 10px;
+    font-weight: bold;
+}
+
+/* Separador */
+.cal-options {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    border-top: 1px solid #00ffcc22;
+    border-bottom: 1px solid #00ffcc22;
+    padding: 6px 0;
+    margin-bottom: 8px;
+}
+
+/* Cada opção */
+.cal-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    background: transparent;
+    transition: all 0.15s ease;
+    position: relative;
+    user-select: none;
+}
+.cal-option:hover {
+    background: #00ffcc08;
+    border-color: #00ffcc33;
+}
+.cal-option--selected {
+    background: #00ffcc0d;
+    border-color: #00ffcc55 !important;
+    box-shadow: 0 0 10px rgba(0,255,200,0.06);
+}
+.cal-option--volatile {
+    border-color: #ff006622;
+}
+.cal-option--volatile:hover {
+    background: #ff006608;
+    border-color: #ff006644;
+}
+.cal-option--volatile.cal-option--selected {
+    background: #ff00660d;
+    border-color: #ff006666 !important;
+    box-shadow: 0 0 10px rgba(255,0,102,0.08);
+}
+
+/* Radio fake */
+.cal-radio {
+    width: 10px;
+    height: 10px;
+    border: 1px solid #00ffcc55;
+    border-radius: 50%;
+    flex-shrink: 0;
+    position: relative;
+    transition: border-color 0.15s;
+}
+.cal-option--selected .cal-radio {
+    border-color: #00ffcc;
+}
+.cal-option--selected .cal-radio::after {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    background: #00ffcc;
+    border-radius: 50%;
+    box-shadow: 0 0 4px #00ffcc;
+}
+.cal-option--volatile.cal-option--selected .cal-radio {
+    border-color: #ff0066;
+}
+.cal-option--volatile.cal-option--selected .cal-radio::after {
+    background: #ff0066;
+    box-shadow: 0 0 4px #ff0066;
+}
+
+/* Nome do filtro */
+.cal-name {
+    font-size: 0.52rem;
+    font-weight: bold;
+    color: #ccddcc;
+    letter-spacing: 1.5px;
+    flex: 0 0 auto;
+    min-width: 140px;
+    transition: color 0.15s;
+}
+.cal-option--selected .cal-name { color: #00ffcc; }
+.cal-option--volatile .cal-name { color: #dd9999; }
+.cal-option--volatile.cal-option--selected .cal-name { color: #ff6688; }
+
+/* Seta */
+.cal-arrow {
+    font-size: 0.45rem;
+    color: #334433;
+    flex-shrink: 0;
+}
+.cal-option--selected .cal-arrow { color: #00ffcc66; }
+
+/* Custo */
+.cal-cost {
+    font-size: 0.44rem;
+    color: #556655;
+    letter-spacing: 1px;
+    flex: 1;
+}
+.cal-option--selected .cal-cost { color: #aabbaa; }
+.cal-cost-val {
+    color: #ffcc00;
+    font-weight: bold;
+}
+
+/* Tags */
+.cal-tag {
+    font-size: 0.38rem;
+    padding: 1px 5px;
+    border: 1px solid #334433;
+    color: #556655;
+    letter-spacing: 1px;
+    vertical-align: middle;
+}
+.cal-tag--free  { border-color: #00ff6633; color: #00ff6688; }
+.cal-tag--danger{ border-color: #ff006644; color: #ff6688;   }
+.cal-tag--holo  { border-color: #00ccff44; color: #00ccffaa; }
+
+/* Status row */
+.cal-status-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.42rem;
+    letter-spacing: 1px;
+    color: #445544;
+    padding: 4px 2px 0;
+}
+.cal-status-label { color: #445544; }
+.cal-status-value {
+    color: #00ffcc;
+    font-weight: bold;
+    transition: color 0.2s;
+}
+.cal-status-sep { color: #223322; }
+.cal-status-cost { color: #666677; }
+.cal-status-cost b { color: #ffcc00; }
+
+/* Flash de seleção */
+@keyframes calFlash {
+    0%   { background: #00ffcc18; }
+    50%  { background: #00ffcc04; }
+    100% { background: transparent; }
+}
+.cal-option--flash {
+    animation: calFlash 0.35s ease-out;
+}
+.cal-option--volatile.cal-option--flash {
+    animation: calFlashRed 0.35s ease-out;
+}
+@keyframes calFlashRed {
+    0%   { background: #ff006618; }
+    50%  { background: #ff006604; }
+    100% { background: transparent; }
+}
+
+/* Ticket badge de sobrecarga */
+.ticket-overload-badge {
+    display: block;
+    font-size: 0.38rem;
+    color: #ff6688;
+    letter-spacing: 1px;
+    margin-top: 3px;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+.ticket-overload-badge.visible { opacity: 1; }

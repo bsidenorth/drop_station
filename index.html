@@ -152,38 +152,96 @@
                     <div class="price-card"><label data-i18n="lbl-creator">AUTOR DA MINTAGEM</label><div class="price-value" id="meta-owner">DESCONHECIDO</div></div>
                 </div>
 
-                <!-- [ESCOPO 4] Filtros avançados de busca — oculto visualmente; lógica JS ativa como easter egg -->
-                <div class="drop-filters-bar" id="dropFiltersBar" style="display:none;">
-                    <button type="button" class="drop-filter-toggle" id="dropFilterToggleBtn" onclick="toggleDropFiltersPanel()">
-                        <span>▾ FILTROS_AVANÇADOS</span>
-                        <span class="drop-filter-active-count" id="dropFilterActiveCount" style="display:none;">0</span>
-                    </button>
-                    <div class="drop-filters-panel" id="dropFiltersPanel" style="display:none;">
-                        <div class="drop-filter-group">
-                            <label>RARIDADE_ALVO</label>
-                            <div class="drop-filter-tags" id="dropRarityFilterTags">
-                                <button type="button" class="drop-filter-tag active" data-rarity="all" onclick="setDropRarityFilter('all')">TODAS</button>
-                                <button type="button" class="drop-filter-tag" data-rarity="common" onclick="setDropRarityFilter('common')">COMUM</button>
-                                <button type="button" class="drop-filter-tag" data-rarity="epic" onclick="setDropRarityFilter('epic')">ÉPICO</button>
-                                <button type="button" class="drop-filter-tag" data-rarity="legendary" onclick="setDropRarityFilter('legendary')">LENDÁRIO</button>
-                                <button type="button" class="drop-filter-tag" data-rarity="ancestral" onclick="setDropRarityFilter('ancestral')" style="border-color:#ff007f; color:#ff007f;">ANCESTRAL</button>
+                <!-- ═══════════════════════════════════════════════════
+                     TERMINAL DE CALIBRAÇÃO DE FREQUÊNCIA
+                     Painel interativo de filtros de injeção visual
+                ════════════════════════════════════════════════════ -->
+                <div id="calibrationTerminal" class="calibration-terminal">
+
+                    <div class="cal-header">
+                        <span class="cal-header-line"></span>
+                        <span class="cal-header-label">// TERMINAL DE CALIBRAÇÃO DE FREQUÊNCIA //</span>
+                        <span class="cal-header-line"></span>
+                    </div>
+                    <div class="cal-subheader">[ SELECIONAR FILTRO DE INJEÇÃO VISUAL ]</div>
+
+                    <div class="cal-options" id="calOptions">
+
+                        <label class="cal-option cal-option--selected" id="calOpt_random" data-fx="all" data-cost="0" onclick="selectCalibrationFilter(this)">
+                            <span class="cal-radio"></span>
+                            <span class="cal-name">ALEATÓRIO_NORMAL</span>
+                            <span class="cal-arrow">-&gt;</span>
+                            <span class="cal-cost">Taxa: 0 ฿ <span class="cal-tag cal-tag--free">SORTE PURA</span></span>
+                        </label>
+
+                        <label class="cal-option" id="calOpt_halftone_matrix" data-fx="HALFTONE_MATRIX" data-cost="25" onclick="selectCalibrationFilter(this)">
+                            <span class="cal-radio"></span>
+                            <span class="cal-name">HALFTONE_MATRIX</span>
+                            <span class="cal-arrow">-&gt;</span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> ฿ <span class="cal-tag">PONTOS/PIXELATE</span></span>
+                        </label>
+
+                        <label class="cal-option" id="calOpt_scanlines_overdrive" data-fx="SCANLINES_OVERDRIVE" data-cost="25" onclick="selectCalibrationFilter(this)">
+                            <span class="cal-radio"></span>
+                            <span class="cal-name">SCANLINES_OVERDRIVE</span>
+                            <span class="cal-arrow">-&gt;</span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> ฿ <span class="cal-tag">LINHAS_NEON</span></span>
+                        </label>
+
+                        <label class="cal-option" id="calOpt_monochrome_stamp" data-fx="MONOCHROME_STAMP" data-cost="25" onclick="selectCalibrationFilter(this)">
+                            <span class="cal-radio"></span>
+                            <span class="cal-name">MONOCHROME_STAMP</span>
+                            <span class="cal-arrow">-&gt;</span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> ฿ <span class="cal-tag">SILHUETA_P&amp;B</span></span>
+                        </label>
+
+                        <label class="cal-option cal-option--volatile" id="calOpt_rgb_split_glitch" data-fx="RGB_SPLIT_GLITCH" data-cost="50" onclick="selectCalibrationFilter(this)">
+                            <span class="cal-radio"></span>
+                            <span class="cal-name">RGB_SPLIT_GLITCH</span>
+                            <span class="cal-arrow">-&gt;</span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">50</span> ฿ <span class="cal-tag cal-tag--danger">ALTA VOLATILIDADE</span></span>
+                        </label>
+
+                        <label class="cal-option cal-option--volatile" id="calOpt_cyber_hologram" data-fx="CYBER_HOLOGRAM" data-cost="50" onclick="selectCalibrationFilter(this)">
+                            <span class="cal-radio"></span>
+                            <span class="cal-name">CYBER_HOLOGRAM</span>
+                            <span class="cal-arrow">-&gt;</span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">50</span> ฿ <span class="cal-tag cal-tag--holo">HOLOGRAMA NEON</span></span>
+                        </label>
+
+                        <label class="cal-option" id="calOpt_retro_mosaic" data-fx="RETRO_MOSAIC" data-cost="25" onclick="selectCalibrationFilter(this)">
+                            <span class="cal-radio"></span>
+                            <span class="cal-name">RETRO_MOSAIC</span>
+                            <span class="cal-arrow">-&gt;</span>
+                            <span class="cal-cost">Taxa: <span class="cal-cost-val">25</span> ฿ <span class="cal-tag">MOSAICO_RETRÔ</span></span>
+                        </label>
+                    </div>
+
+                    <div class="cal-status-row">
+                        <span class="cal-status-label">FILTRO ATIVO:</span>
+                        <span class="cal-status-value" id="calActiveLabel">ALEATÓRIO_NORMAL</span>
+                        <span class="cal-status-sep">//</span>
+                        <span class="cal-status-cost" id="calActiveCost">CUSTO ADICIONAL: <b>0 ฿</b></span>
+                    </div>
+
+                    <!-- IDs preservados para compatibilidade com JS existente -->
+                    <div style="display:none;">
+                        <div id="dropFiltersBar">
+                            <div id="dropFiltersPanel">
+                                <div id="dropRarityFilterTags">
+                                    <button type="button" class="drop-filter-tag active" data-rarity="all" onclick="setDropRarityFilter('all')">TODAS</button>
+                                    <button type="button" class="drop-filter-tag" data-rarity="common" onclick="setDropRarityFilter('common')">COMUM</button>
+                                    <button type="button" class="drop-filter-tag" data-rarity="epic" onclick="setDropRarityFilter('epic')">ÉPICO</button>
+                                    <button type="button" class="drop-filter-tag" data-rarity="legendary" onclick="setDropRarityFilter('legendary')">LENDÁRIO</button>
+                                    <button type="button" class="drop-filter-tag" data-rarity="ancestral" onclick="setDropRarityFilter('ancestral')">ANCESTRAL</button>
+                                </div>
+                                <div id="dropStyleFilterTags"></div>
                             </div>
                         </div>
-                        <div class="drop-filter-group">
-                            <label>ESTILO_VISUAL</label>
-                            <!-- populado dinamicamente via renderDropStyleFilters() no script.js -->
-                            <div class="drop-filter-tags" id="dropStyleFilterTags"></div>
-                        </div>
-                        <div class="drop-filter-group">
-                            <label>MODO</label>
-                            <div class="drop-filter-tags">
-                                <button type="button" class="drop-filter-tag active" data-mode="all" onclick="setDropPoolFilter('all')">AMBOS</button>
-                                <button type="button" class="drop-filter-tag" data-mode="free" onclick="setDropPoolFilter('free')">SÓ FREE_ROLL</button>
-                                <button type="button" class="drop-filter-tag" data-mode="premium" onclick="setDropPoolFilter('premium')">SÓ PREMIUM</button>
-                            </div>
-                        </div>
+                        <span id="dropFilterActiveCount">0</span>
                     </div>
                 </div>
+
 
                 <div class="deck-footer">
                     <div class="ticket-wrapper ticket-free" id="btnFree" onclick="executeHardwareRoll(false)">
