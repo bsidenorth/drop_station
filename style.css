@@ -502,7 +502,23 @@
         }
         @keyframes scanMove { 0% { top: 0%; } 100% { top: 100%; } }
 
-        canvas#pfp-canvas { width: 100%; height: 100%; display: block; object-fit: cover; background: #000; }
+        canvas#pfp-canvas {
+            /* [FIX LISTRA PRETA] O canvas é filho de .target-box, que é
+               display:flex; justify-content:center; align-items:center.
+               Mesmo com width:100%/height:100% explícitos, um <canvas>
+               dentro de flex centralizado pode não esticar de forma
+               confiável (comportamento de "replaced element" com largura
+               intrínseca própria disputando com o % do flex) — sobra
+               fundo do .target-box (#08080c) numa lateral, sempre do
+               mesmo tamanho, em qualquer resolução de tela.
+               Fix: tira o canvas do cálculo de flex com position:absolute
+               + inset:0, preenchendo o pai (que é position:relative) de
+               forma direta e incondicional, sem depender de como o
+               flexbox resolve % em replaced elements. */
+            position: absolute; inset: 0;
+            width: 100%; height: 100%;
+            display: block; object-fit: cover; background: #000;
+        }
         .target-box.rolling { animation: jitter 0.1s infinite; }
         .target-box.rolling .scan-line { display: block; animation: scanMove 0.15s infinite linear; }
 
@@ -5890,14 +5906,12 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
         box-sizing: border-box !important; /* width:100% já inclui a border de 1px */
         overflow: hidden !important; /* conteúdo interno (canvas) não vaza da borda ciano */
     }
-    /* Canvas interno: box-sizing garante que 100%/100% nunca
-       excede a área do target-box, eliminando o deslocamento
-       para fora da borda azul/ciano à esquerda.
-       max-width/max-height são uma segunda blindagem: mesmo que
-       canvas.width (resolução interna, JS) fique desencontrado do
-       tamanho real do container por qualquer motivo, o elemento
-       visual nunca ultrapassa a caixa do .target-box. */
+    /* Canvas interno: position:absolute + inset:0 (regra base acima)
+       já elimina o cálculo de flexbox que causava a listra preta.
+       Aqui só reforçamos que isso vale também em mobile. */
     .target-box canvas#pfp-canvas {
+        position: absolute !important;
+        inset: 0 !important;
         box-sizing: border-box !important;
         width: 100% !important;
         height: 100% !important;
@@ -5918,6 +5932,29 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
         width: 24px !important;
         height: 24px !important;
         z-index: 10 !important;
+    }
+    /* Painel de metadados (CÓDIGO ID, RARIDADE, ESTILO, AUTOR):
+       garante grid simétrico de 2 colunas e centralizado, sem
+       depender do fluxo do .target-box acima — blindagem
+       independente, mesmo que algo empurre o .control-side. */
+    .control-side {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        margin: 0 !important;
+    }
+    .live-pricing {
+        display: grid !important;
+        grid-template-columns: repeat(2, 1fr) !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        box-sizing: border-box !important;
+    }
+    .price-card {
+        box-sizing: border-box !important;
+        text-align: left !important;
+        margin: 0 !important;
     }
 }
 
