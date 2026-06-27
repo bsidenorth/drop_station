@@ -285,6 +285,38 @@
             renderNetworkLimitOverlay();
             return;
         }
+        // ── [FILTRO CONDICIONAL] CALIBRAÇÃO DE TERMINAL ──────────────────
+        // Se o jogador selecionou um estilo específico (dropFilters.style !== 'all'),
+        // o drop forçará esse style_name — custo: 25 fragmentos de sucata.
+        const _styleFilterActive = dropFilters.style && dropFilters.style !== 'all';
+        if (_styleFilterActive) {
+            const _scrapCost = 25;
+            const _currentScrap = (currentUser.scrap_fragments ?? currentUser.scrapFragments ?? 0);
+            if (_currentScrap < _scrapCost) {
+                showCyberAlert('RECURSOS INSUFICIENTES', 'Recursos Insuficientes para Calibração de Terminal', 'error');
+                return;
+            }
+            const _newScrap = _currentScrap - _scrapCost;
+            currentUser.scrap_fragments = _newScrap;
+            currentUser.scrapFragments  = _newScrap;
+            const _scrapEl = document.getElementById('scrapFragmentsDisplay') || document.getElementById('scrapDisplay');
+            if (_scrapEl) _scrapEl.innerText = _newScrap;
+            if (currentUser.loggedIn && currentUser.id) {
+                sb.from('profiles')
+                    .update({ scrap_fragments: _newScrap })
+                    .eq('id', currentUser.id)
+                    .then(({ error: _scrapErr }) => {
+                        if (_scrapErr) {
+                            console.error('[DropFilter] Falha ao debitar fragmentos:', _scrapErr.message);
+                            currentUser.scrap_fragments = _currentScrap;
+                            currentUser.scrapFragments  = _currentScrap;
+                            if (_scrapEl) _scrapEl.innerText = _currentScrap;
+                            showCyberAlert('ERRO_DE_REDE', 'Falha ao debitar fragmentos. Tenta novamente.', 'error');
+                        }
+                    });
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────
         // PREMIUM_DROP_PASS: bloqueia imediatamente se deslogado
         if (isPremium && !currentUser.loggedIn) {
             showCyberAlert('ACESSO_NEGADO:', currentLang === 'PT'
@@ -411,6 +443,22 @@
                 filterStyle = variant.filter;
                 styleName = variant.name;
                 styleNameEN = variant.name;
+            }
+            // [FILTRO CONDICIONAL] Override de styleName quando calibração ativa
+            if (dropFilters.style && dropFilters.style !== 'all') {
+                const _forcedVariant = (DROP_FILTER_DB[rarityKey] || DROP_FILTER_DB.common)
+                    .find(v => v.name === dropFilters.style);
+                // Se o estilo existir na raridade sorteada, aplica;
+                // caso contrário pega o mais próximo (primeiro do pool da raridade)
+                if (_forcedVariant) {
+                    filterStyle = _forcedVariant.filter;
+                    styleName   = _forcedVariant.name;
+                    styleNameEN = _forcedVariant.name;
+                } else {
+                    // Estilo não existe nessa raridade — usa o nome mas mantém filtro sorteado
+                    styleName   = dropFilters.style;
+                    styleNameEN = dropFilters.style;
+                }
             }
 
             targetContainer.className = "target-box";
