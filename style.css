@@ -5861,37 +5861,30 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
 
 
 /* =========================================================
-   PATCH — CORREÇÕES VISUAIS E UX MOBILE (27/06/2026 v4)
-   1. Target-box: cantos harmônicos, FORA do canvas, sem overlap
-   2. Chat: sem espaço morto abaixo do input
-   3. Avatares do ranking: override com especificidade correta
+   PATCH — CORREÇÕES VISUAIS E UX MOBILE (27/06/2026 v5)
+   1. Target-box: padding mínimo no viewer-side → fresta some
+   2. Chat: altura confortável para leitura
+   3. Avatares ranking: override com especificidade máxima
    ========================================================= */
 
-/* ── 1. TARGET-BOX: cantos fora da imagem, harmônicos ────── */
-
-/* Regra: NÃO alterar o target-box em si (overflow, z-index, margin).
-   Apenas garantir que o viewer-side tenha padding suficiente para
-   acomodar os -4px dos cantos sem corte, e sobrescrever qualquer
-   patch anterior que tenha mexido errado. */
+/* ── 1. TARGET-BOX: fresta esquerda eliminada ─────────────── */
 @media (max-width: 768px) {
     .viewer-side {
-        padding: 20px !important;
-        align-items: center !important;
-        /* overflow: visible para os cantos não serem cortados */
+        /* Padding lateral mínimo — 6px é suficiente para o glow
+           do neon não colar na borda do container, mas elimina
+           a fresta perceptível à esquerda da imagem */
+        padding: 6px 6px 16px 6px !important;
+        align-items: stretch !important; /* target-box estica de ponta a ponta */
         overflow: visible !important;
     }
-    /* target-box: reseta qualquer margin/overflow indevido de patches anteriores */
     .target-box {
-        margin: 0 !important;
-        overflow: visible !important;
         width: 100% !important;
         max-width: 100% !important;
+        margin: 0 !important;
         box-sizing: border-box !important;
+        overflow: visible !important;
     }
-    /* Cantos voltam à posição outset original (-4px) — design correto.
-       Com padding: 20px no viewer-side, os -4px ficam dentro do padding
-       e nunca cortam. z-index volta a 10 pra ficarem SOBRE a borda do
-       box mas a propriedade pointer-events:none já impede interferência. */
+    /* Cantos decorativos na posição outset original */
     .target-box::before {
         top: -4px !important;
         left: -4px !important;
@@ -5909,74 +5902,60 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
 }
 
 
-/* ── 2. CHAT: sem espaço morto abaixo do input ────────────── */
+/* ── 2. CHAT: altura legível, sem espaço morto ────────────── */
 
-/* Troca height fixo por min-height + deixa o flex crescer pelo conteúdo.
-   O painel para de ter "vazio" abaixo do input row. */
+/* Base: remove height fixo de qualquer versão anterior */
 #globalChatPanel {
     height: auto !important;
-    min-height: 280px;
-    max-height: calc(100vh - 140px);
-}
-
-/* Versão expandida (override do bloco da linha ~4506) */
-@media (min-width: 769px) {
-    #globalChatPanel {
-        min-height: 340px;
-        max-height: calc(100vh - 100px);
-    }
-}
-
-/* Mobile: mesma lógica, sem altura fixa */
-@media (max-width: 768px) {
-    #globalChatPanel {
-        min-height: 220px;
-        max-height: 60vh;
-        bottom: 76px;
-        right: 10px;
-        width: calc(100vw - 20px);
-    }
-}
-
-/* Estrutura flex correta: mensagens crescem, input fica colado na base */
-#globalChatPanel {
+    min-height: 420px !important;
+    max-height: calc(100vh - 120px) !important;
     display: none;
     flex-direction: column;
 }
 #globalChatPanel.open {
     display: flex !important;
 }
+
+/* Área de mensagens: cresce para preencher o espaço disponível */
 #globalChatMessages,
 .global-chat-messages-expanded {
     flex: 1 1 0 !important;
-    min-height: 0 !important;
+    min-height: 180px !important;
     overflow-y: auto !important;
 }
+
+/* Input row: fixo na base, nunca quebra linha */
 .global-chat-input-row {
     flex: 0 0 auto !important;
     flex-wrap: nowrap !important;
     align-items: center !important;
     min-height: 44px !important;
 }
-.global-chat-input-row input {
-    min-width: 0 !important;
-}
+.global-chat-input-row input { min-width: 0 !important; }
 .global-chat-cost-note,
-.gc-emote-panel {
-    flex-shrink: 0 !important;
-}
-/* Texto das mensagens não estoura */
+.gc-emote-panel { flex-shrink: 0 !important; }
 .gc-msg .gc-text {
     word-break: break-word !important;
     overflow-wrap: anywhere !important;
 }
 
+/* Mobile específico */
+@media (max-width: 768px) {
+    #globalChatPanel {
+        min-height: 380px !important;
+        max-height: 65vh !important;
+        bottom: 76px !important;
+        right: 10px !important;
+        width: calc(100vw - 20px) !important;
+    }
+    #globalChatMessages,
+    .global-chat-messages-expanded {
+        min-height: 160px !important;
+    }
+}
+
 
 /* ── 3. AVATARES DO RANKING: especificidade máxima ─────────── */
-
-/* Inclui .frame-style-1 no seletor para vencer a regra base
-   .avatar-container.frame-style-1 .cyber-frame (especificidade 0,2,1).
-   Este seletor tem especificidade 0,3,1 — garante vitória. */
 .leaderboard-row .avatar-container.frame-style-1 .cyber-frame,
 .leaderboard-row .avatar-container .cyber-frame {
     clip-path: none !important;
@@ -6009,16 +5988,6 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
     padding: 0 !important;
 }
 
-/* Avatares do chat: contidos e sem distorção */
-.gc-avatar-wrap {
-    flex-shrink: 0 !important;
-    overflow: hidden !important;
-    border-radius: 50% !important;
-}
-.gc-avatar-img {
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: cover !important;
-    display: block !important;
-    border-radius: 50% !important;
-}
+/* Avatares do chat global */
+.gc-avatar-wrap { flex-shrink: 0 !important; overflow: hidden !important; border-radius: 50% !important; }
+.gc-avatar-img { width: 100% !important; height: 100% !important; object-fit: cover !important; display: block !important; border-radius: 50% !important; }
