@@ -5858,3 +5858,102 @@ body, .spa-screen, .modal-card, .price-card, .faq-a, .faq-q,
     transition: opacity 0.3s;
 }
 .ticket-overload-badge.visible { opacity: 1; }
+
+/* =========================================================
+   PATCH — CORREÇÕES VISUAIS E UX MOBILE (27/06/2026)
+   1. Chat Global — alinhamento do input + bloqueio de autofocus
+   2. Avatares do Ranking — contenção no leaderboard-row
+   3. Target-box — cantos ::before/::after contidos em mobile
+   ========================================================= */
+
+/* ── 1. CHAT GLOBAL — input row sempre em linha única, nunca quebra ── */
+.global-chat-input-row {
+    flex-wrap: nowrap !important;
+    align-items: center;
+    flex-shrink: 0;
+    min-height: 44px;
+}
+.global-chat-input-row input {
+    min-width: 0;
+    word-break: break-word;
+    /* Garante que mensagens longas não estourem o container */
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Texto das mensagens não quebra o layout horizontal */
+.gc-msg .gc-text {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+/* Chat panel em mobile: input fixo na base, nunca flutua no meio */
+#globalChatPanel {
+    display: none;
+    flex-direction: column;
+}
+#globalChatPanel.open {
+    display: flex !important;
+}
+/* Força a área de mensagens a encolher antes do input row */
+#globalChatMessages,
+.global-chat-messages-expanded {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+}
+.global-chat-input-row {
+    flex: 0 0 auto;
+}
+
+/* ── 2. AVATARES DO RANKING — contenção e alinhamento corretos ── */
+.leaderboard-row .avatar-container {
+    /* Sobrescreve o frame-style-1 hexagonal que não cabe no ranking */
+    clip-path: none !important;
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+}
+.leaderboard-row .avatar-container::before,
+.leaderboard-row .avatar-container::after {
+    /* Remove os cantos decorativos do frame-style-1 no contexto do ranking */
+    display: none !important;
+}
+.leaderboard-row .cyber-frame {
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+    clip-path: none !important;
+    border-radius: 4px !important;
+}
+.leaderboard-row .cyber-frame img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    display: block !important;
+}
+
+/* ── 3. TARGET-BOX — cantos contidos, sem overflow em mobile ── */
+@media (max-width: 768px) {
+    /* O container pai precisa de overflow visible pra exibir
+       os cantos decorativos mas sem sair da tela */
+    .viewer-side {
+        padding: 12px !important;
+        overflow: visible;
+    }
+    .target-box {
+        /* Garante que os ::before/::after não saiam da viewport */
+        margin: 6px;
+        box-sizing: border-box;
+    }
+    .target-box::before,
+    .target-box::after {
+        /* Cantos menores em mobile — encaixam sem sair do container */
+        width: 16px !important;
+        height: 16px !important;
+    }
+    /* Chat: altura máxima reduzida pra não cobrir o teclado todo */
+    #globalChatPanel {
+        max-height: 55vh;
+        bottom: 76px;
+    }
+}

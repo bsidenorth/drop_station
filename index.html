@@ -1177,6 +1177,43 @@
     }
     // Expõe globalmente caso outros módulos precisem verificar o estado
     window.toggleCalibrationTerminal = toggleCalibrationTerminal;
+
+    // ── CHAT GLOBAL — Bloqueio de autofocus em mobile ──────────────────────
+    // Intercepta qualquer função que abra o painel do chat e garante que
+    // o input NÃO receba foco automático. Em mobile, foco no input = teclado
+    // sobe automaticamente, sobrepondo a tela inteira.
+    // Strategy: monitorar quando #globalChatPanel ganha a classe "open"
+    // e, se houver foco no input, remover imediatamente via blur().
+    (function patchChatAutoFocus() {
+        const chatInput = document.getElementById('globalChatInput');
+        if (!chatInput) return;
+
+        // Previne que qualquer código interno chame .focus() no input do chat
+        const origFocus = chatInput.focus.bind(chatInput);
+        chatInput.focus = function() {
+            // Só permite foco se o usuário CLICOU no campo (detectado por isTrusted)
+            // Chamadas programáticas (autofocus) são bloqueadas em mobile.
+            // Em desktop, libera normalmente pois não causa overlay de teclado.
+            if (window.innerWidth > 768) { origFocus(); }
+            // Em mobile: não chama origFocus() — teclado só sobe com toque direto
+        };
+
+        // Observer pra capturar abertura do painel e desfocar o input
+        const panel = document.getElementById('globalChatPanel');
+        if (panel) {
+            const obs = new MutationObserver(() => {
+                if (panel.classList.contains('open') || panel.style.display === 'flex') {
+                    // Pequeno delay pra garantir que JS interno finalizou qualquer .focus()
+                    setTimeout(() => {
+                        if (document.activeElement === chatInput && window.innerWidth <= 768) {
+                            chatInput.blur();
+                        }
+                    }, 80);
+                }
+            });
+            obs.observe(panel, { attributes: true, attributeFilter: ['class', 'style'] });
+        }
+    })();
     </script>
 </body>
 </html>
