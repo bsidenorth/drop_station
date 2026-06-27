@@ -6,12 +6,39 @@
 // ORDEM DE CARREGAMENTO PRESERVADA — não mudar a ordem dos <script> no HTML).
 // =========================================================
 
+    // [FIX MINT BOX] resizeCanvases media a largura do target-box só uma
+    // vez (150ms após load) e só re-media em window.resize de fato. Isso
+    // deixava canvas.width (resolução interna) preso a um valor capturado
+    // antes do layout mobile/CSS terminar de assentar (fonte clamp(),
+    // reflow do header, etc.) — o canvas.width ficava menor que a largura
+    // real do .target-box. Como o elemento <canvas> é width:100% em CSS,
+    // ele continuava ocupando o espaço todo, mas o conteúdo desenhado
+    // (fillRect/drawImage feitos em função de canvas.width/height) parava
+    // de cobrir 100% da área visível — sobrava fundo escuro do .target-box
+    // por trás, criando a listra preta, com o texto/imagem desenhados
+    // fora de centro porque foram centralizados num canvas.width menor.
+    //
+    // Fix: usa clientWidth (não getBoundingClientRect, que distorce com
+    // zoom de página) e ResizeObserver no próprio target-box, que detecta
+    // QUALQUER mudança de tamanho real (CSS, layout, orientação, fonte
+    // carregando) — não só window.resize. Evita também resoluções
+    // fracionárias/desatualizadas no canvas.
     function resizeCanvases() {
-        if(!canvas) return;
-        const size = targetContainer.getBoundingClientRect().width || 400;
-        canvas.width = size; canvas.height = size;
+        if (!canvas || !targetContainer) return;
+        const size = Math.round(targetContainer.clientWidth) || 400;
+        if (canvas.width !== size || canvas.height !== size) {
+            canvas.width = size;
+            canvas.height = size;
+        }
     }
-    window.addEventListener('resize', resizeCanvases); setTimeout(resizeCanvases, 150);
+    window.addEventListener('resize', resizeCanvases);
+    setTimeout(resizeCanvases, 150);
+    // Re-mede sempre que o tamanho real do target-box mudar (cobre casos
+    // que window.resize não dispara: fonte carregando, reflow tardio,
+    // troca de tela, orientação em alguns navegadores).
+    if (typeof ResizeObserver !== 'undefined' && targetContainer) {
+        new ResizeObserver(() => resizeCanvases()).observe(targetContainer);
+    }
 
     function toggleFaq(el) {
         const ans = el.nextElementSibling;
